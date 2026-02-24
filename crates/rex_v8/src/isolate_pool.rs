@@ -1,15 +1,19 @@
 use anyhow::Result;
 use crossbeam_channel::{bounded, Sender};
 use std::sync::Arc;
-use std::thread;
-use tracing::{debug, error, info};
+use std::thread::{self, JoinHandle};
+use tracing::{debug, error, info, warn};
 
 type WorkItem = Box<dyn FnOnce(&mut crate::SsrIsolate) + Send + 'static>;
 
 /// A pool of V8 isolates, each pinned to its own OS thread.
 /// Work is dispatched via channels and results returned via oneshot.
+///
+/// On drop, senders are closed first (signaling threads to exit),
+/// then threads are joined to ensure clean shutdown.
 pub struct IsolatePool {
-    senders: Vec<Sender<WorkItem>>,
+    senders: Vec<Option<Sender<WorkItem>>>,
+    threads: Vec<Option<JoinHandle<()>>>,
     next: std::sync::atomic::AtomicUsize,
     size: usize,
 }
@@ -23,13 +27,14 @@ impl IsolatePool {
         server_bundle_js: Arc<String>,
     ) -> Result<Self> {
         let mut senders = Vec::with_capacity(size);
+        let mut threads = Vec::with_capacity(size);
 
         for i in 0..size {
             let (tx, rx) = bounded::<WorkItem>(64);
             let react_js = react_runtime_js.clone();
             let bundle_js = server_bundle_js.clone();
 
-            thread::Builder::new()
+            let handle = thread::Builder::new()
                 .name(format!("rex-v8-isolate-{i}"))
                 .spawn(move || {
                     // Initialize V8 on this thread (safe to call multiple times)
@@ -52,13 +57,15 @@ impl IsolatePool {
                     debug!("V8 isolate {i} shutting down");
                 })?;
 
-            senders.push(tx);
+            senders.push(Some(tx));
+            threads.push(Some(handle));
         }
 
         info!(count = size, "V8 isolate pool created");
 
         Ok(Self {
             senders,
+            threads,
             next: std::sync::atomic::AtomicUsize::new(0),
             size,
         })
@@ -84,6 +91,8 @@ impl IsolatePool {
             % self.size;
 
         self.senders[idx]
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("V8 isolate pool is shut down"))?
             .send(work)
             .map_err(|_| anyhow::anyhow!("V8 isolate thread has shut down"))?;
 
@@ -105,6 +114,8 @@ impl IsolatePool {
             });
 
             self.senders[i]
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("V8 isolate pool is shut down"))?
                 .send(work)
                 .map_err(|_| anyhow::anyhow!("V8 isolate thread has shut down"))?;
 
@@ -121,5 +132,26 @@ impl IsolatePool {
 
     pub fn size(&self) -> usize {
         self.size
+    }
+}
+
+impl Drop for IsolatePool {
+    fn drop(&mut self) {
+        // Drop all senders first — this closes the channels and causes
+        // worker threads to exit their recv() loops.
+        for sender in &mut self.senders {
+            sender.take();
+        }
+
+        // Join all threads to wait for in-flight work to complete.
+        for (i, handle) in self.threads.iter_mut().enumerate() {
+            if let Some(h) = handle.take() {
+                if let Err(e) = h.join() {
+                    warn!("V8 isolate thread {i} panicked: {e:?}");
+                }
+            }
+        }
+
+        debug!("V8 isolate pool shut down");
     }
 }
