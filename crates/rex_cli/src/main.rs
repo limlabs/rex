@@ -255,19 +255,44 @@ if (typeof process === 'undefined') {{
     globalThis.process = {{ env: {{ NODE_ENV: 'production' }} }};
 }}
 
-// Polyfill Web APIs that React expects but V8 doesn't provide
+// Polyfill Web APIs that React expects but V8 doesn't provide.
+// Use Promise.resolve().then() to defer callbacks to the microtask queue
+// instead of calling them synchronously. V8's perform_microtask_checkpoint()
+// will drain these at the right time.
 if (typeof MessageChannel === 'undefined') {{
     globalThis.MessageChannel = function() {{
-        this.port1 = {{}};
-        this.port2 = {{ postMessage: function() {{}} }};
+        var channel = this;
+        this.port1 = {{ onmessage: null }};
+        this.port2 = {{
+            postMessage: function() {{
+                if (channel.port1.onmessage) {{
+                    var cb = channel.port1.onmessage;
+                    Promise.resolve().then(function() {{ cb({{ data: undefined }}); }});
+                }}
+            }}
+        }};
     }};
 }}
 if (typeof setTimeout === 'undefined') {{
-    globalThis.setTimeout = function(fn) {{ fn(); return 0; }};
-    globalThis.clearTimeout = function() {{}};
+    var __timerIdCounter = 1;
+    var __pendingTimers = {{}};
+    globalThis.setTimeout = function(fn) {{
+        var id = __timerIdCounter++;
+        __pendingTimers[id] = true;
+        Promise.resolve().then(function() {{
+            if (__pendingTimers[id]) {{
+                delete __pendingTimers[id];
+                fn();
+            }}
+        }});
+        return id;
+    }};
+    globalThis.clearTimeout = function(id) {{
+        delete __pendingTimers[id];
+    }};
 }}
 if (typeof queueMicrotask === 'undefined') {{
-    globalThis.queueMicrotask = function(fn) {{ fn(); }};
+    globalThis.queueMicrotask = function(fn) {{ Promise.resolve().then(fn); }};
 }}
 if (typeof performance === 'undefined') {{
     globalThis.performance = {{ now: function() {{ return Date.now(); }} }};
