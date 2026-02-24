@@ -4,6 +4,7 @@ use swc_ecma_ast::*;
 use swc_ecma_codegen::{text_writer::JsWriter, Emitter};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax, TsSyntax};
 use swc_ecma_transforms_base::{fixer::fixer, hygiene::hygiene, resolver};
+use swc_ecma_transforms_module::common_js;
 use swc_ecma_transforms_react::{self as react_transform, Runtime};
 use swc_ecma_transforms_typescript::strip;
 
@@ -91,7 +92,23 @@ pub fn transform_file(source: &str, filename: &str, opts: &TransformOptions) -> 
             .process(&mut program);
         }
 
-        // 4. Hygiene + fixer
+        // 4. CJS module transform for server bundles
+        // Converts ESM imports/exports to require()/module.exports at the AST level,
+        // replacing the fragile line-by-line string matching in the bundler.
+        if opts.server {
+            common_js(
+                Default::default(), // Resolver::Default — no actual path resolution
+                unresolved_mark,
+                swc_ecma_transforms_module::util::Config {
+                    import_interop: Some(swc_ecma_transforms_module::util::ImportInterop::None),
+                    ..Default::default()
+                },
+                Default::default(), // FeatureFlag defaults
+            )
+            .process(&mut program);
+        }
+
+        // 5. Hygiene + fixer
         hygiene().process(&mut program);
         fixer(Some(&comments)).process(&mut program);
 
@@ -101,7 +118,7 @@ pub fn transform_file(source: &str, filename: &str, opts: &TransformOptions) -> 
             _ => unreachable!(),
         };
 
-        // 5. Strip getServerSideProps for client bundles
+        // 6. Strip getServerSideProps for client bundles
         let module = if !opts.server {
             strip_gssp(module)
         } else {
@@ -202,5 +219,39 @@ mod tests {
             ..Default::default()
         }).unwrap();
         assert!(!client_result.contains("getServerSideProps"));
+    }
+
+    #[test]
+    fn test_server_cjs_output() {
+        let source = r#"
+            import React from 'react';
+
+            export default function Home({ name }) {
+                return React.createElement("div", null, "Hello ", name);
+            }
+
+            export async function getServerSideProps() {
+                return { props: { name: "World" } };
+            }
+
+            export const PAGE_SIZE = 10;
+        "#;
+
+        let result = transform_file(source, "page.tsx", &TransformOptions {
+            server: true,
+            typescript: false,
+            jsx: false,
+            ..Default::default()
+        }).unwrap();
+
+        // Should use CJS exports, not ESM
+        assert!(!result.contains("export default"), "should not contain ESM export default: {result}");
+        assert!(!result.contains("export async"), "should not contain ESM export async: {result}");
+        assert!(!result.contains("export const"), "should not contain ESM export const: {result}");
+        // Should have CJS-style require/exports
+        assert!(result.contains("require("), "should use require(): {result}");
+        assert!(result.contains("exports"), "should use exports: {result}");
+        assert!(result.contains("getServerSideProps"), "should keep GSSP: {result}");
+        assert!(result.contains("PAGE_SIZE"), "should keep named export: {result}");
     }
 }

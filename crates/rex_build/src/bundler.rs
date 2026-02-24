@@ -60,13 +60,23 @@ fn build_server_bundle(
         ..Default::default()
     };
 
+    // require() shim for CJS modules — maps known packages to V8 globals
+    bundle.push_str(
+        r#"var require = function(name) {
+    if (name === 'react') return { default: globalThis.__React, createElement: globalThis.__React.createElement };
+    return {};
+};
+"#,
+    );
+
     // Transform and include each page as a module in a registry
     bundle.push_str("globalThis.__rex_pages = globalThis.__rex_pages || {};\n\n");
 
-    // Transform all route pages
+    // Transform all route pages (SWC CJS transform handles imports/exports)
     for route in &scan.routes {
         let source = fs::read_to_string(&route.abs_path)?;
-        let transformed = transform_file(&source, &route.abs_path.to_string_lossy(), &server_opts)?;
+        let transformed =
+            transform_file(&source, &route.abs_path.to_string_lossy(), &server_opts)?;
         let module_name = route.module_name();
 
         bundle.push_str(&format!("// Page: {}\n", module_name));
@@ -74,88 +84,32 @@ fn build_server_bundle(
             "globalThis.__rex_pages['{}'] = (function() {{\n  var exports = {{}};\n  var module = {{ exports: exports }};\n",
             module_name
         ));
-        // Wrap in a function to give it its own scope
-        bundle.push_str("  (function(exports, module) {\n");
+        bundle.push_str("  (function(exports, module, require) {\n");
         for line in transformed.lines() {
-            let trimmed = line.trim();
-
-            // Strip import statements — React is globally available in V8
-            if trimmed.starts_with("import ") {
-                continue;
-            }
-
-            // Convert ESM exports to CJS
-            if trimmed.starts_with("export default function ") {
-                let rest = &trimmed["export default ".len()..];
-                bundle.push_str("    module.exports.default = ");
-                bundle.push_str(rest);
-                bundle.push('\n');
-            } else if trimmed.starts_with("export default ") {
-                let rest = &trimmed["export default ".len()..];
-                bundle.push_str("    module.exports.default = ");
-                bundle.push_str(rest);
-                bundle.push('\n');
-            } else if trimmed.starts_with("export async function ") {
-                // export async function getServerSideProps(...)
-                let rest = &trimmed["export ".len()..]; // "async function X(...)"
-                let fn_name = rest
-                    .strip_prefix("async function ")
-                    .and_then(|s| s.split(&['(', ' ', '<'][..]).next())
-                    .unwrap_or("unknown");
-                bundle.push_str(&format!("    module.exports.{fn_name} = {rest}"));
-                bundle.push('\n');
-            } else if trimmed.starts_with("export function ") {
-                let rest = &trimmed["export ".len()..]; // "function X(...)"
-                let fn_name = rest
-                    .strip_prefix("function ")
-                    .and_then(|s| s.split(&['(', ' ', '<'][..]).next())
-                    .unwrap_or("unknown");
-                bundle.push_str(&format!("    module.exports.{fn_name} = {rest}"));
-                bundle.push('\n');
-            } else {
-                bundle.push_str("    ");
-                bundle.push_str(line);
-                bundle.push('\n');
-            }
+            bundle.push_str("    ");
+            bundle.push_str(line);
+            bundle.push('\n');
         }
-        bundle.push_str("  })(exports, module);\n");
-        bundle.push_str("  // Re-export\n");
-        bundle.push_str("  if (module.exports.default) exports.default = module.exports.default;\n");
-        bundle.push_str("  return exports;\n");
+        bundle.push_str("  })(exports, module, require);\n");
+        bundle.push_str("  return module.exports;\n");
         bundle.push_str("})();\n\n");
     }
 
     // Transform _app if present
     if let Some(app) = &scan.app {
         let source = fs::read_to_string(&app.abs_path)?;
-        let transformed = transform_file(&source, &app.abs_path.to_string_lossy(), &server_opts)?;
+        let transformed =
+            transform_file(&source, &app.abs_path.to_string_lossy(), &server_opts)?;
         bundle.push_str("// _app\n");
         bundle.push_str("globalThis.__rex_app = (function() {\n  var exports = {};\n  var module = { exports: exports };\n");
-        bundle.push_str("  (function(exports, module) {\n");
+        bundle.push_str("  (function(exports, module, require) {\n");
         for line in transformed.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("import ") {
-                continue;
-            }
-            if trimmed.starts_with("export default function ") {
-                let rest = &trimmed["export default ".len()..];
-                bundle.push_str("    module.exports.default = ");
-                bundle.push_str(rest);
-                bundle.push('\n');
-            } else if trimmed.starts_with("export default ") {
-                let rest = &trimmed["export default ".len()..];
-                bundle.push_str("    module.exports.default = ");
-                bundle.push_str(rest);
-                bundle.push('\n');
-            } else {
-                bundle.push_str("    ");
-                bundle.push_str(line);
-                bundle.push('\n');
-            }
+            bundle.push_str("    ");
+            bundle.push_str(line);
+            bundle.push('\n');
         }
-        bundle.push_str("  })(exports, module);\n");
-        bundle.push_str("  if (module.exports.default) exports.default = module.exports.default;\n");
-        bundle.push_str("  return exports;\n");
+        bundle.push_str("  })(exports, module, require);\n");
+        bundle.push_str("  return module.exports;\n");
         bundle.push_str("})();\n\n");
     }
 

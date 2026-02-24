@@ -23,6 +23,7 @@ swc_ecma_codegen = "23"
 swc_ecma_transforms_base = "37"
 swc_ecma_transforms_react = "41"
 swc_ecma_transforms_typescript = "41"
+swc_ecma_transforms_module = "41"
 swc_bundler = "43"
 
 # HTTP
