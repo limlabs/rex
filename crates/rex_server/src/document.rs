@@ -2,6 +2,7 @@
 pub fn assemble_document(
     ssr_html: &str,
     props_json: &str,
+    vendor_scripts: &[String],
     client_scripts: &[String],
     _build_id: &str,
     is_dev: bool,
@@ -32,9 +33,12 @@ pub fn assemble_document(
         "  <script id=\"__REX_DATA__\" type=\"application/json\">{escaped_props}</script>\n"
     ));
 
-    // React runtime (from CDN for prototype)
-    html.push_str("  <script crossorigin src=\"https://unpkg.com/react@18/umd/react.production.min.js\"></script>\n");
-    html.push_str("  <script crossorigin src=\"https://unpkg.com/react-dom@18/umd/react-dom.production.min.js\"></script>\n");
+    // React vendor scripts (built from node_modules at build time)
+    for script in vendor_scripts {
+        html.push_str(&format!(
+            "  <script src=\"/_rex/static/{script}\"></script>\n"
+        ));
+    }
 
     // Client chunks
     for script in client_scripts {

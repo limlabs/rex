@@ -151,6 +151,7 @@ pub async fn page_handler(
     let document = assemble_document(
         &ssr_html,
         &render_props,
+        &state.manifest.vendor_scripts,
         &client_scripts,
         &state.build_id,
         state.is_dev,

@@ -8,6 +8,9 @@ pub struct AssetManifest {
     pub build_id: String,
     /// route pattern -> client chunk filename
     pub pages: HashMap<String, PageAssets>,
+    /// Vendor scripts (e.g. React runtime) to load before page scripts
+    #[serde(default)]
+    pub vendor_scripts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +23,7 @@ impl AssetManifest {
         Self {
             build_id,
             pages: HashMap::new(),
+            vendor_scripts: Vec::new(),
         }
     }
 

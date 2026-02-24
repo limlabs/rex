@@ -239,7 +239,7 @@ globalThis.__rex_resolve_gssp = function() {
     Ok(bundle_path)
 }
 
-/// Build client-side bundles: one per page
+/// Build client-side bundles: one per page, plus vendor scripts
 fn build_client_bundles(
     config: &RexConfig,
     scan: &ScanResult,
@@ -247,6 +247,9 @@ fn build_client_bundles(
     build_id: &str,
 ) -> Result<AssetManifest> {
     let mut manifest = AssetManifest::new(build_id.to_string());
+
+    // Build vendor scripts (React runtime for the browser)
+    manifest.vendor_scripts = build_vendor_scripts(config, output_dir, build_id)?;
 
     let client_opts = TransformOptions {
         server: false,
@@ -305,4 +308,64 @@ fn build_client_bundles(
     }
 
     Ok(manifest)
+}
+
+/// Build vendor scripts (React runtime wrapped for browser use).
+/// Reads React CJS/UMD from node_modules, wraps for global assignment,
+/// and writes to the client output directory.
+fn build_vendor_scripts(
+    config: &RexConfig,
+    output_dir: &Path,
+    build_id: &str,
+) -> Result<Vec<String>> {
+    let nm = config.node_modules_dir();
+    let mut vendor_files = Vec::new();
+    let hash = &build_id[..8];
+
+    // Try React 19 CJS first
+    let react_cjs = nm.join("react/cjs/react.production.js");
+    let react_dom_cjs = nm.join("react-dom/cjs/react-dom.production.js");
+
+    if react_cjs.exists() && react_dom_cjs.exists() {
+        // React CJS → window.React
+        let react_src = fs::read_to_string(&react_cjs)?;
+        let react_vendor = format!(
+            "(function(){{\nvar exports={{}};var module={{exports:exports}};\n{react_src}\nwindow.React=module.exports;\n}})();\n"
+        );
+        let react_filename = format!("vendor-react-{hash}.js");
+        fs::write(output_dir.join(&react_filename), &react_vendor)?;
+        vendor_files.push(react_filename);
+
+        // ReactDOM CJS → window.ReactDOM (requires React)
+        let react_dom_src = fs::read_to_string(&react_dom_cjs)?;
+        let react_dom_vendor = format!(
+            "(function(){{\nvar exports={{}};var module={{exports:exports}};\nvar require=function(n){{if(n==='react')return window.React;return {{}}}};\n{react_dom_src}\nwindow.ReactDOM=module.exports;\n}})();\n"
+        );
+        let react_dom_filename = format!("vendor-react-dom-{hash}.js");
+        fs::write(output_dir.join(&react_dom_filename), &react_dom_vendor)?;
+        vendor_files.push(react_dom_filename);
+
+        return Ok(vendor_files);
+    }
+
+    // Fallback: React 18 UMD
+    let react_umd = nm.join("react/umd/react.production.min.js");
+    let react_dom_umd = nm.join("react-dom/umd/react-dom.production.min.js");
+
+    if react_umd.exists() && react_dom_umd.exists() {
+        let react_src = fs::read_to_string(&react_umd)?;
+        let react_filename = format!("vendor-react-{hash}.js");
+        fs::write(output_dir.join(&react_filename), &react_src)?;
+        vendor_files.push(react_filename);
+
+        let react_dom_src = fs::read_to_string(&react_dom_umd)?;
+        let react_dom_filename = format!("vendor-react-dom-{hash}.js");
+        fs::write(output_dir.join(&react_dom_filename), &react_dom_src)?;
+        vendor_files.push(react_dom_filename);
+
+        return Ok(vendor_files);
+    }
+
+    // No React found — hydration won't work, but SSR stub may still function
+    Ok(vendor_files)
 }
