@@ -240,3 +240,331 @@ fn console_warn(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _
 fn console_error(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _: v8::ReturnValue) {
     tracing::error!(target: "v8::console", "{}", format_args(scope, &args));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Minimal React stub: provides React.createElement and ReactDOMServer.renderToString
+    /// without needing node_modules. Renders elements as simple HTML strings.
+    const MOCK_REACT_RUNTIME: &str = r#"
+        globalThis.__React = {
+            createElement: function(type, props) {
+                var children = Array.prototype.slice.call(arguments, 2);
+                return { type: type, props: props || {}, children: children };
+            }
+        };
+        var React = globalThis.__React;
+
+        function renderElement(el) {
+            if (el === null || el === undefined) return '';
+            if (typeof el === 'string') return el;
+            if (typeof el === 'number') return String(el);
+            if (Array.isArray(el)) return el.map(renderElement).join('');
+            if (typeof el.type === 'function') {
+                var merged = Object.assign({}, el.props);
+                if (el.children.length > 0) merged.children = el.children.length === 1 ? el.children[0] : el.children;
+                return renderElement(el.type(merged));
+            }
+            if (typeof el.type === 'string') {
+                var attrs = '';
+                var p = el.props || {};
+                for (var k in p) {
+                    if (k === 'children') continue;
+                    if (p.hasOwnProperty(k)) attrs += ' ' + k + '="' + p[k] + '"';
+                }
+                var inner = '';
+                if (p.children) inner += renderElement(p.children);
+                inner += el.children.map(renderElement).join('');
+                if (!inner) return '<' + el.type + attrs + '/>';
+                return '<' + el.type + attrs + '>' + inner + '</' + el.type + '>';
+            }
+            return '';
+        }
+
+        globalThis.__ReactDOMServer = {
+            renderToString: function(el) { return renderElement(el); }
+        };
+    "#;
+
+    /// Build a minimal server bundle JS with given page definitions.
+    /// Each page entry: (route_key, component_js, gssp_js)
+    fn make_server_bundle(pages: &[(&str, &str, Option<&str>)]) -> String {
+        let mut bundle = String::new();
+        bundle.push_str("'use strict';\n");
+        bundle.push_str("globalThis.__rex_pages = globalThis.__rex_pages || {};\n\n");
+
+        for (key, component, gssp) in pages {
+            bundle.push_str(&format!(
+                "globalThis.__rex_pages['{}'] = (function() {{\n  var exports = {{}};\n",
+                key
+            ));
+            bundle.push_str(&format!("  exports.default = {};\n", component));
+            if let Some(gssp_code) = gssp {
+                bundle.push_str(&format!("  exports.getServerSideProps = {};\n", gssp_code));
+            }
+            bundle.push_str("  return exports;\n})();\n\n");
+        }
+
+        // SSR runtime (same as bundler.rs produces)
+        bundle.push_str(
+            r#"
+globalThis.__rex_render_page = function(routeKey, propsJson) {
+    var React = globalThis.__React;
+    var ReactDOMServer = globalThis.__ReactDOMServer;
+    if (!React || !ReactDOMServer) {
+        throw new Error('React/ReactDOMServer not loaded');
+    }
+    var page = globalThis.__rex_pages[routeKey];
+    if (!page) throw new Error('Page not found: ' + routeKey);
+    var Component = page.default;
+    if (!Component) throw new Error('No default export: ' + routeKey);
+    var props = JSON.parse(propsJson);
+    var element = React.createElement(Component, props);
+    return ReactDOMServer.renderToString(element);
+};
+
+globalThis.__rex_gssp_resolved = null;
+globalThis.__rex_gssp_rejected = null;
+
+globalThis.__rex_get_server_side_props = function(routeKey, contextJson) {
+    var page = globalThis.__rex_pages[routeKey];
+    if (!page || !page.getServerSideProps) {
+        return JSON.stringify({ props: {} });
+    }
+    var context = JSON.parse(contextJson);
+    var result = page.getServerSideProps(context);
+    if (result && typeof result.then === 'function') {
+        globalThis.__rex_gssp_resolved = null;
+        globalThis.__rex_gssp_rejected = null;
+        result.then(
+            function(v) { globalThis.__rex_gssp_resolved = v; },
+            function(e) { globalThis.__rex_gssp_rejected = e; }
+        );
+        return '__REX_ASYNC__';
+    }
+    return JSON.stringify(result);
+};
+
+globalThis.__rex_resolve_gssp = function() {
+    if (globalThis.__rex_gssp_rejected) throw globalThis.__rex_gssp_rejected;
+    if (globalThis.__rex_gssp_resolved !== null) return JSON.stringify(globalThis.__rex_gssp_resolved);
+    throw new Error('GSSP promise did not resolve');
+};
+"#,
+        );
+        bundle
+    }
+
+    fn make_isolate(pages: &[(&str, &str, Option<&str>)]) -> SsrIsolate {
+        crate::init_v8();
+        let bundle = make_server_bundle(pages);
+        SsrIsolate::new(MOCK_REACT_RUNTIME, &bundle).expect("failed to create isolate")
+    }
+
+    #[test]
+    fn test_render_simple_page() {
+        let mut iso = make_isolate(&[(
+            "index",
+            "function Index() { return React.createElement('h1', null, 'Hello'); }",
+            None,
+        )]);
+        let html = iso.render_page("index", "{}").unwrap();
+        assert_eq!(html, "<h1>Hello</h1>");
+    }
+
+    #[test]
+    fn test_render_with_props() {
+        let mut iso = make_isolate(&[(
+            "greet",
+            "function Greet(props) { return React.createElement('p', null, 'Hi ' + props.name); }",
+            None,
+        )]);
+        let html = iso.render_page("greet", r#"{"name":"Rex"}"#).unwrap();
+        assert_eq!(html, "<p>Hi Rex</p>");
+    }
+
+    #[test]
+    fn test_render_nested_elements() {
+        let mut iso = make_isolate(&[(
+            "nested",
+            r#"function Page() {
+                return React.createElement('div', {class: 'wrapper'},
+                    React.createElement('h1', null, 'Title'),
+                    React.createElement('p', null, 'Body')
+                );
+            }"#,
+            None,
+        )]);
+        let html = iso.render_page("nested", "{}").unwrap();
+        assert_eq!(html, r#"<div class="wrapper"><h1>Title</h1><p>Body</p></div>"#);
+    }
+
+    #[test]
+    fn test_render_missing_page() {
+        let mut iso = make_isolate(&[]);
+        let err = iso.render_page("nonexistent", "{}").unwrap_err();
+        assert!(
+            err.to_string().contains("Page not found"),
+            "expected 'Page not found', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_render_component_throws() {
+        let mut iso = make_isolate(&[(
+            "bad",
+            "function Bad() { throw new Error('component broke'); }",
+            None,
+        )]);
+        let err = iso.render_page("bad", "{}").unwrap_err();
+        assert!(
+            err.to_string().contains("component broke"),
+            "expected 'component broke', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_gssp_sync() {
+        let mut iso = make_isolate(&[(
+            "page",
+            "function Page(props) { return React.createElement('span', null, props.title); }",
+            Some("function(ctx) { return { props: { title: 'from gssp' } }; }"),
+        )]);
+        let json = iso
+            .get_server_side_props("page", r#"{"params":{},"query":{}}"#)
+            .unwrap();
+        let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(val["props"]["title"], "from gssp");
+    }
+
+    #[test]
+    fn test_gssp_no_gssp_returns_empty_props() {
+        let mut iso = make_isolate(&[(
+            "page",
+            "function Page() { return React.createElement('div', null, 'hi'); }",
+            None,
+        )]);
+        let json = iso
+            .get_server_side_props("page", r#"{"params":{},"query":{}}"#)
+            .unwrap();
+        let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(val["props"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn test_gssp_receives_context() {
+        let mut iso = make_isolate(&[(
+            "page",
+            "function Page() { return React.createElement('div'); }",
+            Some("function(ctx) { return { props: { slug: ctx.params.slug, url: ctx.resolved_url } }; }"),
+        )]);
+        let context = r#"{"params":{"slug":"hello"},"query":{},"resolved_url":"/blog/hello","headers":{},"cookies":{}}"#;
+        let json = iso.get_server_side_props("page", context).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(val["props"]["slug"], "hello");
+        assert_eq!(val["props"]["url"], "/blog/hello");
+    }
+
+    #[test]
+    fn test_gssp_async() {
+        let mut iso = make_isolate(&[(
+            "page",
+            "function Page() { return React.createElement('div'); }",
+            Some("function(ctx) { return Promise.resolve({ props: { async: true } }); }"),
+        )]);
+        let json = iso
+            .get_server_side_props("page", r#"{"params":{},"query":{}}"#)
+            .unwrap();
+        let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(val["props"]["async"], true);
+    }
+
+    #[test]
+    fn test_gssp_throws() {
+        let mut iso = make_isolate(&[(
+            "page",
+            "function Page() { return React.createElement('div'); }",
+            Some("function(ctx) { throw new Error('gssp failed'); }"),
+        )]);
+        let err = iso
+            .get_server_side_props("page", r#"{"params":{},"query":{}}"#)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("gssp failed"),
+            "expected 'gssp failed', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_gssp_missing_page() {
+        let mut iso = make_isolate(&[]);
+        let json = iso
+            .get_server_side_props("nonexistent", r#"{"params":{},"query":{}}"#)
+            .unwrap();
+        let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(val["props"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn test_reload_replaces_pages() {
+        let mut iso = make_isolate(&[(
+            "page",
+            "function Page() { return React.createElement('p', null, 'v1'); }",
+            None,
+        )]);
+        assert_eq!(iso.render_page("page", "{}").unwrap(), "<p>v1</p>");
+
+        let new_bundle = make_server_bundle(&[(
+            "page",
+            "function Page() { return React.createElement('p', null, 'v2'); }",
+            None,
+        )]);
+        iso.reload(&new_bundle).unwrap();
+        assert_eq!(iso.render_page("page", "{}").unwrap(), "<p>v2</p>");
+    }
+
+    #[test]
+    fn test_reload_adds_new_pages() {
+        let mut iso = make_isolate(&[(
+            "page",
+            "function Page() { return React.createElement('p', null, 'original'); }",
+            None,
+        )]);
+
+        let new_bundle = make_server_bundle(&[
+            (
+                "page",
+                "function Page() { return React.createElement('p', null, 'original'); }",
+                None,
+            ),
+            (
+                "about",
+                "function About() { return React.createElement('h1', null, 'About'); }",
+                None,
+            ),
+        ]);
+        iso.reload(&new_bundle).unwrap();
+        assert_eq!(iso.render_page("about", "{}").unwrap(), "<h1>About</h1>");
+    }
+
+    #[test]
+    fn test_invalid_server_bundle() {
+        crate::init_v8();
+        let result = SsrIsolate::new(MOCK_REACT_RUNTIME, "this is not valid javascript {{{{");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_multiple_renders_same_isolate() {
+        let mut iso = make_isolate(&[(
+            "page",
+            "function Page(props) { return React.createElement('b', null, props.n); }",
+            None,
+        )]);
+        for i in 0..5 {
+            let html = iso.render_page("page", &format!(r#"{{"n":{i}}}"#)).unwrap();
+            assert_eq!(html, format!("<b>{i}</b>"));
+        }
+    }
+}
