@@ -212,3 +212,380 @@ pub async fn data_handler(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::Request;
+    use axum::routing::get;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use rex_core::{DynamicSegment, PageType, Route};
+    use std::path::PathBuf;
+    use tower::ServiceExt;
+
+    /// Same minimal React stub as rex_v8 tests.
+    const MOCK_REACT_RUNTIME: &str = r#"
+        globalThis.__React = {
+            createElement: function(type, props) {
+                var children = Array.prototype.slice.call(arguments, 2);
+                return { type: type, props: props || {}, children: children };
+            }
+        };
+        var React = globalThis.__React;
+
+        function renderElement(el) {
+            if (el === null || el === undefined) return '';
+            if (typeof el === 'string') return el;
+            if (typeof el === 'number') return String(el);
+            if (Array.isArray(el)) return el.map(renderElement).join('');
+            if (typeof el.type === 'function') {
+                var merged = Object.assign({}, el.props);
+                if (el.children.length > 0) merged.children = el.children.length === 1 ? el.children[0] : el.children;
+                return renderElement(el.type(merged));
+            }
+            if (typeof el.type === 'string') {
+                var attrs = '';
+                var p = el.props || {};
+                for (var k in p) {
+                    if (k === 'children') continue;
+                    if (p.hasOwnProperty(k)) attrs += ' ' + k + '="' + p[k] + '"';
+                }
+                var inner = '';
+                if (p.children) inner += renderElement(p.children);
+                inner += el.children.map(renderElement).join('');
+                if (!inner) return '<' + el.type + attrs + '/>';
+                return '<' + el.type + attrs + '>' + inner + '</' + el.type + '>';
+            }
+            return '';
+        }
+
+        globalThis.__ReactDOMServer = {
+            renderToString: function(el) { return renderElement(el); }
+        };
+    "#;
+
+    fn make_server_bundle(pages: &[(&str, &str, Option<&str>)]) -> String {
+        let mut bundle = String::new();
+        bundle.push_str("'use strict';\n");
+        bundle.push_str("globalThis.__rex_pages = globalThis.__rex_pages || {};\n\n");
+
+        for (key, component, gssp) in pages {
+            bundle.push_str(&format!(
+                "globalThis.__rex_pages['{}'] = (function() {{\n  var exports = {{}};\n",
+                key
+            ));
+            bundle.push_str(&format!("  exports.default = {};\n", component));
+            if let Some(gssp_code) = gssp {
+                bundle.push_str(&format!(
+                    "  exports.getServerSideProps = {};\n",
+                    gssp_code
+                ));
+            }
+            bundle.push_str("  return exports;\n})();\n\n");
+        }
+
+        bundle.push_str(
+            r#"
+globalThis.__rex_render_page = function(routeKey, propsJson) {
+    var React = globalThis.__React;
+    var ReactDOMServer = globalThis.__ReactDOMServer;
+    if (!React || !ReactDOMServer) throw new Error('React not loaded');
+    var page = globalThis.__rex_pages[routeKey];
+    if (!page) throw new Error('Page not found: ' + routeKey);
+    var Component = page.default;
+    if (!Component) throw new Error('No default export: ' + routeKey);
+    var props = JSON.parse(propsJson);
+    return ReactDOMServer.renderToString(React.createElement(Component, props));
+};
+
+globalThis.__rex_gssp_resolved = null;
+globalThis.__rex_gssp_rejected = null;
+
+globalThis.__rex_get_server_side_props = function(routeKey, contextJson) {
+    var page = globalThis.__rex_pages[routeKey];
+    if (!page || !page.getServerSideProps) return JSON.stringify({ props: {} });
+    var context = JSON.parse(contextJson);
+    var result = page.getServerSideProps(context);
+    if (result && typeof result.then === 'function') {
+        globalThis.__rex_gssp_resolved = null;
+        globalThis.__rex_gssp_rejected = null;
+        result.then(
+            function(v) { globalThis.__rex_gssp_resolved = v; },
+            function(e) { globalThis.__rex_gssp_rejected = e; }
+        );
+        return '__REX_ASYNC__';
+    }
+    return JSON.stringify(result);
+};
+
+globalThis.__rex_resolve_gssp = function() {
+    if (globalThis.__rex_gssp_rejected) throw globalThis.__rex_gssp_rejected;
+    if (globalThis.__rex_gssp_resolved !== null) return JSON.stringify(globalThis.__rex_gssp_resolved);
+    throw new Error('GSSP promise did not resolve');
+};
+"#,
+        );
+        bundle
+    }
+
+    fn make_route(pattern: &str, file_path: &str, segments: Vec<DynamicSegment>) -> Route {
+        let specificity = if segments.is_empty() { 100 } else { 50 };
+        Route {
+            pattern: pattern.to_string(),
+            file_path: PathBuf::from(file_path),
+            abs_path: PathBuf::from(format!("/fake/pages/{file_path}")),
+            dynamic_segments: segments,
+            page_type: PageType::Regular,
+            specificity,
+        }
+    }
+
+    /// Build a test app with router, isolate pool, and routes wired up.
+    fn build_test_app(
+        routes: Vec<Route>,
+        pages: &[(&str, &str, Option<&str>)],
+    ) -> Router {
+        rex_v8::init_v8();
+        let bundle = make_server_bundle(pages);
+        let pool = rex_v8::IsolatePool::new(
+            1,
+            Arc::new(MOCK_REACT_RUNTIME.to_string()),
+            Arc::new(bundle),
+        )
+        .expect("failed to create pool");
+
+        let trie = RouteTrie::from_routes(&routes);
+        let manifest = rex_build::AssetManifest::new("test-build-id".to_string());
+
+        let state = Arc::new(AppState {
+            route_trie: trie,
+            isolate_pool: pool,
+            manifest,
+            build_id: "test-build-id".to_string(),
+            is_dev: false,
+        });
+
+        Router::new()
+            .route(
+                "/_rex/data/{build_id}/{*path}",
+                get(data_handler),
+            )
+            .fallback(page_handler)
+            .with_state(state)
+    }
+
+    async fn body_string(body: Body) -> String {
+        let bytes = body.collect().await.unwrap().to_bytes();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_page_returns_html_with_ssr() {
+        let app = build_test_app(
+            vec![make_route("/", "index.tsx", vec![])],
+            &[(
+                "index",
+                "function Index() { return React.createElement('h1', null, 'Home'); }",
+                None,
+            )],
+        );
+
+        let resp = app
+            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp.into_body()).await;
+        assert!(html.contains("<h1>Home</h1>"), "missing SSR content: {html}");
+        assert!(html.contains("<!DOCTYPE html>"), "missing doctype: {html}");
+        assert!(html.contains("__REX_DATA__"), "missing data script: {html}");
+    }
+
+    #[tokio::test]
+    async fn test_page_404_no_route() {
+        let app = build_test_app(
+            vec![make_route("/", "index.tsx", vec![])],
+            &[(
+                "index",
+                "function Index() { return React.createElement('h1', null, 'Home'); }",
+                None,
+            )],
+        );
+
+        let resp = app
+            .oneshot(Request::get("/nonexistent").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_page_with_gssp_props() {
+        let app = build_test_app(
+            vec![make_route("/", "index.tsx", vec![])],
+            &[(
+                "index",
+                "function Index(props) { return React.createElement('p', null, props.msg); }",
+                Some("function(ctx) { return { props: { msg: 'hello from gssp' } }; }"),
+            )],
+        );
+
+        let resp = app
+            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp.into_body()).await;
+        assert!(
+            html.contains("<p>hello from gssp</p>"),
+            "GSSP props not rendered: {html}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_page_gssp_redirect() {
+        let app = build_test_app(
+            vec![make_route("/old", "old.tsx", vec![])],
+            &[(
+                "old",
+                "function Old() { return React.createElement('div'); }",
+                Some("function(ctx) { return { redirect: { destination: '/new', statusCode: 307 } }; }"),
+            )],
+        );
+
+        let resp = app
+            .oneshot(Request::get("/old").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(resp.headers().get("location").unwrap(), "/new");
+    }
+
+    #[tokio::test]
+    async fn test_page_gssp_not_found() {
+        let app = build_test_app(
+            vec![make_route("/hidden", "hidden.tsx", vec![])],
+            &[(
+                "hidden",
+                "function Hidden() { return React.createElement('div'); }",
+                Some("function(ctx) { return { notFound: true }; }"),
+            )],
+        );
+
+        let resp = app
+            .oneshot(Request::get("/hidden").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_dynamic_route_params() {
+        let app = build_test_app(
+            vec![make_route(
+                "/blog/:slug",
+                "blog/[slug].tsx",
+                vec![DynamicSegment::Single("slug".into())],
+            )],
+            &[(
+                "blog/[slug]",
+                "function Post(props) { return React.createElement('h1', null, props.slug); }",
+                Some("function(ctx) { return { props: { slug: ctx.params.slug } }; }"),
+            )],
+        );
+
+        let resp = app
+            .oneshot(Request::get("/blog/my-post").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp.into_body()).await;
+        assert!(
+            html.contains("<h1>my-post</h1>"),
+            "dynamic param not passed: {html}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_data_handler_returns_json() {
+        let app = build_test_app(
+            vec![make_route("/about", "about.tsx", vec![])],
+            &[(
+                "about",
+                "function About() { return React.createElement('div'); }",
+                Some("function(ctx) { return { props: { title: 'data test' } }; }"),
+            )],
+        );
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/data/test-build-id/about.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+        let json = body_string(resp.into_body()).await;
+        let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(val["props"]["title"], "data test");
+    }
+
+    #[tokio::test]
+    async fn test_data_handler_stale_build_id() {
+        let app = build_test_app(
+            vec![make_route("/", "index.tsx", vec![])],
+            &[(
+                "index",
+                "function Index() { return React.createElement('div'); }",
+                None,
+            )],
+        );
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/data/wrong-build-id/index.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_data_handler_no_route() {
+        let app = build_test_app(
+            vec![make_route("/", "index.tsx", vec![])],
+            &[(
+                "index",
+                "function Index() { return React.createElement('div'); }",
+                None,
+            )],
+        );
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/data/test-build-id/nonexistent.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+}
