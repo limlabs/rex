@@ -587,6 +587,150 @@ mod tests {
         assert_eq!(loaded.build_id, result.build_id);
         assert_eq!(loaded.pages.len(), 2);
     }
+
+    /// Helper to create fake node_modules with React CJS or UMD files
+    fn setup_fake_node_modules(root: &Path, layout: &str) {
+        let nm = root.join("node_modules");
+        match layout {
+            "cjs" => {
+                // React 19 CJS layout
+                let react_cjs_dir = nm.join("react/cjs");
+                let react_dom_cjs_dir = nm.join("react-dom/cjs");
+                fs::create_dir_all(&react_cjs_dir).unwrap();
+                fs::create_dir_all(&react_dom_cjs_dir).unwrap();
+                fs::write(
+                    react_cjs_dir.join("react.production.js"),
+                    "module.exports = { createElement: function() { return {}; } };",
+                )
+                .unwrap();
+                fs::write(
+                    react_dom_cjs_dir.join("react-dom.production.js"),
+                    "module.exports = { createRoot: function() {} };",
+                )
+                .unwrap();
+            }
+            "umd" => {
+                // React 18 UMD layout
+                let react_umd_dir = nm.join("react/umd");
+                let react_dom_umd_dir = nm.join("react-dom/umd");
+                fs::create_dir_all(&react_umd_dir).unwrap();
+                fs::create_dir_all(&react_dom_umd_dir).unwrap();
+                fs::write(
+                    react_umd_dir.join("react.production.min.js"),
+                    "window.React = { createElement: function() { return {}; } };",
+                )
+                .unwrap();
+                fs::write(
+                    react_dom_umd_dir.join("react-dom.production.min.js"),
+                    "window.ReactDOM = { createRoot: function() {} };",
+                )
+                .unwrap();
+            }
+            _ => {} // "none" — no node_modules
+        }
+    }
+
+    #[test]
+    fn test_vendor_scripts_react19_cjs() {
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                "export default function Home() { return <div>Home</div>; }",
+            )],
+            None,
+        );
+        setup_fake_node_modules(&config.project_root, "cjs");
+
+        let result = build_bundles(&config, &scan).unwrap();
+
+        assert_eq!(
+            result.manifest.vendor_scripts.len(),
+            2,
+            "should have react + react-dom vendor scripts"
+        );
+        assert!(
+            result.manifest.vendor_scripts[0].starts_with("vendor-react-"),
+            "first vendor script should be react"
+        );
+        assert!(
+            result.manifest.vendor_scripts[1].starts_with("vendor-react-dom-"),
+            "second vendor script should be react-dom"
+        );
+
+        // Verify files exist and contain CJS wrapper
+        let client_dir = config.client_build_dir();
+        let react_vendor = fs::read_to_string(
+            client_dir.join(&result.manifest.vendor_scripts[0]),
+        )
+        .unwrap();
+        assert!(
+            react_vendor.contains("window.React=module.exports"),
+            "CJS react vendor should assign window.React"
+        );
+
+        let react_dom_vendor = fs::read_to_string(
+            client_dir.join(&result.manifest.vendor_scripts[1]),
+        )
+        .unwrap();
+        assert!(
+            react_dom_vendor.contains("window.ReactDOM=module.exports"),
+            "CJS react-dom vendor should assign window.ReactDOM"
+        );
+        assert!(
+            react_dom_vendor.contains("require"),
+            "react-dom vendor should have require shim"
+        );
+    }
+
+    #[test]
+    fn test_vendor_scripts_react18_umd() {
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                "export default function Home() { return <div>Home</div>; }",
+            )],
+            None,
+        );
+        setup_fake_node_modules(&config.project_root, "umd");
+
+        let result = build_bundles(&config, &scan).unwrap();
+
+        assert_eq!(
+            result.manifest.vendor_scripts.len(),
+            2,
+            "should have react + react-dom vendor scripts"
+        );
+
+        // UMD scripts are written as-is (no wrapper needed)
+        let client_dir = config.client_build_dir();
+        let react_vendor = fs::read_to_string(
+            client_dir.join(&result.manifest.vendor_scripts[0]),
+        )
+        .unwrap();
+        assert!(
+            react_vendor.contains("window.React"),
+            "UMD react should set window.React"
+        );
+    }
+
+    #[test]
+    fn test_vendor_scripts_no_react() {
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                "export default function Home() { return <div>Home</div>; }",
+            )],
+            None,
+        );
+        // No setup_fake_node_modules — no React available
+
+        let result = build_bundles(&config, &scan).unwrap();
+
+        assert!(
+            result.manifest.vendor_scripts.is_empty(),
+            "should have no vendor scripts when React not found"
+        );
+    }
 }
 
 /// Build vendor scripts (React runtime wrapped for browser use).
