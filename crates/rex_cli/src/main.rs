@@ -5,6 +5,7 @@ use rex_core::RexConfig;
 use rex_router::{scan_pages, RouteTrie};
 use rex_server::RexServer;
 use rex_v8::{init_v8, IsolatePool};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
@@ -85,11 +86,14 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
     let build_result = build_bundles(&config, &scan)?;
     info!(build_id = %build_result.build_id, "Build complete");
 
+    // Load environment variables from .env files
+    let env_vars = load_env_vars(&config);
+
     // Initialize V8
     init_v8();
 
     // Load React runtime (minimal CJS shim for V8)
-    let react_runtime = load_react_runtime(&config)?;
+    let react_runtime = load_react_runtime(&config, &env_vars)?;
 
     // Load server bundle
     let server_bundle = std::fs::read_to_string(&build_result.server_bundle_path)?;
@@ -215,10 +219,13 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
     let scan = scan_pages(&config.pages_dir)?;
     let trie = RouteTrie::from_routes(&scan.routes);
 
+    // Load environment variables from .env files
+    let env_vars = load_env_vars(&config);
+
     // Initialize V8
     init_v8();
 
-    let react_runtime = load_react_runtime(&config)?;
+    let react_runtime = load_react_runtime(&config, &env_vars)?;
     let server_bundle = std::fs::read_to_string(config.server_bundle_path())?;
 
     let pool_size = std::thread::available_parallelism()
@@ -245,10 +252,68 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
     server.serve().await
 }
 
+/// Load environment variables from .env files following Next.js priority order.
+/// Later files take precedence over earlier ones; explicit env vars override all.
+fn load_env_vars(config: &RexConfig) -> BTreeMap<String, String> {
+    let root = &config.project_root;
+    let mode = if config.dev { "development" } else { "production" };
+
+    // Next.js load order (lowest to highest priority):
+    // .env, .env.local, .env.{mode}, .env.{mode}.local
+    let files = [
+        root.join(".env"),
+        root.join(".env.local"),
+        root.join(format!(".env.{mode}")),
+        root.join(format!(".env.{mode}.local")),
+    ];
+
+    let mut vars = BTreeMap::new();
+
+    for file in &files {
+        if file.exists() {
+            match dotenvy::from_path_iter(file) {
+                Ok(iter) => {
+                    for item in iter {
+                        if let Ok((key, value)) = item {
+                            vars.insert(key, value);
+                        }
+                    }
+                    info!(file = %file.display(), "Loaded env file");
+                }
+                Err(e) => {
+                    tracing::warn!(file = %file.display(), error = %e, "Failed to load env file");
+                }
+            }
+        }
+    }
+
+    // Always set NODE_ENV
+    vars.entry("NODE_ENV".to_string())
+        .or_insert_with(|| mode.to_string());
+
+    vars
+}
+
+/// Generate a JS object literal for process.env from loaded environment variables.
+fn env_vars_to_js(vars: &BTreeMap<String, String>) -> String {
+    let mut js = String::from("{ ");
+    for (i, (key, value)) in vars.iter().enumerate() {
+        if i > 0 {
+            js.push_str(", ");
+        }
+        // Escape key (identifiers) and value (strings)
+        let escaped_value = value.replace('\\', "\\\\").replace('\'', "\\'");
+        js.push_str(&format!("'{}': '{}'", key, escaped_value));
+    }
+    js.push_str(" }");
+    js
+}
+
 /// Load React runtime for V8 SSR from node_modules.
 /// Supports both CJS (React 19+) and UMD (React 18) builds.
-fn load_react_runtime(config: &RexConfig) -> Result<String> {
+fn load_react_runtime(config: &RexConfig, env_vars: &BTreeMap<String, String>) -> Result<String> {
     let nm = config.node_modules_dir();
+    let env_js = env_vars_to_js(env_vars);
 
     // Try CJS paths first (React 19+)
     let react_cjs = nm.join("react/cjs/react.production.js");
@@ -271,7 +336,7 @@ fn load_react_runtime(config: &RexConfig) -> Result<String> {
         let runtime = format!(
             r#"// React Runtime for V8 SSR (CJS)
 if (typeof process === 'undefined') {{
-    globalThis.process = {{ env: {{ NODE_ENV: 'production' }} }};
+    globalThis.process = {{ env: {env_js} }};
 }}
 
 // Polyfill Web APIs that React expects but V8 doesn't provide.
@@ -381,7 +446,7 @@ globalThis.ReactDOMServer = __modules['react-dom/server'];
         let runtime = format!(
             r#"// React Runtime for V8 SSR (UMD)
 if (typeof process === 'undefined') {{
-    globalThis.process = {{ env: {{ NODE_ENV: 'production' }} }};
+    globalThis.process = {{ env: {env_js} }};
 }}
 
 (function() {{
@@ -401,61 +466,64 @@ globalThis.__ReactDOMServer = globalThis.ReactDOMServer;
 
     // Fallback: provide a stub that will error clearly
     info!("React not found in node_modules, using stub. Run `npm install react react-dom` in your project.");
-    Ok(r#"
+    Ok(format!(r#"
 // Stub React runtime - install react and react-dom for real SSR
-globalThis.__React = {
-    createElement: function(type, props) {
+if (typeof process === 'undefined') {{
+    globalThis.process = {{ env: {env_js} }};
+}}
+globalThis.__React = {{
+    createElement: function(type, props) {{
         var children = Array.prototype.slice.call(arguments, 2);
-        return { type: type, props: props || {}, children: children, $$typeof: Symbol.for('react.element') };
-    },
+        return {{ type: type, props: props || {{}}, children: children, $$typeof: Symbol.for('react.element') }};
+    }},
     Fragment: Symbol.for('react.fragment'),
-};
-globalThis.__ReactDOMServer = {
-    renderToString: function(element) {
+}};
+globalThis.__ReactDOMServer = {{
+    renderToString: function(element) {{
         if (!element) return '';
         if (typeof element === 'string') return element;
-        if (typeof element.type === 'function') {
+        if (typeof element.type === 'function') {{
             var result = element.type(element.props);
             return globalThis.__ReactDOMServer.renderToString(result);
-        }
-        if (typeof element.type === 'string') {
+        }}
+        if (typeof element.type === 'string') {{
             var tag = element.type;
             var html = '<' + tag;
-            if (element.props) {
-                Object.keys(element.props).forEach(function(key) {
+            if (element.props) {{
+                Object.keys(element.props).forEach(function(key) {{
                     if (key === 'children' || key === 'dangerouslySetInnerHTML') return;
-                    if (key === 'className') {
+                    if (key === 'className') {{
                         html += ' class="' + element.props[key] + '"';
-                    } else if (typeof element.props[key] === 'string') {
+                    }} else if (typeof element.props[key] === 'string') {{
                         html += ' ' + key + '="' + element.props[key] + '"';
-                    }
-                });
-            }
+                    }}
+                }});
+            }}
             html += '>';
             var children = element.props && element.props.children;
-            if (children) {
-                if (Array.isArray(children)) {
-                    children.forEach(function(child) {
+            if (children) {{
+                if (Array.isArray(children)) {{
+                    children.forEach(function(child) {{
                         html += globalThis.__ReactDOMServer.renderToString(child);
-                    });
-                } else {
+                    }});
+                }} else {{
                     html += globalThis.__ReactDOMServer.renderToString(children);
-                }
-            }
-            if (element.children && element.children.length > 0) {
-                element.children.forEach(function(child) {
+                }}
+            }}
+            if (element.children && element.children.length > 0) {{
+                element.children.forEach(function(child) {{
                     html += globalThis.__ReactDOMServer.renderToString(child);
-                });
-            }
+                }});
+            }}
             html += '</' + tag + '>';
             return html;
-        }
+        }}
         return '';
-    },
-};
+    }},
+}};
 globalThis.React = globalThis.__React;
 globalThis.ReactDOMServer = globalThis.__ReactDOMServer;
-"#.to_string())
+"#))
 }
 
 async fn hmr_client_handler() -> impl axum::response::IntoResponse {
