@@ -115,15 +115,11 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
     // Start file watcher
     let event_rx = rex_dev::start_watcher(&config.pages_dir)?;
 
-    // Spawn rebuild handler
-    let _config_clone = config.clone();
-    let hmr_clone = hmr.clone();
-    // We can't easily share the pool for reload in this prototype,
-    // so file changes will trigger a full reload message
+    // Bridge sync file watcher to async rebuild handler
+    let (rebuild_tx, mut rebuild_rx) = tokio::sync::mpsc::unbounded_channel();
     tokio::task::spawn_blocking(move || {
         while let Ok(event) = event_rx.recv() {
-            info!(path = %event.path.display(), "File changed, signaling reload");
-            hmr_clone.send_full_reload();
+            let _ = rebuild_tx.send(event);
         }
     });
 
@@ -149,13 +145,36 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
         true,
     );
 
-    info!("Ready on http://localhost:{port}");
     let router = server.build_router_with_extra(extra_routes);
-    // Keep an Arc<AppState> reference alive across the .await points below.
-    // Without this, the async transform may drop `server` (and its Arc) before
-    // the serve future runs, causing the IsolatePool senders to drop and the
-    // V8 isolate threads to exit immediately.
-    let _keep = server.state();
+    let state = server.state();
+
+    // Spawn async rebuild handler: rebuild bundles + reload V8 isolates on file changes
+    {
+        let rebuild_config = config.clone();
+        let rebuild_hmr = hmr.clone();
+        let rebuild_state = state.clone();
+        tokio::spawn(async move {
+            while let Some(event) = rebuild_rx.recv().await {
+                info!(path = %event.path.display(), "Rebuilding...");
+                match rex_dev::rebuild::handle_file_event(
+                    event,
+                    &rebuild_config,
+                    &rebuild_state.isolate_pool,
+                    &rebuild_hmr,
+                )
+                .await
+                {
+                    Ok(()) => {}
+                    Err(e) => {
+                        tracing::error!("Rebuild failed: {e}");
+                        rebuild_hmr.send_error(&e.to_string(), None);
+                    }
+                }
+            }
+        });
+    }
+
+    info!("Ready on http://localhost:{port}");
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, router).await?;
