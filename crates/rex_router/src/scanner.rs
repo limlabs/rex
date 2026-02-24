@@ -1,0 +1,228 @@
+use rex_core::{DynamicSegment, PageType, Route};
+use std::path::Path;
+use tracing::debug;
+
+/// Result of scanning the pages directory
+#[derive(Debug, Clone)]
+pub struct ScanResult {
+    pub routes: Vec<Route>,
+    pub app: Option<Route>,
+    pub document: Option<Route>,
+    pub error: Option<Route>,
+    pub not_found: Option<Route>,
+}
+
+/// Scan the pages/ directory and produce routes
+pub fn scan_pages(pages_dir: &Path) -> anyhow::Result<ScanResult> {
+    let mut routes = Vec::new();
+    let mut app = None;
+    let mut document = None;
+    let mut error = None;
+    let mut not_found = None;
+
+    walk_dir(pages_dir, pages_dir, &mut |rel_path, abs_path| {
+        let route = parse_route(rel_path, abs_path);
+        debug!(pattern = %route.pattern, file = %route.file_path.display(), "scanned route");
+
+        match route.page_type {
+            PageType::App => app = Some(route),
+            PageType::Document => document = Some(route),
+            PageType::Error => error = Some(route),
+            PageType::NotFound => not_found = Some(route),
+            PageType::Regular => routes.push(route),
+        }
+    })?;
+
+    // Sort routes by specificity (highest first)
+    routes.sort_by(|a, b| b.specificity.cmp(&a.specificity));
+
+    Ok(ScanResult {
+        routes,
+        app,
+        document,
+        error,
+        not_found,
+    })
+}
+
+fn walk_dir(
+    base: &Path,
+    dir: &Path,
+    callback: &mut dyn FnMut(&Path, &Path),
+) -> anyhow::Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    let mut entries: Vec<_> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok())
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            // Skip directories starting with _ (except pages themselves can have _app etc.)
+            let dir_name = path.file_name().unwrap().to_string_lossy();
+            if dir_name.starts_with('.') || dir_name == "node_modules" || dir_name == "api" {
+                continue;
+            }
+            walk_dir(base, &path, callback)?;
+        } else if is_page_file(&path) {
+            let rel_path = path.strip_prefix(base).unwrap();
+            callback(rel_path, &path);
+        }
+    }
+
+    Ok(())
+}
+
+fn is_page_file(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some("tsx" | "ts" | "jsx" | "js")
+    )
+}
+
+fn parse_route(rel_path: &Path, abs_path: &Path) -> Route {
+    let stem = rel_path.with_extension("");
+    let stem_str = stem.to_string_lossy().replace('\\', "/");
+
+    // Detect special pages
+    let page_type = match stem_str.as_str() {
+        "_app" => PageType::App,
+        "_document" => PageType::Document,
+        "_error" => PageType::Error,
+        "404" => PageType::NotFound,
+        _ => PageType::Regular,
+    };
+
+    // Convert file path to URL pattern
+    let (pattern, dynamic_segments, specificity) = file_path_to_pattern(&stem_str);
+
+    Route {
+        pattern,
+        file_path: rel_path.to_path_buf(),
+        abs_path: abs_path.to_path_buf(),
+        dynamic_segments,
+        page_type,
+        specificity,
+    }
+}
+
+fn file_path_to_pattern(stem: &str) -> (String, Vec<DynamicSegment>, u32) {
+    let mut segments = Vec::new();
+    let mut dynamic_segments = Vec::new();
+    let mut specificity: u32 = 0;
+
+    // Handle index files
+    let parts: Vec<&str> = stem.split('/').collect();
+    for (i, part) in parts.iter().enumerate() {
+        // "index" at the end maps to "/"
+        if *part == "index" && i == parts.len() - 1 {
+            continue;
+        }
+
+        if let Some(segment) = parse_dynamic_segment(part) {
+            match &segment {
+                DynamicSegment::Single(name) => {
+                    segments.push(format!(":{name}"));
+                    specificity += 5;
+                }
+                DynamicSegment::CatchAll(name) => {
+                    segments.push(format!("*{name}"));
+                    specificity += 1;
+                }
+                DynamicSegment::OptionalCatchAll(name) => {
+                    segments.push(format!("*{name}"));
+                    specificity += 1;
+                }
+            }
+            dynamic_segments.push(segment);
+        } else {
+            segments.push(part.to_string());
+            specificity += 10;
+        }
+    }
+
+    let pattern = if segments.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{}", segments.join("/"))
+    };
+
+    (pattern, dynamic_segments, specificity)
+}
+
+fn parse_dynamic_segment(part: &str) -> Option<DynamicSegment> {
+    // [[...slug]] - optional catch-all
+    if part.starts_with("[[...") && part.ends_with("]]") {
+        let name = part[5..part.len() - 2].to_string();
+        return Some(DynamicSegment::OptionalCatchAll(name));
+    }
+
+    // [...slug] - catch-all
+    if part.starts_with("[...") && part.ends_with(']') {
+        let name = part[4..part.len() - 1].to_string();
+        return Some(DynamicSegment::CatchAll(name));
+    }
+
+    // [slug] - single dynamic
+    if part.starts_with('[') && part.ends_with(']') {
+        let name = part[1..part.len() - 1].to_string();
+        return Some(DynamicSegment::Single(name));
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_file_path_to_pattern() {
+        let (p, _, _) = file_path_to_pattern("index");
+        assert_eq!(p, "/");
+
+        let (p, _, _) = file_path_to_pattern("about");
+        assert_eq!(p, "/about");
+
+        let (p, segs, _) = file_path_to_pattern("blog/[slug]");
+        assert_eq!(p, "/blog/:slug");
+        assert_eq!(segs.len(), 1);
+
+        let (p, segs, _) = file_path_to_pattern("blog/[...slug]");
+        assert_eq!(p, "/blog/*slug");
+        assert_eq!(segs.len(), 1);
+
+        let (p, _, _) = file_path_to_pattern("blog/index");
+        assert_eq!(p, "/blog");
+    }
+
+    #[test]
+    fn test_specificity() {
+        let (_, _, s1) = file_path_to_pattern("blog/post");
+        let (_, _, s2) = file_path_to_pattern("blog/[slug]");
+        let (_, _, s3) = file_path_to_pattern("blog/[...slug]");
+        assert!(s1 > s2);
+        assert!(s2 > s3);
+    }
+
+    #[test]
+    fn test_parse_dynamic_segment() {
+        assert_eq!(
+            parse_dynamic_segment("[slug]"),
+            Some(DynamicSegment::Single("slug".to_string()))
+        );
+        assert_eq!(
+            parse_dynamic_segment("[...slug]"),
+            Some(DynamicSegment::CatchAll("slug".to_string()))
+        );
+        assert_eq!(
+            parse_dynamic_segment("[[...slug]]"),
+            Some(DynamicSegment::OptionalCatchAll("slug".to_string()))
+        );
+        assert_eq!(parse_dynamic_segment("about"), None);
+    }
+}

@@ -1,0 +1,48 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::Path;
+
+/// Maps route patterns to their client-side asset filenames
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AssetManifest {
+    pub build_id: String,
+    /// route pattern -> client chunk filename
+    pub pages: HashMap<String, PageAssets>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PageAssets {
+    pub js: String,
+}
+
+impl AssetManifest {
+    pub fn new(build_id: String) -> Self {
+        Self {
+            build_id,
+            pages: HashMap::new(),
+        }
+    }
+
+    pub fn add_page(&mut self, route_pattern: &str, js_filename: &str) {
+        self.pages.insert(
+            route_pattern.to_string(),
+            PageAssets {
+                js: js_filename.to_string(),
+            },
+        );
+    }
+
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+        let json = serde_json::to_string_pretty(self)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    pub fn load(path: &Path) -> anyhow::Result<Self> {
+        let json = std::fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&json)?)
+    }
+}

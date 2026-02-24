@@ -1,0 +1,22 @@
+[package]
+name = "rex_cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rex"
+path = "src/main.rs"
+
+[dependencies]
+rex_core = { path = "../rex_core" }
+rex_router = { path = "../rex_router" }
+rex_build = { path = "../rex_build" }
+rex_v8 = { path = "../rex_v8" }
+rex_server = { path = "../rex_server" }
+rex_dev = { path = "../rex_dev" }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+axum = { workspace = true }

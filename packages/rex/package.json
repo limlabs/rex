@@ -1,0 +1,16 @@
+{
+  "name": "rex",
+  "version": "0.1.0",
+  "description": "Rex - Next.js Pages Router reimplemented in Rust",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./document": "./src/document.js",
+    "./link": "./src/link.js",
+    "./router": "./src/router.js"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  }
+}

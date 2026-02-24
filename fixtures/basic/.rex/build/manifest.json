@@ -1,0 +1,14 @@
+{
+  "build_id": "d3377594e24b5bcd",
+  "pages": {
+    "/": {
+      "js": "index-d3377594.js"
+    },
+    "/blog/:slug": {
+      "js": "blog-[slug]-d3377594.js"
+    },
+    "/about": {
+      "js": "about-d3377594.js"
+    }
+  }
+}

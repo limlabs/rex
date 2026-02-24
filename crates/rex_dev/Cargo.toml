@@ -1,0 +1,22 @@
+[package]
+name = "rex_dev"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rex_core = { path = "../rex_core" }
+rex_router = { path = "../rex_router" }
+rex_build = { path = "../rex_build" }
+rex_v8 = { path = "../rex_v8" }
+rex_server = { path = "../rex_server" }
+notify = { workspace = true }
+notify-debouncer-mini = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+futures = { workspace = true }
+dashmap = { workspace = true }

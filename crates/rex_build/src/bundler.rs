@@ -1,0 +1,308 @@
+use crate::entries::generate_build_id;
+use crate::manifest::AssetManifest;
+use crate::transform::{TransformOptions, transform_file};
+use anyhow::Result;
+use rex_core::RexConfig;
+use rex_router::ScanResult;
+use std::fs;
+use std::path::Path;
+use tracing::info;
+
+/// Build result containing paths to generated bundles
+#[derive(Debug, Clone)]
+pub struct BuildResult {
+    pub build_id: String,
+    pub server_bundle_path: std::path::PathBuf,
+    pub manifest: AssetManifest,
+}
+
+/// Build both server and client bundles
+pub fn build_bundles(config: &RexConfig, scan: &ScanResult) -> Result<BuildResult> {
+    let build_id = generate_build_id();
+    let server_dir = config.server_build_dir();
+    let client_dir = config.client_build_dir();
+
+    fs::create_dir_all(&server_dir)?;
+    fs::create_dir_all(&client_dir)?;
+
+    info!("Building server bundle...");
+    let server_bundle_path = build_server_bundle(config, scan, &server_dir)?;
+
+    info!("Building client bundles...");
+    let manifest = build_client_bundles(config, scan, &client_dir, &build_id)?;
+
+    // Save manifest
+    manifest.save(&config.manifest_path())?;
+
+    Ok(BuildResult {
+        build_id,
+        server_bundle_path,
+        manifest,
+    })
+}
+
+/// Build the server bundle: transform all pages and concatenate with React SSR runtime
+fn build_server_bundle(
+    _config: &RexConfig,
+    scan: &ScanResult,
+    output_dir: &Path,
+) -> Result<std::path::PathBuf> {
+    let mut bundle = String::new();
+
+    // Preamble: we'll load React/ReactDOMServer separately in V8
+    bundle.push_str("// Rex Server Bundle - Auto-generated\n");
+    bundle.push_str("'use strict';\n\n");
+
+    let server_opts = TransformOptions {
+        server: true,
+        typescript: true,
+        jsx: true,
+        ..Default::default()
+    };
+
+    // Transform and include each page as a module in a registry
+    bundle.push_str("globalThis.__rex_pages = globalThis.__rex_pages || {};\n\n");
+
+    // Transform all route pages
+    for route in &scan.routes {
+        let source = fs::read_to_string(&route.abs_path)?;
+        let transformed = transform_file(&source, &route.abs_path.to_string_lossy(), &server_opts)?;
+        let module_name = route.module_name();
+
+        bundle.push_str(&format!("// Page: {}\n", module_name));
+        bundle.push_str(&format!(
+            "globalThis.__rex_pages['{}'] = (function() {{\n  var exports = {{}};\n  var module = {{ exports: exports }};\n",
+            module_name
+        ));
+        // Wrap in a function to give it its own scope
+        bundle.push_str("  (function(exports, module) {\n");
+        for line in transformed.lines() {
+            let trimmed = line.trim();
+
+            // Strip import statements — React is globally available in V8
+            if trimmed.starts_with("import ") {
+                continue;
+            }
+
+            // Convert ESM exports to CJS
+            if trimmed.starts_with("export default function ") {
+                let rest = &trimmed["export default ".len()..];
+                bundle.push_str("    module.exports.default = ");
+                bundle.push_str(rest);
+                bundle.push('\n');
+            } else if trimmed.starts_with("export default ") {
+                let rest = &trimmed["export default ".len()..];
+                bundle.push_str("    module.exports.default = ");
+                bundle.push_str(rest);
+                bundle.push('\n');
+            } else if trimmed.starts_with("export async function ") {
+                // export async function getServerSideProps(...)
+                let rest = &trimmed["export ".len()..]; // "async function X(...)"
+                let fn_name = rest
+                    .strip_prefix("async function ")
+                    .and_then(|s| s.split(&['(', ' ', '<'][..]).next())
+                    .unwrap_or("unknown");
+                bundle.push_str(&format!("    module.exports.{fn_name} = {rest}"));
+                bundle.push('\n');
+            } else if trimmed.starts_with("export function ") {
+                let rest = &trimmed["export ".len()..]; // "function X(...)"
+                let fn_name = rest
+                    .strip_prefix("function ")
+                    .and_then(|s| s.split(&['(', ' ', '<'][..]).next())
+                    .unwrap_or("unknown");
+                bundle.push_str(&format!("    module.exports.{fn_name} = {rest}"));
+                bundle.push('\n');
+            } else {
+                bundle.push_str("    ");
+                bundle.push_str(line);
+                bundle.push('\n');
+            }
+        }
+        bundle.push_str("  })(exports, module);\n");
+        bundle.push_str("  // Re-export\n");
+        bundle.push_str("  if (module.exports.default) exports.default = module.exports.default;\n");
+        bundle.push_str("  return exports;\n");
+        bundle.push_str("})();\n\n");
+    }
+
+    // Transform _app if present
+    if let Some(app) = &scan.app {
+        let source = fs::read_to_string(&app.abs_path)?;
+        let transformed = transform_file(&source, &app.abs_path.to_string_lossy(), &server_opts)?;
+        bundle.push_str("// _app\n");
+        bundle.push_str("globalThis.__rex_app = (function() {\n  var exports = {};\n  var module = { exports: exports };\n");
+        bundle.push_str("  (function(exports, module) {\n");
+        for line in transformed.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("import ") {
+                continue;
+            }
+            if trimmed.starts_with("export default function ") {
+                let rest = &trimmed["export default ".len()..];
+                bundle.push_str("    module.exports.default = ");
+                bundle.push_str(rest);
+                bundle.push('\n');
+            } else if trimmed.starts_with("export default ") {
+                let rest = &trimmed["export default ".len()..];
+                bundle.push_str("    module.exports.default = ");
+                bundle.push_str(rest);
+                bundle.push('\n');
+            } else {
+                bundle.push_str("    ");
+                bundle.push_str(line);
+                bundle.push('\n');
+            }
+        }
+        bundle.push_str("  })(exports, module);\n");
+        bundle.push_str("  if (module.exports.default) exports.default = module.exports.default;\n");
+        bundle.push_str("  return exports;\n");
+        bundle.push_str("})();\n\n");
+    }
+
+    // SSR functions
+    bundle.push_str(
+        r#"
+// SSR render function
+globalThis.__rex_render_page = function(routeKey, propsJson) {
+    var React = globalThis.__React;
+    var ReactDOMServer = globalThis.__ReactDOMServer;
+    if (!React || !ReactDOMServer) {
+        throw new Error('React/ReactDOMServer not loaded. Ensure react runtime is evaluated first.');
+    }
+
+    var page = globalThis.__rex_pages[routeKey];
+    if (!page) {
+        throw new Error('Page not found in registry: ' + routeKey);
+    }
+
+    var Component = page.default;
+    if (!Component) {
+        throw new Error('Page has no default export: ' + routeKey);
+    }
+
+    var props = JSON.parse(propsJson);
+    var element = React.createElement(Component, props);
+
+    // Wrap with _app if present
+    if (globalThis.__rex_app && globalThis.__rex_app.default) {
+        var App = globalThis.__rex_app.default;
+        element = React.createElement(App, { Component: Component, pageProps: props });
+    }
+
+    return ReactDOMServer.renderToString(element);
+};
+
+// getServerSideProps executor
+globalThis.__rex_gssp_resolved = null;
+globalThis.__rex_gssp_rejected = null;
+
+globalThis.__rex_get_server_side_props = function(routeKey, contextJson) {
+    var page = globalThis.__rex_pages[routeKey];
+    if (!page || !page.getServerSideProps) {
+        return JSON.stringify({ props: {} });
+    }
+
+    var context = JSON.parse(contextJson);
+    var result = page.getServerSideProps(context);
+
+    // Handle sync result or immediately-resolved promise
+    if (result && typeof result.then === 'function') {
+        globalThis.__rex_gssp_resolved = null;
+        globalThis.__rex_gssp_rejected = null;
+        result.then(
+            function(v) { globalThis.__rex_gssp_resolved = v; },
+            function(e) { globalThis.__rex_gssp_rejected = e; }
+        );
+        // Return sentinel — Rust will pump the microtask queue and call the resolver
+        return '__REX_ASYNC__';
+    }
+
+    return JSON.stringify(result);
+};
+
+globalThis.__rex_resolve_gssp = function() {
+    if (globalThis.__rex_gssp_rejected) {
+        throw globalThis.__rex_gssp_rejected;
+    }
+    if (globalThis.__rex_gssp_resolved !== null) {
+        return JSON.stringify(globalThis.__rex_gssp_resolved);
+    }
+    throw new Error('getServerSideProps promise did not resolve after microtask checkpoint');
+};
+"#,
+    );
+
+    let bundle_path = output_dir.join("server-bundle.js");
+    fs::write(&bundle_path, &bundle)?;
+    info!(path = %bundle_path.display(), "Server bundle written");
+
+    Ok(bundle_path)
+}
+
+/// Build client-side bundles: one per page
+fn build_client_bundles(
+    config: &RexConfig,
+    scan: &ScanResult,
+    output_dir: &Path,
+    build_id: &str,
+) -> Result<AssetManifest> {
+    let mut manifest = AssetManifest::new(build_id.to_string());
+
+    let client_opts = TransformOptions {
+        server: false,
+        typescript: true,
+        jsx: true,
+        fast_refresh: config.dev,
+    };
+
+    for route in &scan.routes {
+        let source = fs::read_to_string(&route.abs_path)?;
+        let transformed =
+            transform_file(&source, &route.abs_path.to_string_lossy(), &client_opts)?;
+        let module_name = route.module_name();
+
+        // Generate a filename from the route
+        let chunk_name = module_name.replace('/', "-");
+        let chunk_name = if chunk_name.is_empty() {
+            "index".to_string()
+        } else {
+            chunk_name
+        };
+        let filename = format!("{chunk_name}-{}.js", &build_id[..8]);
+
+        // For the prototype, write the transformed page as a standalone script
+        // that expects React to be globally available
+        let mut client_js = String::new();
+        client_js.push_str("// Rex Client Chunk - Auto-generated\n");
+        client_js.push_str("(function() {\n");
+        client_js.push_str("'use strict';\n");
+        client_js.push_str(&transformed);
+        client_js.push_str("\n");
+
+        // Hydration bootstrap
+        client_js.push_str(&format!(
+            r#"
+  var React = window.React;
+  var ReactDOM = window.ReactDOM;
+  if (typeof exports !== 'undefined' && exports.default) {{
+    var dataEl = document.getElementById('__REX_DATA__');
+    var pageProps = dataEl ? JSON.parse(dataEl.textContent) : {{}};
+    var container = document.getElementById('__rex');
+    if (container && ReactDOM.hydrateRoot) {{
+      var element = React.createElement(exports.default, pageProps);
+      window.__REX_ROOT__ = ReactDOM.hydrateRoot(container, element);
+    }}
+  }}
+"#
+        ));
+
+        client_js.push_str("})();\n");
+
+        let chunk_path = output_dir.join(&filename);
+        fs::write(&chunk_path, &client_js)?;
+
+        manifest.add_page(&route.pattern, &filename);
+    }
+
+    Ok(manifest)
+}
