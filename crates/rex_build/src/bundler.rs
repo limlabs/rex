@@ -264,6 +264,331 @@ fn build_client_bundles(
     Ok(manifest)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rex_core::{PageType, Route};
+    use std::path::PathBuf;
+
+    /// Create a temp project directory with page files, returning (config, scan)
+    fn setup_test_project(
+        pages: &[(&str, &str)],
+        app_source: Option<&str>,
+    ) -> (tempfile::TempDir, RexConfig, ScanResult) {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        // Create pages directory
+        let pages_dir = root.join("pages");
+        fs::create_dir_all(&pages_dir).unwrap();
+
+        let mut routes = Vec::new();
+        for (rel_path, source) in pages {
+            let abs = pages_dir.join(rel_path);
+            if let Some(parent) = abs.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(&abs, source).unwrap();
+
+            let file_path = PathBuf::from(rel_path);
+            let module_name = file_path
+                .with_extension("")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let pattern = if module_name == "index" {
+                "/".to_string()
+            } else {
+                format!("/{}", module_name.replace("[slug]", ":slug"))
+            };
+
+            routes.push(Route {
+                pattern,
+                file_path,
+                abs_path: abs,
+                dynamic_segments: vec![],
+                page_type: PageType::Regular,
+                specificity: 10,
+            });
+        }
+
+        let app = app_source.map(|src| {
+            let abs = pages_dir.join("_app.tsx");
+            fs::write(&abs, src).unwrap();
+            Route {
+                pattern: String::new(),
+                file_path: PathBuf::from("_app.tsx"),
+                abs_path: abs,
+                dynamic_segments: vec![],
+                page_type: PageType::App,
+                specificity: 0,
+            }
+        });
+
+        let config = RexConfig::new(root);
+        let scan = ScanResult {
+            routes,
+            app,
+            document: None,
+            error: None,
+            not_found: None,
+        };
+
+        (tmp, config, scan)
+    }
+
+    #[test]
+    fn test_server_bundle_structure() {
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                r#"
+                export default function Home() {
+                    return <div>Hello</div>;
+                }
+                "#,
+            )],
+            None,
+        );
+        let result = build_bundles(&config, &scan).unwrap();
+        let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
+
+        // Preamble
+        assert!(bundle.starts_with("// Rex Server Bundle"), "should start with preamble");
+        assert!(bundle.contains("'use strict'"), "should have strict mode");
+
+        // Page registry
+        assert!(bundle.contains("globalThis.__rex_pages"), "should init page registry");
+        assert!(
+            bundle.contains("globalThis.__rex_pages['index']"),
+            "should register index page"
+        );
+
+        // SSR runtime functions
+        assert!(
+            bundle.contains("globalThis.__rex_render_page"),
+            "should have render function"
+        );
+        assert!(
+            bundle.contains("globalThis.__rex_get_server_side_props"),
+            "should have GSSP executor"
+        );
+        assert!(
+            bundle.contains("globalThis.__rex_resolve_gssp"),
+            "should have GSSP resolver"
+        );
+        assert!(
+            bundle.contains("__REX_ASYNC__"),
+            "should have async sentinel"
+        );
+    }
+
+    #[test]
+    fn test_server_bundle_cjs_format() {
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                r#"
+                import React from 'react';
+                export default function Home() {
+                    return <div>Hello</div>;
+                }
+                export async function getServerSideProps() {
+                    return { props: {} };
+                }
+                "#,
+            )],
+            None,
+        );
+        let result = build_bundles(&config, &scan).unwrap();
+        let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
+
+        // Should use CJS, not ESM
+        // The page code is inside IIFEs, check it doesn't have raw ESM
+        assert!(
+            !bundle.contains("export default"),
+            "should not have ESM export default"
+        );
+        assert!(
+            !bundle.contains("import React"),
+            "should not have ESM import"
+        );
+
+        // Should have require() shim
+        assert!(
+            bundle.contains("var require = function(name)"),
+            "should have require shim"
+        );
+        assert!(
+            bundle.contains("globalThis.__React"),
+            "require shim should reference React global"
+        );
+
+        // CJS module wrapper
+        assert!(
+            bundle.contains("var exports = {}"),
+            "should have CJS exports"
+        );
+        assert!(
+            bundle.contains("var module = { exports: exports }"),
+            "should have CJS module"
+        );
+        assert!(
+            bundle.contains("return module.exports"),
+            "should return module.exports"
+        );
+    }
+
+    #[test]
+    fn test_server_bundle_multiple_pages() {
+        let (_tmp, config, scan) = setup_test_project(
+            &[
+                (
+                    "index.tsx",
+                    "export default function Home() { return <div>Home</div>; }",
+                ),
+                (
+                    "about.tsx",
+                    "export default function About() { return <div>About</div>; }",
+                ),
+                (
+                    "blog/[slug].tsx",
+                    "export default function Post({ slug }) { return <div>{slug}</div>; }",
+                ),
+            ],
+            None,
+        );
+        let result = build_bundles(&config, &scan).unwrap();
+        let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
+
+        assert!(
+            bundle.contains("globalThis.__rex_pages['index']"),
+            "should have index page"
+        );
+        assert!(
+            bundle.contains("globalThis.__rex_pages['about']"),
+            "should have about page"
+        );
+        assert!(
+            bundle.contains("globalThis.__rex_pages['blog/[slug]']"),
+            "should have dynamic page"
+        );
+    }
+
+    #[test]
+    fn test_server_bundle_with_app() {
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                "export default function Home() { return <div>Home</div>; }",
+            )],
+            Some(
+                r#"
+                export default function App({ Component, pageProps }) {
+                    return <Component {...pageProps} />;
+                }
+                "#,
+            ),
+        );
+        let result = build_bundles(&config, &scan).unwrap();
+        let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
+
+        assert!(
+            bundle.contains("globalThis.__rex_app"),
+            "should register _app"
+        );
+        assert!(
+            bundle.contains("// _app"),
+            "should have _app comment marker"
+        );
+    }
+
+    #[test]
+    fn test_client_bundles_per_page() {
+        let (_tmp, config, scan) = setup_test_project(
+            &[
+                (
+                    "index.tsx",
+                    "export default function Home() { return <div>Home</div>; }",
+                ),
+                (
+                    "about.tsx",
+                    "export default function About() { return <div>About</div>; }",
+                ),
+            ],
+            None,
+        );
+        let result = build_bundles(&config, &scan).unwrap();
+        let client_dir = config.client_build_dir();
+        let build_hash = &result.build_id[..8];
+
+        // Each page should have its own client chunk
+        let index_path = client_dir.join(format!("index-{build_hash}.js"));
+        let about_path = client_dir.join(format!("about-{build_hash}.js"));
+        assert!(index_path.exists(), "index client chunk should exist");
+        assert!(about_path.exists(), "about client chunk should exist");
+
+        // Client chunks should have hydration bootstrap
+        let index_js = fs::read_to_string(&index_path).unwrap();
+        assert!(
+            index_js.contains("hydrateRoot"),
+            "should have hydration code"
+        );
+        assert!(
+            index_js.contains("__REX_DATA__"),
+            "should reference data element"
+        );
+
+        // Client chunks should NOT have getServerSideProps
+        assert!(
+            !index_js.contains("getServerSideProps"),
+            "client chunk should strip GSSP"
+        );
+    }
+
+    #[test]
+    fn test_manifest_contents() {
+        let (_tmp, config, scan) = setup_test_project(
+            &[
+                (
+                    "index.tsx",
+                    "export default function Home() { return <div>Home</div>; }",
+                ),
+                (
+                    "about.tsx",
+                    "export default function About() { return <div>About</div>; }",
+                ),
+            ],
+            None,
+        );
+        let result = build_bundles(&config, &scan).unwrap();
+
+        // Manifest should track both pages
+        assert!(
+            result.manifest.pages.contains_key("/"),
+            "manifest should have index route"
+        );
+        assert!(
+            result.manifest.pages.contains_key("/about"),
+            "manifest should have about route"
+        );
+
+        // JS filenames should include build hash
+        let hash = &result.build_id[..8];
+        assert!(
+            result.manifest.pages["/"].js.contains(hash),
+            "JS filename should include build hash"
+        );
+
+        // Manifest should be saved to disk
+        let manifest_path = config.manifest_path();
+        assert!(manifest_path.exists(), "manifest.json should be written");
+
+        let loaded = AssetManifest::load(&manifest_path).unwrap();
+        assert_eq!(loaded.build_id, result.build_id);
+        assert_eq!(loaded.pages.len(), 2);
+    }
+}
+
 /// Build vendor scripts (React runtime wrapped for browser use).
 /// Reads React CJS/UMD from node_modules, wraps for global assignment,
 /// and writes to the client output directory.
