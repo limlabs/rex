@@ -5,6 +5,7 @@
 - **Rust** (1.75+): https://rustup.rs
 - **Node.js** (18+): only needed for test fixtures that use `react`/`react-dom`
 - **clang/llvm**: required by the `v8` crate to build V8 from source
+- **jq**: used by Claude Code hooks for auto-formatting (`brew install jq` on macOS)
 
 On macOS, Xcode Command Line Tools provides clang. On Linux, install `clang` and `libstdc++-dev`.
 
