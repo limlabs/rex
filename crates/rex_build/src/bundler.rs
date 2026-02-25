@@ -278,16 +278,6 @@ async fn build_server_bundle(
         banner: Some(rolldown::AddonOutputOption::String(Some(
             V8_POLYFILLS.to_string(),
         ))),
-        // In IIFE mode, rolldown generates global references for imported
-        // packages at the call site: `})(react, react_dom_server)`.
-        // React is fully bundled inside the IIFE, so these params are unused,
-        // but we must map them to something that exists to avoid ReferenceError.
-        globals: Some(rolldown_common::GlobalsOutputOption::FxHashMap({
-            let mut m = rustc_hash::FxHashMap::default();
-            m.insert("react".to_string(), "globalThis".to_string());
-            m.insert("react-dom/server".to_string(), "globalThis".to_string());
-            m
-        })),
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(vec![
                 (
@@ -317,6 +307,16 @@ async fn build_server_bundle(
                 ".ts".to_string(),
                 ".jsx".to_string(),
                 ".js".to_string(),
+            ]),
+            // Ensure runtime stubs (outside project tree) can resolve 'react'
+            // from the project's node_modules
+            modules: Some(vec![
+                config
+                    .project_root
+                    .join("node_modules")
+                    .to_string_lossy()
+                    .to_string(),
+                "node_modules".to_string(),
             ]),
             ..Default::default()
         }),
@@ -464,6 +464,16 @@ if (!window.__REX_NAVIGATING__) {{
                 ".ts".to_string(),
                 ".jsx".to_string(),
                 ".js".to_string(),
+            ]),
+            // Ensure runtime stubs (outside project tree) can resolve 'react'
+            // from the project's node_modules
+            modules: Some(vec![
+                config
+                    .project_root
+                    .join("node_modules")
+                    .to_string_lossy()
+                    .to_string(),
+                "node_modules".to_string(),
             ]),
             ..Default::default()
         }),

@@ -1,5 +1,6 @@
 import React from 'react';
 import Head from 'rex/head';
+import Link from 'rex/link';
 
 export default function About() {
   return (
@@ -10,7 +11,7 @@ export default function About() {
       </Head>
       <h1>About</h1>
       <p>Rex is a Next.js Pages Router reimplemented in Rust.</p>
-      <a href="/">Back to home</a>
+      <Link href="/">Back to home</Link>
     </div>
   );
 }

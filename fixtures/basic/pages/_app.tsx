@@ -1,12 +1,13 @@
 import React from 'react';
+import Link from 'rex/link';
 import '../styles/globals.css';
 
 export default function App({ Component, pageProps }) {
   return (
     <div className="app-wrapper">
       <nav>
-        <a href="/">Home</a>
-        <a href="/about">About</a>
+        <Link href="/">Home</Link>
+        <Link href="/about">About</Link>
       </nav>
       <Component {...pageProps} />
     </div>

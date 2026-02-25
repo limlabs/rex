@@ -1,4 +1,5 @@
 import React from 'react';
+import Link from 'rex/link';
 
 interface Props {
   slug: string;
@@ -10,7 +11,7 @@ export default function BlogPost({ slug, title }: Props) {
     <div>
       <h1>{title}</h1>
       <p>Slug: {slug}</p>
-      <a href="/">Back to home</a>
+      <Link href="/">Back to home</Link>
     </div>
   );
 }
