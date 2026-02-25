@@ -22,6 +22,13 @@ pub async fn build_bundles(config: &RexConfig, scan: &ScanResult) -> Result<Buil
     let server_dir = config.server_build_dir();
     let client_dir = config.client_build_dir();
 
+    // Clean output directories to remove stale artifacts from previous builds
+    if server_dir.exists() {
+        fs::remove_dir_all(&server_dir)?;
+    }
+    if client_dir.exists() {
+        fs::remove_dir_all(&client_dir)?;
+    }
     fs::create_dir_all(&server_dir)?;
     fs::create_dir_all(&client_dir)?;
 
@@ -305,6 +312,13 @@ async fn build_server_bundle(
     let mut module_types = rustc_hash::FxHashMap::default();
     module_types.insert(".css".to_string(), rolldown::ModuleType::Empty);
 
+    // Enable minification for production builds
+    let minify = if !config.dev {
+        Some(rolldown_common::RawMinifyOptions::Bool(true))
+    } else {
+        None
+    };
+
     let options = rolldown::BundlerOptions {
         input: Some(vec![rolldown::InputItem {
             name: Some("server-bundle".to_string()),
@@ -316,6 +330,7 @@ async fn build_server_bundle(
         entry_filenames: Some("server-bundle.js".to_string().into()),
         platform: Some(rolldown::Platform::Browser),
         module_types: Some(module_types),
+        minify: minify.clone(),
         banner: Some(rolldown::AddonOutputOption::String(Some(
             V8_POLYFILLS.to_string(),
         ))),
@@ -509,6 +524,13 @@ if (!window.__REX_NAVIGATING__) {{
     let mut module_types = rustc_hash::FxHashMap::default();
     module_types.insert(".css".to_string(), rolldown::ModuleType::Empty);
 
+    // Enable minification for production builds
+    let minify = if !config.dev {
+        Some(rolldown_common::RawMinifyOptions::Bool(true))
+    } else {
+        None
+    };
+
     let options = rolldown::BundlerOptions {
         input: Some(inputs),
         cwd: Some(config.project_root.clone()),
@@ -519,6 +541,7 @@ if (!window.__REX_NAVIGATING__) {{
         asset_filenames: Some(format!("[name]-{hash}.[ext]").into()),
         platform: Some(rolldown::Platform::Browser),
         module_types: Some(module_types),
+        minify,
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(vec![
                 (
@@ -854,7 +877,7 @@ mod tests {
             }
         });
 
-        let config = RexConfig::new(root);
+        let config = RexConfig::new(root).with_dev(true);
         let scan = ScanResult {
             routes,
             api_routes: vec![],
@@ -1198,7 +1221,7 @@ mod tests {
         )
         .unwrap();
 
-        let config = RexConfig::new(root);
+        let config = RexConfig::new(root).with_dev(true);
         let scan = ScanResult {
             routes: vec![Route {
                 pattern: "/".to_string(),

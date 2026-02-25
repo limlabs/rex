@@ -190,21 +190,79 @@ async fn cmd_build(root: PathBuf) -> Result<()> {
     let config = RexConfig::new(root);
     config.validate()?;
 
-    info!("Building...");
+    let start = std::time::Instant::now();
+    info!("Building for production...");
 
     let scan = scan_pages(&config.pages_dir)?;
     info!(routes = scan.routes.len(), "Routes scanned");
 
     let build_result = build_bundles(&config, &scan).await?;
-    info!(build_id = %build_result.build_id, "Build complete");
+    let elapsed = start.elapsed();
 
-    info!(
-        server = %build_result.server_bundle_path.display(),
-        manifest = %config.manifest_path().display(),
-        "Output written"
+    // Print build summary
+    eprintln!();
+    eprintln!("  Build complete in {:.2}s", elapsed.as_secs_f64());
+    eprintln!("  Build ID: {}", build_result.build_id);
+    eprintln!();
+
+    // Server bundle size
+    let server_size = std::fs::metadata(&build_result.server_bundle_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    eprintln!(
+        "  Server bundle:  {}",
+        format_size(server_size)
     );
 
+    // Client bundle sizes
+    let client_dir = config.client_build_dir();
+    let mut total_client: u64 = 0;
+    let mut page_sizes: Vec<(String, u64)> = Vec::new();
+    let mut chunk_sizes: Vec<(String, u64)> = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(&client_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "js") {
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let name = path.file_name().unwrap().to_string_lossy().to_string();
+                total_client += size;
+                if name.starts_with("chunk-") {
+                    chunk_sizes.push((name, size));
+                } else {
+                    page_sizes.push((name, size));
+                }
+            }
+        }
+    }
+
+    eprintln!();
+    eprintln!("  Client bundles: {} total", format_size(total_client));
+
+    // Show page entry chunks
+    page_sizes.sort_by(|a, b| a.0.cmp(&b.0));
+    for (name, size) in &page_sizes {
+        eprintln!("    {:<40} {}", name, format_size(*size));
+    }
+
+    // Show shared chunks
+    chunk_sizes.sort_by(|a, b| b.1.cmp(&a.1)); // largest first
+    for (name, size) in &chunk_sizes {
+        eprintln!("    {:<40} {}", name, format_size(*size));
+    }
+
+    eprintln!();
     Ok(())
+}
+
+fn format_size(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
