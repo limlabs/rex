@@ -293,6 +293,12 @@ async fn build_server_bundle(
                     )],
                 ),
                 (
+                    "rex/router".to_string(),
+                    vec![Some(
+                        runtime_dir.join("router.js").to_string_lossy().to_string(),
+                    )],
+                ),
+                (
                     "rex/document".to_string(),
                     vec![Some(
                         runtime_dir
@@ -456,6 +462,15 @@ if (!window.__REX_NAVIGATING__) {{
                     "rex/head".to_string(),
                     vec![Some(
                         runtime_dir.join("head.js").to_string_lossy().to_string(),
+                    )],
+                ),
+                (
+                    "rex/router".to_string(),
+                    vec![Some(
+                        runtime_dir
+                            .join("use-router.js")
+                            .to_string_lossy()
+                            .to_string(),
                     )],
                 ),
             ]),

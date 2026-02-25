@@ -1,6 +1,6 @@
 // Rex Client Router — client-side navigation without full page reloads.
 // Reads window.__REX_MANIFEST__ (embedded in HTML) for route-to-chunk mapping.
-// Used by rex/link's onClick handler via window.__REX_ROUTER.
+// Exposes window.__REX_ROUTER with navigation methods, state, and events.
 (function() {
   var manifest = window.__REX_MANIFEST__;
   if (!manifest) return;
@@ -10,13 +10,45 @@
   var prefetchCache = {};
   var loadingChunks = {};
 
+  // --- Event emitter ---
+
+  var listeners = {};
+
+  var events = {
+    on: function(event, fn) {
+      (listeners[event] = listeners[event] || []).push(fn);
+    },
+    off: function(event, fn) {
+      var arr = listeners[event];
+      if (arr) listeners[event] = arr.filter(function(f) { return f !== fn; });
+    },
+    emit: function(event) {
+      var args = Array.prototype.slice.call(arguments, 1);
+      var arr = listeners[event];
+      if (arr) for (var i = 0; i < arr.length; i++) arr[i].apply(null, args);
+    }
+  };
+
+  // --- Query string parsing ---
+
+  function parseQuery(search) {
+    var query = {};
+    if (!search || search.length < 2) return query;
+    var pairs = search.substring(1).split('&');
+    for (var i = 0; i < pairs.length; i++) {
+      var idx = pairs[i].indexOf('=');
+      if (idx > 0) {
+        query[decodeURIComponent(pairs[i].substring(0, idx))] =
+          decodeURIComponent(pairs[i].substring(idx + 1));
+      }
+    }
+    return query;
+  }
+
   // --- Route matching ---
 
   function matchRoute(pathname) {
-    // Exact static match first
     if (pages[pathname]) return { pattern: pathname, params: {} };
-
-    // Dynamic pattern match
     for (var pattern in pages) {
       if (pattern.indexOf(':') === -1) continue;
       var params = matchDynamic(pattern, pathname);
@@ -38,6 +70,34 @@
       }
     }
     return params;
+  }
+
+  // --- Router state ---
+
+  var initialMatch = matchRoute(window.location.pathname);
+  var initialQuery = parseQuery(window.location.search);
+  if (initialMatch) {
+    for (var k in initialMatch.params) initialQuery[k] = initialMatch.params[k];
+  }
+
+  var state = {
+    pathname: initialMatch ? initialMatch.pattern : window.location.pathname,
+    asPath: window.location.pathname + window.location.search,
+    query: initialQuery,
+    route: initialMatch ? initialMatch.pattern : window.location.pathname
+  };
+
+  function updateState(match, url) {
+    var a = document.createElement('a');
+    a.href = url;
+    var query = parseQuery(a.search);
+    if (match) {
+      for (var k in match.params) query[k] = match.params[k];
+    }
+    state.pathname = match ? match.pattern : a.pathname;
+    state.route = state.pathname;
+    state.asPath = a.pathname + a.search;
+    state.query = query;
   }
 
   // --- Data fetching ---
@@ -93,12 +153,15 @@
     var a = document.createElement('a');
     a.href = url;
     var pathname = a.pathname;
+    var fullUrl = a.pathname + a.search;
 
     var match = matchRoute(pathname);
     if (!match) {
       window.location.href = url;
       return Promise.resolve();
     }
+
+    events.emit('routeChangeStart', fullUrl);
 
     var dataPromise = prefetchCache[pathname] || fetchPageData(pathname);
     delete prefetchCache[pathname];
@@ -123,12 +186,16 @@
 
       // Update URL (skip on popstate — browser already updated it)
       if (!opts.popstate) {
+        events.emit('beforeHistoryChange', fullUrl);
         if (opts.replace) {
           history.replaceState({ __rex: pathname }, '', url);
         } else {
           history.pushState({ __rex: pathname }, '', url);
         }
       }
+
+      // Update router state
+      updateState(match, url);
 
       // Update data element
       var dataEl = document.getElementById('__REX_DATA__');
@@ -147,8 +214,11 @@
       if (!opts.popstate) {
         window.scrollTo(0, 0);
       }
+
+      events.emit('routeChangeComplete', fullUrl);
     }).catch(function(err) {
       console.error('Rex navigation failed:', err);
+      events.emit('routeChangeError', err, fullUrl);
       window.location.href = url;
     });
   }
@@ -167,8 +237,12 @@
   // --- Public API ---
 
   window.__REX_ROUTER = {
-    push: function(url) { navigate(url); },
-    replace: function(url) { navigate(url, { replace: true }); },
+    // Navigation methods
+    push: function(url) { return navigate(url); },
+    replace: function(url) { return navigate(url, { replace: true }); },
+    back: function() { history.back(); },
+    forward: function() { history.forward(); },
+    reload: function() { window.location.reload(); },
     prefetch: function(url) {
       var a = document.createElement('a');
       a.href = url;
@@ -176,6 +250,10 @@
       if (!prefetchCache[pathname]) {
         prefetchCache[pathname] = fetchPageData(pathname);
       }
-    }
+    },
+    // State (mutable — updated on navigation)
+    state: state,
+    // Event system
+    events: events
   };
 })();
