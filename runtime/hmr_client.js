@@ -63,58 +63,39 @@
 
     overlay = document.createElement('div');
     overlay.id = '__rex_error_overlay';
-    overlay.style.cssText = [
-      'position: fixed',
-      'top: 0',
-      'left: 0',
-      'width: 100%',
-      'height: 100%',
-      'background: rgba(0, 0, 0, 0.85)',
-      'color: #ff5555',
-      'font-family: monospace',
-      'font-size: 14px',
-      'padding: 40px',
-      'z-index: 99999',
-      'overflow: auto',
-      'box-sizing: border-box',
-    ].join(';');
-
-    var title = document.createElement('h2');
-    title.style.cssText = 'color: #ff5555; margin: 0 0 20px 0; font-size: 20px;';
-    title.textContent = 'Build Error';
-
-    var fileEl = null;
-    if (file) {
-      fileEl = document.createElement('div');
-      fileEl.style.cssText = 'color: #888; margin-bottom: 10px;';
-      fileEl.textContent = file;
-    }
-
-    var pre = document.createElement('pre');
-    pre.style.cssText = 'white-space: pre-wrap; word-wrap: break-word; color: #fff;';
-    pre.textContent = message;
-
-    var dismiss = document.createElement('button');
-    dismiss.textContent = 'Dismiss';
-    dismiss.style.cssText = [
-      'position: absolute',
-      'top: 10px',
-      'right: 10px',
-      'background: none',
-      'border: 1px solid #666',
-      'color: #999',
-      'padding: 5px 10px',
-      'cursor: pointer',
-      'font-family: monospace',
-    ].join(';');
-    dismiss.onclick = removeOverlay;
-
-    overlay.appendChild(dismiss);
-    overlay.appendChild(title);
-    if (fileEl) overlay.appendChild(fileEl);
-    overlay.appendChild(pre);
+    overlay.innerHTML = '<style>' +
+      '#__rex_error_overlay{position:fixed;top:0;left:0;width:100%;height:100%;' +
+      'background:#1a1a2e;color:#e0e0e0;font-family:"SF Mono","Fira Code","JetBrains Mono",Menlo,Consolas,monospace;' +
+      'font-size:14px;z-index:99999;overflow:auto;box-sizing:border-box;display:flex;align-items:flex-start;justify-content:center;padding:60px 20px}' +
+      '#__rex_error_overlay .eo-container{max-width:860px;width:100%}' +
+      '#__rex_error_overlay .eo-badge{display:inline-block;background:#e63946;color:#fff;font-size:11px;font-weight:700;' +
+      'text-transform:uppercase;letter-spacing:.5px;padding:4px 10px;border-radius:4px;margin-bottom:16px}' +
+      '#__rex_error_overlay .eo-file{color:#8892b0;font-size:13px;margin-bottom:16px;padding:8px 12px;' +
+      'background:rgba(255,255,255,.04);border-radius:6px;border-left:3px solid #e63946}' +
+      '#__rex_error_overlay .eo-stack{background:#0d1117;border:1px solid rgba(255,255,255,.08);border-radius:8px;' +
+      'padding:20px;overflow-x:auto;font-size:13px;line-height:1.7;white-space:pre-wrap;word-wrap:break-word;color:#f0c674}' +
+      '#__rex_error_overlay .eo-hint{margin-top:24px;font-size:12px;color:#555}' +
+      '#__rex_error_overlay .eo-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;background:#2ecc71}' +
+      '#__rex_error_overlay .eo-dismiss{position:absolute;top:20px;right:20px;background:none;border:1px solid rgba(255,255,255,.15);' +
+      'color:#888;padding:6px 14px;cursor:pointer;font-family:inherit;font-size:12px;border-radius:4px}' +
+      '#__rex_error_overlay .eo-dismiss:hover{border-color:rgba(255,255,255,.3);color:#bbb}' +
+      '</style>' +
+      '<div class="eo-container">' +
+      '<button class="eo-dismiss" id="__rex_eo_dismiss">Dismiss</button>' +
+      '<div class="eo-badge">Build Error</div>' +
+      (file ? '<div class="eo-file" id="__rex_eo_file"></div>' : '') +
+      '<div class="eo-stack" id="__rex_eo_msg"></div>' +
+      '<div class="eo-hint"><span class="eo-dot"></span>Connected — save a file to reload</div>' +
+      '</div>';
 
     document.body.appendChild(overlay);
+
+    // Set text content (safe from XSS)
+    document.getElementById('__rex_eo_msg').textContent = message;
+    if (file && document.getElementById('__rex_eo_file')) {
+      document.getElementById('__rex_eo_file').textContent = file;
+    }
+    document.getElementById('__rex_eo_dismiss').onclick = removeOverlay;
   }
 
   function removeOverlay() {

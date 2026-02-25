@@ -34,6 +34,134 @@ fn snapshot(state: &Arc<AppState>) -> HotState {
     state.hot.read().unwrap().clone()
 }
 
+/// Generate a full-page error overlay for dev mode.
+/// Includes HMR WebSocket connection for auto-reload on fix.
+fn dev_error_overlay(title: &str, message: &str, file: Option<&str>) -> String {
+    let escaped_message = message
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    let file_section = file
+        .map(|f| {
+            let escaped = f.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+            format!(r#"<div class="file">{escaped}</div>"#)
+        })
+        .unwrap_or_default();
+
+    format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>{title}</title>
+<style>
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+body {{
+  background: #1a1a2e;
+  color: #e0e0e0;
+  font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace;
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 60px 20px;
+}}
+.container {{
+  max-width: 860px;
+  width: 100%;
+}}
+.badge {{
+  display: inline-block;
+  background: #e63946;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+}}
+h1 {{
+  font-size: 22px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 20px;
+  line-height: 1.4;
+}}
+.file {{
+  color: #8892b0;
+  font-size: 13px;
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 6px;
+  border-left: 3px solid #e63946;
+}}
+.stack {{
+  background: #0d1117;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 20px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  color: #f0c674;
+}}
+.hint {{
+  margin-top: 24px;
+  font-size: 12px;
+  color: #555;
+}}
+.dot {{
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+  background: #e63946;
+  animation: pulse 2s infinite;
+}}
+.dot.connected {{ background: #2ecc71; animation: none; }}
+@keyframes pulse {{ 0%,100% {{ opacity: 1; }} 50% {{ opacity: 0.3; }} }}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="badge">{title}</div>
+  {file_section}
+  <div class="stack">{escaped_message}</div>
+  <div class="hint"><span class="dot" id="dot"></span><span id="status">Waiting for changes...</span></div>
+</div>
+<script>
+(function() {{
+  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var ws = new WebSocket(proto + '//' + location.host + '/_rex/hmr');
+  var dot = document.getElementById('dot');
+  var status = document.getElementById('status');
+  ws.onopen = function() {{
+    dot.className = 'dot connected';
+    status.textContent = 'Connected — save a file to reload';
+  }};
+  ws.onmessage = function(e) {{
+    try {{ var m = JSON.parse(e.data); }} catch(x) {{ return; }}
+    if (m.type === 'update' || m.type === 'full-reload') location.reload();
+  }};
+  ws.onclose = function() {{
+    dot.className = 'dot';
+    status.textContent = 'Disconnected — retrying...';
+    setTimeout(function() {{ location.reload(); }}, 2000);
+  }};
+}})();
+</script>
+</body>
+</html>"#
+    )
+}
+
 /// Render a custom error page (404 or _error) via SSR, returning the full HTML document.
 async fn render_error_page(
     state: &Arc<AppState>,
@@ -283,7 +411,9 @@ pub async fn page_handler(
         Ok(Ok(json)) => json,
         Ok(Err(e)) => {
             error!("GSSP error: {e}");
-            if hot.has_custom_error {
+            if state.is_dev {
+                return Html(dev_error_overlay("Server Props Error", &e.to_string(), None)).into_response();
+            } else if hot.has_custom_error {
                 let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
                 return render_error_page(&state, &hot, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
             }
@@ -291,7 +421,9 @@ pub async fn page_handler(
         }
         Err(e) => {
             error!("Isolate pool error: {e}");
-            if hot.has_custom_error {
+            if state.is_dev {
+                return Html(dev_error_overlay("Runtime Error", &e.to_string(), None)).into_response();
+            } else if hot.has_custom_error {
                 let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
                 return render_error_page(&state, &hot, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
             }
@@ -344,9 +476,7 @@ pub async fn page_handler(
         Ok(Err(e)) => {
             error!("SSR render error: {e}");
             if state.is_dev {
-                let err_html = format!("<div style=\"color:red;font-family:monospace;padding:20px;\"><h2>SSR Error</h2><pre>{e}</pre></div>");
-                let document = assemble_document(&err_html, "", &render_props, &hot.manifest.vendor_scripts, &[], &hot.manifest.global_css, hot.manifest.app_script.as_deref(), &hot.build_id, state.is_dev, None, None);
-                return Html(document).into_response();
+                return Html(dev_error_overlay("SSR Error", &e.to_string(), None)).into_response();
             } else if hot.has_custom_error {
                 let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
                 return render_error_page(&state, &hot, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
@@ -356,7 +486,9 @@ pub async fn page_handler(
         }
         Err(e) => {
             error!("Isolate pool error: {e}");
-            if hot.has_custom_error {
+            if state.is_dev {
+                return Html(dev_error_overlay("Runtime Error", &e.to_string(), None)).into_response();
+            } else if hot.has_custom_error {
                 let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
                 return render_error_page(&state, &hot, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
             }
