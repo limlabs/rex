@@ -348,6 +348,34 @@ async fn build_server_bundle(
                             .to_string(),
                     )],
                 ),
+                // Next.js compatibility shims
+                (
+                    "next/head".to_string(),
+                    vec![Some(
+                        runtime_dir.join("head.js").to_string_lossy().to_string(),
+                    )],
+                ),
+                (
+                    "next/link".to_string(),
+                    vec![Some(
+                        runtime_dir.join("link.js").to_string_lossy().to_string(),
+                    )],
+                ),
+                (
+                    "next/router".to_string(),
+                    vec![Some(
+                        runtime_dir.join("router.js").to_string_lossy().to_string(),
+                    )],
+                ),
+                (
+                    "next/document".to_string(),
+                    vec![Some(
+                        runtime_dir
+                            .join("document.js")
+                            .to_string_lossy()
+                            .to_string(),
+                    )],
+                ),
             ]),
             extensions: Some(vec![
                 ".tsx".to_string(),
@@ -507,6 +535,28 @@ if (!window.__REX_NAVIGATING__) {{
                 ),
                 (
                     "rex/router".to_string(),
+                    vec![Some(
+                        runtime_dir
+                            .join("use-router.js")
+                            .to_string_lossy()
+                            .to_string(),
+                    )],
+                ),
+                // Next.js compatibility shims
+                (
+                    "next/link".to_string(),
+                    vec![Some(
+                        runtime_dir.join("link.js").to_string_lossy().to_string(),
+                    )],
+                ),
+                (
+                    "next/head".to_string(),
+                    vec![Some(
+                        runtime_dir.join("head.js").to_string_lossy().to_string(),
+                    )],
+                ),
+                (
+                    "next/router".to_string(),
                     vec![Some(
                         runtime_dir
                             .join("use-router.js")
@@ -1241,6 +1291,39 @@ mod tests {
         assert!(
             index_js.contains("__REX_APP__"),
             "page hydration should check for __REX_APP__"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_next_import_shims() {
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                r#"
+                import Head from 'next/head';
+                import Link from 'next/link';
+                export default function Home() {
+                    return <div><Head><title>Test</title></Head><Link href="/about">About</Link></div>;
+                }
+                "#,
+            )],
+            None,
+        );
+
+        // Should build without errors — next/* aliases resolve to rex runtime stubs
+        let result = build_bundles(&config, &scan).await.unwrap();
+
+        // Server bundle should contain the page
+        let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
+        assert!(
+            bundle.contains("__rex_pages"),
+            "server bundle should register pages"
+        );
+
+        // Client bundle should exist for the page
+        assert!(
+            result.manifest.pages.contains_key("/"),
+            "manifest should have index page"
         );
     }
 }
