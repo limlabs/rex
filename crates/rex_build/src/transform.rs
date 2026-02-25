@@ -13,6 +13,10 @@ use swc_ecma_transforms_typescript::strip;
 pub struct TransformOptions {
     /// Whether this is a server-side transform (keeps getServerSideProps)
     pub server: bool,
+    /// Whether to apply CJS module transform (ESM → require/module.exports)
+    pub cjs: bool,
+    /// Whether to use Classic JSX runtime (React.createElement) vs Automatic (jsx-runtime)
+    pub classic_jsx: bool,
     /// Whether to enable React Fast Refresh (dev mode)
     pub fast_refresh: bool,
     /// Whether the source is TypeScript
@@ -25,6 +29,8 @@ impl Default for TransformOptions {
     fn default() -> Self {
         Self {
             server: false,
+            cjs: false,
+            classic_jsx: false,
             fast_refresh: false,
             typescript: true,
             jsx: true,
@@ -80,12 +86,11 @@ pub fn transform_file(source: &str, filename: &str, opts: &TransformOptions) -> 
         }
 
         // 3. JSX transform
-        // Server bundles use Classic runtime (React.createElement) since they run
-        // in V8 as scripts with React available globally.
-        // Client bundles use Automatic runtime (jsx-runtime imports).
+        // Classic runtime uses React.createElement (works with global React).
+        // Automatic runtime uses jsx-runtime imports (needs bundler support).
         if opts.jsx {
             let jsx_opts = react_transform::Options {
-                runtime: Some(if opts.server {
+                runtime: Some(if opts.classic_jsx {
                     Runtime::Classic
                 } else {
                     Runtime::Automatic
@@ -102,10 +107,9 @@ pub fn transform_file(source: &str, filename: &str, opts: &TransformOptions) -> 
             .process(&mut program);
         }
 
-        // 4. CJS module transform for server bundles
-        // Converts ESM imports/exports to require()/module.exports at the AST level,
-        // replacing the fragile line-by-line string matching in the bundler.
-        if opts.server {
+        // 4. CJS module transform
+        // Converts ESM imports/exports to require()/module.exports at the AST level.
+        if opts.cjs {
             common_js(
                 Default::default(), // Resolver::Default — no actual path resolution
                 unresolved_mark,
@@ -242,6 +246,8 @@ mod tests {
         // Server transform keeps GSSP
         let server_result = transform_file(source, "index.tsx", &TransformOptions {
             server: true,
+            cjs: true,
+            classic_jsx: true,
             ..Default::default()
         }).unwrap();
         assert!(server_result.code.contains("getServerSideProps"));
@@ -272,6 +278,8 @@ mod tests {
 
         let result = transform_file(source, "page.tsx", &TransformOptions {
             server: true,
+            cjs: true,
+            classic_jsx: true,
             typescript: false,
             jsx: false,
             ..Default::default()

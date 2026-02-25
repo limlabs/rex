@@ -4,8 +4,9 @@ use crate::transform::{TransformOptions, transform_file};
 use anyhow::Result;
 use rex_core::RexConfig;
 use rex_router::ScanResult;
+use rolldown_common::Output;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::info;
 
 /// Build result containing paths to generated bundles
@@ -17,7 +18,7 @@ pub struct BuildResult {
 }
 
 /// Build both server and client bundles
-pub fn build_bundles(config: &RexConfig, scan: &ScanResult) -> Result<BuildResult> {
+pub async fn build_bundles(config: &RexConfig, scan: &ScanResult) -> Result<BuildResult> {
     let build_id = generate_build_id();
     let server_dir = config.server_build_dir();
     let client_dir = config.client_build_dir();
@@ -29,7 +30,7 @@ pub fn build_bundles(config: &RexConfig, scan: &ScanResult) -> Result<BuildResul
     let server_bundle_path = build_server_bundle(config, scan, &server_dir)?;
 
     info!("Building client bundles...");
-    let manifest = build_client_bundles(config, scan, &client_dir, &build_id)?;
+    let manifest = build_client_bundles(config, scan, &client_dir, &build_id).await?;
 
     // Save manifest
     manifest.save(&config.manifest_path())?;
@@ -72,6 +73,8 @@ fn build_server_bundle(
 
     let server_opts = TransformOptions {
         server: true,
+        cjs: true,
+        classic_jsx: true,
         typescript: true,
         jsx: true,
         ..Default::default()
@@ -82,6 +85,7 @@ fn build_server_bundle(
         r#"var require = function(name) {
     if (name === 'react') return { default: globalThis.__React, createElement: globalThis.__React.createElement };
     if (name === 'rex/head') return { default: globalThis.__rex_head_component, __esModule: true };
+    if (name === 'rex/link') return { default: globalThis.__rex_link_component, __esModule: true };
     if (name === 'rex/document') return { default: (globalThis.__rex_document_components || {}).Html, Html: (globalThis.__rex_document_components || {}).Html, Head: (globalThis.__rex_document_components || {}).Head, Main: (globalThis.__rex_document_components || {}).Main, NextScript: (globalThis.__rex_document_components || {}).NextScript, __esModule: true };
     return {};
 };
@@ -316,128 +320,287 @@ globalThis.__rex_resolve_api = function() {
     Ok(bundle_path)
 }
 
-/// Build client-side bundles: one per page, plus vendor scripts
-fn build_client_bundles(
+/// Build client-side bundles using rolldown.
+///
+/// Rolldown handles the full pipeline: parsing TSX/JSX, resolving imports from
+/// node_modules (including React), transforming, and code-splitting shared
+/// dependencies into separate chunks. Output is ESM.
+async fn build_client_bundles(
     config: &RexConfig,
     scan: &ScanResult,
     output_dir: &Path,
     build_id: &str,
 ) -> Result<AssetManifest> {
     let mut manifest = AssetManifest::new(build_id.to_string());
+    let hash = &build_id[..8];
 
-    // Build vendor scripts (React runtime for the browser)
-    manifest.vendor_scripts = build_vendor_scripts(config, output_dir, build_id)?;
+    // Collect and copy CSS files referenced by source (rolldown doesn't bundle CSS)
+    collect_css_files(config, scan, output_dir, build_id, &mut manifest)?;
 
-    let client_opts = TransformOptions {
-        server: false,
-        typescript: true,
-        jsx: true,
-        fast_refresh: config.dev,
+    // Runtime files for rex/link, rex/head aliases
+    let runtime_dir = runtime_client_dir()?;
+
+    // Generate virtual entry files for rolldown
+    let entries_dir = output_dir.join("_entries");
+    fs::create_dir_all(&entries_dir)?;
+
+    let mut inputs = Vec::new();
+
+    // _app entry
+    if let Some(app) = &scan.app {
+        let page_path = app.abs_path.to_string_lossy().replace('\\', "/");
+        let entry_code = format!(
+            "import App from '{page_path}';\nwindow.__REX_APP__ = App;\n"
+        );
+        let entry_path = entries_dir.join("_app.js");
+        fs::write(&entry_path, &entry_code)?;
+        inputs.push(rolldown::InputItem {
+            name: Some("_app".to_string()),
+            import: entry_path.to_string_lossy().to_string(),
+        });
+    }
+
+    // Page entries
+    for route in &scan.routes {
+        let chunk_name = route_to_chunk_name(route);
+        let page_path = route.abs_path.to_string_lossy().replace('\\', "/");
+        let entry_code = format!(
+            r#"import {{ createElement }} from 'react';
+import {{ hydrateRoot }} from 'react-dom/client';
+import Page from '{page_path}';
+
+window.__REX_PAGES = window.__REX_PAGES || {{}};
+window.__REX_PAGES['{route_pattern}'] = {{ default: Page }};
+
+if (!window.__REX_NAVIGATING__) {{
+  var dataEl = document.getElementById('__REX_DATA__');
+  var pageProps = dataEl ? JSON.parse(dataEl.textContent) : {{}};
+  var container = document.getElementById('__rex');
+  if (container) {{
+    var element;
+    if (window.__REX_APP__) {{
+      element = createElement(window.__REX_APP__, {{ Component: Page, pageProps: pageProps }});
+    }} else {{
+      element = createElement(Page, pageProps);
+    }}
+    window.__REX_ROOT__ = hydrateRoot(container, element);
+  }}
+}}
+"#,
+            route_pattern = route.pattern,
+        );
+        let entry_path = entries_dir.join(format!("{chunk_name}.js"));
+        fs::write(&entry_path, &entry_code)?;
+        inputs.push(rolldown::InputItem {
+            name: Some(chunk_name),
+            import: entry_path.to_string_lossy().to_string(),
+        });
+    }
+
+    // CSS imports → empty modules (rolldown removed CSS bundling support)
+    let mut module_types = rustc_hash::FxHashMap::default();
+    module_types.insert(".css".to_string(), rolldown::ModuleType::Empty);
+
+    let options = rolldown::BundlerOptions {
+        input: Some(inputs),
+        cwd: Some(config.project_root.clone()),
+        format: Some(rolldown::OutputFormat::Esm),
+        dir: Some(output_dir.to_string_lossy().to_string()),
+        entry_filenames: Some(format!("[name]-{hash}.js").into()),
+        chunk_filenames: Some(format!("chunk-[name]-{hash}.js").into()),
+        asset_filenames: Some(format!("[name]-{hash}.[ext]").into()),
+        platform: Some(rolldown::Platform::Browser),
+        module_types: Some(module_types),
+        resolve: Some(rolldown::ResolveOptions {
+            alias: Some(vec![
+                (
+                    "rex/link".to_string(),
+                    vec![Some(
+                        runtime_dir.join("link.js").to_string_lossy().to_string(),
+                    )],
+                ),
+                (
+                    "rex/head".to_string(),
+                    vec![Some(
+                        runtime_dir.join("head.js").to_string_lossy().to_string(),
+                    )],
+                ),
+            ]),
+            extensions: Some(vec![
+                ".tsx".to_string(),
+                ".ts".to_string(),
+                ".jsx".to_string(),
+                ".js".to_string(),
+            ]),
+            ..Default::default()
+        }),
+        ..Default::default()
     };
 
-    // Build client _app chunk if present
-    // _app may import global CSS — collect and add to manifest as global_css
-    if let Some(app) = &scan.app {
-        let source = fs::read_to_string(&app.abs_path)?;
-        let result =
-            transform_file(&source, &app.abs_path.to_string_lossy(), &client_opts)?;
-        let filename = format!("_app-{}.js", &build_id[..8]);
+    let mut bundler = rolldown::Bundler::new(options)
+        .map_err(|e| anyhow::anyhow!("Failed to create rolldown bundler: {e}"))?;
 
-        let mut app_js = String::new();
-        app_js.push_str("// Rex _app Client Chunk - Auto-generated\n");
-        app_js.push_str("(function() {\n");
-        app_js.push_str("'use strict';\n");
-        app_js.push_str(&result.code);
-        app_js.push_str("\n");
-        app_js.push_str("  if (typeof exports !== 'undefined' && exports.default) {\n");
-        app_js.push_str("    window.__REX_APP__ = exports.default;\n");
-        app_js.push_str("  }\n");
-        app_js.push_str("})();\n");
+    let output = bundler
+        .write()
+        .await
+        .map_err(|e| anyhow::anyhow!("Rolldown bundle failed: {e:?}"))?;
 
-        let chunk_path = output_dir.join(&filename);
-        fs::write(&chunk_path, &app_js)?;
+    // Process rolldown output: register entry chunks in the manifest
+    for item in &output.assets {
+        if let Output::Chunk(chunk) = item {
+            if !chunk.is_entry {
+                continue;
+            }
+            let name = chunk.name.to_string();
+            let filename = chunk.filename.to_string();
 
-        manifest.app_script = Some(filename);
-
-        // Copy global CSS from _app
-        for css_import in &result.css_imports {
-            let css_abs = app.abs_path.parent().unwrap().join(css_import);
-            if let Ok(css_abs) = css_abs.canonicalize() {
-                let css_stem = css_abs.file_stem().unwrap().to_string_lossy();
-                let css_filename = format!("{css_stem}-{}.css", &build_id[..8]);
-                fs::copy(&css_abs, output_dir.join(&css_filename))?;
-                manifest.global_css.push(css_filename);
+            if name == "_app" {
+                manifest.app_script = Some(filename);
+            } else if let Some(route) = find_route_for_chunk(&name, &scan.routes) {
+                manifest.add_page(&route.pattern, &filename);
             }
         }
     }
 
-    for route in &scan.routes {
-        let source = fs::read_to_string(&route.abs_path)?;
-        let result =
-            transform_file(&source, &route.abs_path.to_string_lossy(), &client_opts)?;
-        let module_name = route.module_name();
+    let _ = fs::remove_dir_all(&entries_dir);
 
-        // Generate a filename from the route
-        let chunk_name = module_name.replace('/', "-");
-        let chunk_name = if chunk_name.is_empty() {
-            "index".to_string()
-        } else {
-            chunk_name
-        };
-        let filename = format!("{chunk_name}-{}.js", &build_id[..8]);
-
-        // Resolve and copy CSS imports for this page
-        let mut css_filenames = Vec::new();
-        for css_import in &result.css_imports {
-            let css_abs = route.abs_path.parent().unwrap().join(css_import);
-            if let Ok(css_abs) = css_abs.canonicalize() {
-                let css_stem = css_abs.file_stem().unwrap().to_string_lossy();
-                let css_filename = format!("{css_stem}-{}.css", &build_id[..8]);
-                fs::copy(&css_abs, output_dir.join(&css_filename))?;
-                css_filenames.push(css_filename);
-            }
-        }
-
-        // For the prototype, write the transformed page as a standalone script
-        // that expects React to be globally available
-        let mut client_js = String::new();
-        client_js.push_str("// Rex Client Chunk - Auto-generated\n");
-        client_js.push_str("(function() {\n");
-        client_js.push_str("'use strict';\n");
-        client_js.push_str(&result.code);
-        client_js.push_str("\n");
-
-        // Hydration bootstrap — wraps with _app if present
-        client_js.push_str(&format!(
-            r#"
-  var React = window.React;
-  var ReactDOM = window.ReactDOM;
-  if (typeof exports !== 'undefined' && exports.default) {{
-    var dataEl = document.getElementById('__REX_DATA__');
-    var pageProps = dataEl ? JSON.parse(dataEl.textContent) : {{}};
-    var container = document.getElementById('__rex');
-    if (container && ReactDOM.hydrateRoot) {{
-      var element;
-      if (window.__REX_APP__) {{
-        element = React.createElement(window.__REX_APP__, {{ Component: exports.default, pageProps: pageProps }});
-      }} else {{
-        element = React.createElement(exports.default, pageProps);
-      }}
-      window.__REX_ROOT__ = ReactDOM.hydrateRoot(container, element);
-    }}
-  }}
-"#
-        ));
-
-        client_js.push_str("})();\n");
-
-        let chunk_path = output_dir.join(&filename);
-        fs::write(&chunk_path, &client_js)?;
-
-        manifest.add_page_with_css(&route.pattern, &filename, &css_filenames);
-    }
-
+    info!(
+        pages = scan.routes.len(),
+        "Client bundles built with rolldown"
+    );
     Ok(manifest)
+}
+
+/// Map a route to a chunk name for rolldown entry naming.
+fn route_to_chunk_name(route: &rex_core::Route) -> String {
+    let module_name = route.module_name();
+    let cn = module_name.replace('/', "-");
+    if cn.is_empty() {
+        "index".to_string()
+    } else {
+        cn
+    }
+}
+
+/// Find the route that matches a given chunk name.
+fn find_route_for_chunk<'a>(
+    chunk_name: &str,
+    routes: &'a [rex_core::Route],
+) -> Option<&'a rex_core::Route> {
+    routes.iter().find(|r| route_to_chunk_name(r) == chunk_name)
+}
+
+/// Scan source files for CSS imports and copy them to the output directory.
+/// Registers global CSS (from _app) and per-page CSS in the manifest.
+fn collect_css_files(
+    _config: &RexConfig,
+    scan: &ScanResult,
+    output_dir: &Path,
+    build_id: &str,
+    manifest: &mut AssetManifest,
+) -> Result<()> {
+    let hash = &build_id[..8];
+
+    // Collect CSS from _app (global styles)
+    if let Some(app) = &scan.app {
+        let css_paths = extract_css_imports(&app.abs_path)?;
+        for css_path in css_paths {
+            if css_path.exists() {
+                let stem = css_path.file_stem().unwrap_or_default().to_string_lossy();
+                let filename = format!("{stem}-{hash}.css");
+                fs::copy(&css_path, output_dir.join(&filename))?;
+                manifest.global_css.push(filename);
+            }
+        }
+    }
+
+    // Collect CSS from individual pages
+    for route in &scan.routes {
+        let css_paths = extract_css_imports(&route.abs_path)?;
+        if css_paths.is_empty() {
+            continue;
+        }
+        let mut page_css = Vec::new();
+        for css_path in css_paths {
+            if css_path.exists() {
+                let stem = css_path.file_stem().unwrap_or_default().to_string_lossy();
+                let filename = format!("{stem}-{hash}.css");
+                fs::copy(&css_path, output_dir.join(&filename))?;
+                page_css.push(filename);
+            }
+        }
+        if !page_css.is_empty() {
+            let chunk_name = route_to_chunk_name(route);
+            let js_filename = format!("{chunk_name}-{hash}.js");
+            manifest.add_page_with_css(&route.pattern, &js_filename, &page_css);
+        }
+    }
+
+    Ok(())
+}
+
+/// Parse a source file and extract CSS import paths (resolved relative to the file).
+fn extract_css_imports(source_path: &Path) -> Result<Vec<PathBuf>> {
+    let source = fs::read_to_string(source_path)?;
+    let parent = source_path.parent().unwrap_or(Path::new("."));
+    let mut css_paths = Vec::new();
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+        // Match: import 'path.css' or import "path.css"
+        if trimmed.starts_with("import ") || trimmed.starts_with("import'")
+            || trimmed.starts_with("import\"")
+        {
+            if let Some(path) = extract_string_literal(trimmed) {
+                if path.ends_with(".css") {
+                    css_paths.push(parent.join(path));
+                }
+            }
+        }
+    }
+
+    Ok(css_paths)
+}
+
+/// Extract the string literal from an import statement.
+/// E.g. `import '../styles/globals.css';` → `../styles/globals.css`
+fn extract_string_literal(line: &str) -> Option<&str> {
+    // Find first quote character
+    let single = line.find('\'');
+    let double = line.find('"');
+    let (quote_char, start) = match (single, double) {
+        (Some(s), Some(d)) => {
+            if s < d {
+                ('\'', s)
+            } else {
+                ('"', d)
+            }
+        }
+        (Some(s), None) => ('\'', s),
+        (None, Some(d)) => ('"', d),
+        (None, None) => return None,
+    };
+    let rest = &line[start + 1..];
+    let end = rest.find(quote_char)?;
+    Some(&rest[..end])
+}
+
+/// Get the path to the client runtime files.
+/// These are embedded in the source tree at runtime/client/.
+fn runtime_client_dir() -> Result<PathBuf> {
+    // In dev: relative to the crate source
+    // The runtime files are at the workspace root under runtime/client/
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let runtime_dir = manifest_dir.join("../../runtime/client");
+    if runtime_dir.exists() {
+        return Ok(runtime_dir.canonicalize()?);
+    }
+    // Fallback: look relative to current dir
+    let cwd_runtime = PathBuf::from("runtime/client");
+    if cwd_runtime.exists() {
+        return Ok(cwd_runtime.canonicalize()?);
+    }
+    anyhow::bail!("Could not find runtime/client directory")
 }
 
 #[cfg(test)]
@@ -461,6 +624,9 @@ mod tests {
     ) -> (tempfile::TempDir, RexConfig, ScanResult) {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().to_path_buf();
+
+        // Create mock node_modules so rolldown can resolve React imports
+        setup_mock_node_modules(&root);
 
         // Create pages directory
         let pages_dir = root.join("pages");
@@ -534,8 +700,8 @@ mod tests {
         (tmp, config, scan)
     }
 
-    #[test]
-    fn test_server_bundle_structure() {
+    #[tokio::test]
+    async fn test_server_bundle_structure() {
         let (_tmp, config, scan) = setup_test_project(
             &[(
                 "index.tsx",
@@ -547,7 +713,7 @@ mod tests {
             )],
             None,
         );
-        let result = build_bundles(&config, &scan).unwrap();
+        let result = build_bundles(&config, &scan).await.unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         // Preamble
@@ -580,8 +746,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_server_bundle_cjs_format() {
+    #[tokio::test]
+    async fn test_server_bundle_cjs_format() {
         let (_tmp, config, scan) = setup_test_project(
             &[(
                 "index.tsx",
@@ -597,7 +763,7 @@ mod tests {
             )],
             None,
         );
-        let result = build_bundles(&config, &scan).unwrap();
+        let result = build_bundles(&config, &scan).await.unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         // Should use CJS, not ESM
@@ -636,8 +802,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_server_bundle_multiple_pages() {
+    #[tokio::test]
+    async fn test_server_bundle_multiple_pages() {
         let (_tmp, config, scan) = setup_test_project(
             &[
                 (
@@ -655,7 +821,7 @@ mod tests {
             ],
             None,
         );
-        let result = build_bundles(&config, &scan).unwrap();
+        let result = build_bundles(&config, &scan).await.unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         assert!(
@@ -672,8 +838,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_server_bundle_with_app() {
+    #[tokio::test]
+    async fn test_server_bundle_with_app() {
         let (_tmp, config, scan) = setup_test_project(
             &[(
                 "index.tsx",
@@ -687,7 +853,7 @@ mod tests {
                 "#,
             ),
         );
-        let result = build_bundles(&config, &scan).unwrap();
+        let result = build_bundles(&config, &scan).await.unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         assert!(
@@ -700,8 +866,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_client_bundles_per_page() {
+    #[tokio::test]
+    async fn test_client_bundles_per_page() {
         let (_tmp, config, scan) = setup_test_project(
             &[
                 (
@@ -715,7 +881,7 @@ mod tests {
             ],
             None,
         );
-        let result = build_bundles(&config, &scan).unwrap();
+        let result = build_bundles(&config, &scan).await.unwrap();
         let client_dir = config.client_build_dir();
         let build_hash = &result.build_id[..8];
 
@@ -743,8 +909,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_manifest_contents() {
+    #[tokio::test]
+    async fn test_manifest_contents() {
         let (_tmp, config, scan) = setup_test_project(
             &[
                 (
@@ -758,7 +924,7 @@ mod tests {
             ],
             None,
         );
-        let result = build_bundles(&config, &scan).unwrap();
+        let result = build_bundles(&config, &scan).await.unwrap();
 
         // Manifest should track both pages
         assert!(
@@ -786,152 +952,52 @@ mod tests {
         assert_eq!(loaded.pages.len(), 2);
     }
 
-    /// Helper to create fake node_modules with React CJS or UMD files
-    fn setup_fake_node_modules(root: &Path, layout: &str) {
+    /// Create mock node_modules with minimal React stubs so rolldown can resolve imports.
+    fn setup_mock_node_modules(root: &Path) {
         let nm = root.join("node_modules");
-        match layout {
-            "cjs" => {
-                // React 19 CJS layout
-                let react_cjs_dir = nm.join("react/cjs");
-                let react_dom_cjs_dir = nm.join("react-dom/cjs");
-                fs::create_dir_all(&react_cjs_dir).unwrap();
-                fs::create_dir_all(&react_dom_cjs_dir).unwrap();
-                fs::write(
-                    react_cjs_dir.join("react.production.js"),
-                    "module.exports = { createElement: function() { return {}; } };",
-                )
-                .unwrap();
-                fs::write(
-                    react_dom_cjs_dir.join("react-dom.production.js"),
-                    "module.exports = { createRoot: function() {} };",
-                )
-                .unwrap();
-            }
-            "umd" => {
-                // React 18 UMD layout
-                let react_umd_dir = nm.join("react/umd");
-                let react_dom_umd_dir = nm.join("react-dom/umd");
-                fs::create_dir_all(&react_umd_dir).unwrap();
-                fs::create_dir_all(&react_dom_umd_dir).unwrap();
-                fs::write(
-                    react_umd_dir.join("react.production.min.js"),
-                    "window.React = { createElement: function() { return {}; } };",
-                )
-                .unwrap();
-                fs::write(
-                    react_dom_umd_dir.join("react-dom.production.min.js"),
-                    "window.ReactDOM = { createRoot: function() {} };",
-                )
-                .unwrap();
-            }
-            _ => {} // "none" — no node_modules
-        }
-    }
 
-    #[test]
-    fn test_vendor_scripts_react19_cjs() {
-        let (_tmp, config, scan) = setup_test_project(
-            &[(
-                "index.tsx",
-                "export default function Home() { return <div>Home</div>; }",
-            )],
-            None,
-        );
-        setup_fake_node_modules(&config.project_root, "cjs");
-
-        let result = build_bundles(&config, &scan).unwrap();
-
-        assert_eq!(
-            result.manifest.vendor_scripts.len(),
-            2,
-            "should have react + react-dom vendor scripts"
-        );
-        assert!(
-            result.manifest.vendor_scripts[0].starts_with("vendor-react-"),
-            "first vendor script should be react"
-        );
-        assert!(
-            result.manifest.vendor_scripts[1].starts_with("vendor-react-dom-"),
-            "second vendor script should be react-dom"
-        );
-
-        // Verify files exist and contain CJS wrapper
-        let client_dir = config.client_build_dir();
-        let react_vendor = fs::read_to_string(
-            client_dir.join(&result.manifest.vendor_scripts[0]),
+        // react
+        let react_dir = nm.join("react");
+        fs::create_dir_all(&react_dir).unwrap();
+        fs::write(
+            react_dir.join("package.json"),
+            r#"{"name":"react","version":"19.0.0","main":"index.js"}"#,
         )
         .unwrap();
-        assert!(
-            react_vendor.contains("window.React=module.exports"),
-            "CJS react vendor should assign window.React"
-        );
-
-        let react_dom_vendor = fs::read_to_string(
-            client_dir.join(&result.manifest.vendor_scripts[1]),
+        fs::write(
+            react_dir.join("index.js"),
+            "export function createElement(type, props, ...children) { return { type, props, children }; }\nexport default { createElement };\n",
         )
         .unwrap();
-        assert!(
-            react_dom_vendor.contains("window.ReactDOM=module.exports"),
-            "CJS react-dom vendor should assign window.ReactDOM"
-        );
-        assert!(
-            react_dom_vendor.contains("require"),
-            "react-dom vendor should have require shim"
-        );
-    }
-
-    #[test]
-    fn test_vendor_scripts_react18_umd() {
-        let (_tmp, config, scan) = setup_test_project(
-            &[(
-                "index.tsx",
-                "export default function Home() { return <div>Home</div>; }",
-            )],
-            None,
-        );
-        setup_fake_node_modules(&config.project_root, "umd");
-
-        let result = build_bundles(&config, &scan).unwrap();
-
-        assert_eq!(
-            result.manifest.vendor_scripts.len(),
-            2,
-            "should have react + react-dom vendor scripts"
-        );
-
-        // UMD scripts are written as-is (no wrapper needed)
-        let client_dir = config.client_build_dir();
-        let react_vendor = fs::read_to_string(
-            client_dir.join(&result.manifest.vendor_scripts[0]),
+        fs::write(
+            react_dir.join("jsx-runtime.js"),
+            "export function jsx(type, props) { return { type, props }; }\nexport function jsxs(type, props) { return { type, props }; }\nexport const Fragment = 'Fragment';\n",
         )
         .unwrap();
-        assert!(
-            react_vendor.contains("window.React"),
-            "UMD react should set window.React"
-        );
+        fs::write(
+            react_dir.join("jsx-dev-runtime.js"),
+            "export function jsxDEV(type, props) { return { type, props }; }\nexport const Fragment = 'Fragment';\n",
+        )
+        .unwrap();
+
+        // react-dom
+        let react_dom_dir = nm.join("react-dom");
+        fs::create_dir_all(&react_dom_dir).unwrap();
+        fs::write(
+            react_dom_dir.join("package.json"),
+            r#"{"name":"react-dom","version":"19.0.0","main":"index.js","exports":{".":{"default":"./index.js"},"./client":{"default":"./client.js"}}}"#,
+        )
+        .unwrap();
+        fs::write(react_dom_dir.join("index.js"), "export default {};\n").unwrap();
+        fs::write(
+            react_dom_dir.join("client.js"),
+            "export function hydrateRoot() {}\nexport function createRoot() {}\n",
+        )
+        .unwrap();
     }
 
-    #[test]
-    fn test_vendor_scripts_no_react() {
-        let (_tmp, config, scan) = setup_test_project(
-            &[(
-                "index.tsx",
-                "export default function Home() { return <div>Home</div>; }",
-            )],
-            None,
-        );
-        // No setup_fake_node_modules — no React available
-
-        let result = build_bundles(&config, &scan).unwrap();
-
-        assert!(
-            result.manifest.vendor_scripts.is_empty(),
-            "should have no vendor scripts when React not found"
-        );
-    }
-
-    #[test]
-    fn test_server_bundle_with_document() {
+    #[tokio::test]
+    async fn test_server_bundle_with_document() {
         let (_tmp, config, scan) = setup_test_project_full(
             &[(
                 "index.tsx",
@@ -947,7 +1013,7 @@ mod tests {
                 "#,
             ),
         );
-        let result = build_bundles(&config, &scan).unwrap();
+        let result = build_bundles(&config, &scan).await.unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         assert!(
@@ -960,10 +1026,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_global_css_from_app() {
+    #[tokio::test]
+    async fn test_global_css_from_app() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().to_path_buf();
+
+        setup_mock_node_modules(&root);
 
         let pages_dir = root.join("pages");
         let styles_dir = root.join("styles");
@@ -1013,7 +1081,7 @@ mod tests {
             not_found: None,
         };
 
-        let result = build_bundles(&config, &scan).unwrap();
+        let result = build_bundles(&config, &scan).await.unwrap();
 
         // Manifest should have global CSS
         assert_eq!(
@@ -1045,8 +1113,8 @@ mod tests {
         assert_eq!(loaded.global_css.len(), 1);
     }
 
-    #[test]
-    fn test_client_bundle_app_wrapping() {
+    #[tokio::test]
+    async fn test_client_bundle_app_wrapping() {
         let (_tmp, config, scan) = setup_test_project(
             &[(
                 "index.tsx",
@@ -1060,7 +1128,7 @@ mod tests {
                 "#,
             ),
         );
-        let result = build_bundles(&config, &scan).unwrap();
+        let result = build_bundles(&config, &scan).await.unwrap();
 
         // _app client chunk should exist
         assert!(
@@ -1086,62 +1154,3 @@ mod tests {
     }
 }
 
-/// Build vendor scripts (React runtime wrapped for browser use).
-/// Reads React CJS/UMD from node_modules, wraps for global assignment,
-/// and writes to the client output directory.
-fn build_vendor_scripts(
-    config: &RexConfig,
-    output_dir: &Path,
-    build_id: &str,
-) -> Result<Vec<String>> {
-    let nm = config.node_modules_dir();
-    let mut vendor_files = Vec::new();
-    let hash = &build_id[..8];
-
-    // Try React 19 CJS first
-    let react_cjs = nm.join("react/cjs/react.production.js");
-    let react_dom_cjs = nm.join("react-dom/cjs/react-dom.production.js");
-
-    if react_cjs.exists() && react_dom_cjs.exists() {
-        // React CJS → window.React
-        let react_src = fs::read_to_string(&react_cjs)?;
-        let react_vendor = format!(
-            "(function(){{\nvar exports={{}};var module={{exports:exports}};\n{react_src}\nwindow.React=module.exports;\n}})();\n"
-        );
-        let react_filename = format!("vendor-react-{hash}.js");
-        fs::write(output_dir.join(&react_filename), &react_vendor)?;
-        vendor_files.push(react_filename);
-
-        // ReactDOM CJS → window.ReactDOM (requires React)
-        let react_dom_src = fs::read_to_string(&react_dom_cjs)?;
-        let react_dom_vendor = format!(
-            "(function(){{\nvar exports={{}};var module={{exports:exports}};\nvar require=function(n){{if(n==='react')return window.React;return {{}}}};\n{react_dom_src}\nwindow.ReactDOM=module.exports;\n}})();\n"
-        );
-        let react_dom_filename = format!("vendor-react-dom-{hash}.js");
-        fs::write(output_dir.join(&react_dom_filename), &react_dom_vendor)?;
-        vendor_files.push(react_dom_filename);
-
-        return Ok(vendor_files);
-    }
-
-    // Fallback: React 18 UMD
-    let react_umd = nm.join("react/umd/react.production.min.js");
-    let react_dom_umd = nm.join("react-dom/umd/react-dom.production.min.js");
-
-    if react_umd.exists() && react_dom_umd.exists() {
-        let react_src = fs::read_to_string(&react_umd)?;
-        let react_filename = format!("vendor-react-{hash}.js");
-        fs::write(output_dir.join(&react_filename), &react_src)?;
-        vendor_files.push(react_filename);
-
-        let react_dom_src = fs::read_to_string(&react_dom_umd)?;
-        let react_dom_filename = format!("vendor-react-dom-{hash}.js");
-        fs::write(output_dir.join(&react_dom_filename), &react_dom_src)?;
-        vendor_files.push(react_dom_filename);
-
-        return Ok(vendor_files);
-    }
-
-    // No React found — hydration won't work, but SSR stub may still function
-    Ok(vendor_files)
-}

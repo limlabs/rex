@@ -21,7 +21,7 @@ pub async fn handle_file_event(
         FileEventKind::PageModified => {
             // Incremental: rescan, rebuild, reload isolates
             let scan = scan_pages(&config.pages_dir)?;
-            let build_result = build_bundles(config, &scan)?;
+            let build_result = build_bundles(config, &scan).await?;
 
             // Read the new server bundle
             let bundle_js = std::fs::read_to_string(&build_result.server_bundle_path)?;
@@ -42,7 +42,7 @@ pub async fn handle_file_event(
         FileEventKind::PageAdded | FileEventKind::PageRemoved => {
             // Full rebuild needed for route changes
             let scan = scan_pages(&config.pages_dir)?;
-            let build_result = build_bundles(config, &scan)?;
+            let build_result = build_bundles(config, &scan).await?;
 
             let bundle_js = std::fs::read_to_string(&build_result.server_bundle_path)?;
             let bundle_arc = Arc::new(bundle_js);

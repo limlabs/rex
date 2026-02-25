@@ -85,7 +85,7 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
     );
 
     // Build
-    let build_result = build_bundles(&config, &scan)?;
+    let build_result = build_bundles(&config, &scan).await?;
     info!(build_id = %build_result.build_id, "Build complete");
 
     // Load environment variables from .env files
@@ -203,7 +203,7 @@ async fn cmd_build(root: PathBuf) -> Result<()> {
     let scan = scan_pages(&config.pages_dir)?;
     info!(routes = scan.routes.len(), "Routes scanned");
 
-    let build_result = build_bundles(&config, &scan)?;
+    let build_result = build_bundles(&config, &scan).await?;
     info!(build_id = %build_result.build_id, "Build complete");
 
     info!(

@@ -24,7 +24,9 @@ swc_ecma_transforms_base = "37"
 swc_ecma_transforms_react = "41"
 swc_ecma_transforms_typescript = "41"
 swc_ecma_transforms_module = "41"
-swc_bundler = "43"
+# Bundler
+rolldown = { git = "https://github.com/rolldown/rolldown", branch = "main" }
+rolldown_common = { git = "https://github.com/rolldown/rolldown", branch = "main" }
 
 # HTTP
 axum = { version = "0.8", features = ["ws"] }
@@ -61,6 +63,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Collections
 dashmap = "6"
+rustc-hash = "2"
 
 # Async
 futures = "0.3"

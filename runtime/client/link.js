@@ -1,0 +1,53 @@
+// Rex Link Component - Client-side navigation
+// Equivalent to next/link: renders <a> with client-side nav on click.
+import React from 'react';
+
+export default function Link(props) {
+  var href = props.href;
+  var replace = props.replace || false;
+  var children = props.children;
+  var target = props.target;
+
+  var aProps = { href: href };
+  if (props.className) aProps.className = props.className;
+  if (props.style) aProps.style = props.style;
+  if (props.id) aProps.id = props.id;
+  if (target) aProps.target = target;
+
+  aProps.onClick = function(e) {
+    if (props.onClick) props.onClick(e);
+    if (e.defaultPrevented) return;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (e.button !== 0) return;
+    if (target && target !== '_self') return;
+
+    try {
+      var url = new URL(href, window.location.origin);
+      if (url.origin !== window.location.origin) return;
+    } catch (_) {
+      return;
+    }
+
+    e.preventDefault();
+
+    var router = window.__REX_ROUTER;
+    if (router) {
+      if (replace) {
+        router.replace(href);
+      } else {
+        router.push(href);
+      }
+    } else {
+      window.location.href = href;
+    }
+  };
+
+  aProps.onMouseEnter = function() {
+    var router = window.__REX_ROUTER;
+    if (router && router.prefetch) {
+      router.prefetch(href);
+    }
+  };
+
+  return React.createElement('a', aProps, children);
+}

@@ -98,14 +98,14 @@ pub fn assemble_document(
     // _app client chunk (must load before page scripts for hydration wrapping)
     if let Some(app) = app_script {
         html.push_str(&format!(
-            "  <script src=\"/_rex/static/{app}\"></script>\n"
+            "  <script type=\"module\" src=\"/_rex/static/{app}\"></script>\n"
         ));
     }
 
-    // Client chunks
+    // Client chunks (ESM bundles produced by rolldown)
     for script in client_scripts {
         html.push_str(&format!(
-            "  <script src=\"/_rex/static/{script}\"></script>\n"
+            "  <script type=\"module\" src=\"/_rex/static/{script}\"></script>\n"
         ));
     }
 
