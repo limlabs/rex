@@ -7,7 +7,7 @@ use rex_server::RexServer;
 use rex_v8::{init_v8, IsolatePool};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{debug, info};
 
 #[derive(Parser)]
 #[command(name = "rex", about = "Rex - Next.js Pages Router in Rust")]
@@ -67,15 +67,19 @@ async fn main() -> Result<()> {
 }
 
 async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
+    let start = std::time::Instant::now();
     let root = std::fs::canonicalize(&root)?;
     let config = RexConfig::new(root).with_dev(true).with_port(port);
     config.validate()?;
 
-    info!("Rex dev server starting...");
+    eprintln!();
+    eprintln!("  {} {}", cyan_bold("▲ rex"), dim(env!("CARGO_PKG_VERSION")));
+    eprintln!();
 
     // Scan routes
+    debug!("Scanning routes...");
     let scan = scan_pages(&config.pages_dir)?;
-    info!(
+    debug!(
         routes = scan.routes.len(),
         has_app = scan.app.is_some(),
         has_404 = scan.not_found.is_some(),
@@ -84,10 +88,12 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
     );
 
     // Build
+    debug!("Building bundles...");
     let build_result = build_bundles(&config, &scan).await?;
-    info!(build_id = %build_result.build_id, "Build complete");
+    debug!(build_id = %build_result.build_id, "Build complete");
 
     // Initialize V8
+    debug!("Initializing V8...");
     init_v8();
 
     // Load self-contained server bundle (includes React, polyfills, pages, SSR runtime)
@@ -99,6 +105,7 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
         .unwrap_or(4)
         .min(4); // Cap at 4 for dev
 
+    debug!(pool_size, "Creating V8 isolate pool");
     let pool = IsolatePool::new(
         pool_size,
         Arc::new(server_bundle),
@@ -177,7 +184,14 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
         });
     }
 
-    info!("Ready on http://localhost:{port}");
+    let elapsed = start.elapsed();
+    eprintln!("  {} {}", green_bold("✓ Ready in"), green_bold(&format_duration(elapsed)));
+    eprintln!();
+    eprintln!("  {} {}", dim("➜ Local:"), bold(&format!("http://localhost:{port}")));
+    eprintln!();
+    print_route_summary(&scan.routes, &scan.api_routes);
+    eprintln!();
+
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, router).await?;
@@ -190,29 +204,27 @@ async fn cmd_build(root: PathBuf) -> Result<()> {
     let config = RexConfig::new(root);
     config.validate()?;
 
+    eprintln!();
+    eprintln!("  {} {}", cyan_bold("▲ rex"), dim(env!("CARGO_PKG_VERSION")));
+    eprintln!();
+
     let start = std::time::Instant::now();
-    info!("Building for production...");
+    debug!("Building for production...");
 
     let scan = scan_pages(&config.pages_dir)?;
-    info!(routes = scan.routes.len(), "Routes scanned");
+    debug!(routes = scan.routes.len(), "Routes scanned");
 
     let build_result = build_bundles(&config, &scan).await?;
     let elapsed = start.elapsed();
 
-    // Print build summary
-    eprintln!();
-    eprintln!("  Build complete in {:.2}s", elapsed.as_secs_f64());
-    eprintln!("  Build ID: {}", build_result.build_id);
+    eprintln!("  {} {}", green_bold("✓ Built in"), green_bold(&format_duration(elapsed)));
     eprintln!();
 
     // Server bundle size
     let server_size = std::fs::metadata(&build_result.server_bundle_path)
         .map(|m| m.len())
         .unwrap_or(0);
-    eprintln!(
-        "  Server bundle:  {}",
-        format_size(server_size)
-    );
+    eprintln!("  {}  {}", dim("Server"), format_size(server_size));
 
     // Client bundle sizes
     let client_dir = config.client_build_dir();
@@ -236,23 +248,52 @@ async fn cmd_build(root: PathBuf) -> Result<()> {
         }
     }
 
+    eprintln!("  {}  {}", dim("Client"), format_size(total_client));
     eprintln!();
-    eprintln!("  Client bundles: {} total", format_size(total_client));
 
     // Show page entry chunks
     page_sizes.sort_by(|a, b| a.0.cmp(&b.0));
     for (name, size) in &page_sizes {
-        eprintln!("    {:<40} {}", name, format_size(*size));
+        eprintln!("    {}  {}", dim(&format!("{:<38}", name)), dim(&format_size(*size)));
     }
 
     // Show shared chunks
     chunk_sizes.sort_by(|a, b| b.1.cmp(&a.1)); // largest first
     for (name, size) in &chunk_sizes {
-        eprintln!("    {:<40} {}", name, format_size(*size));
+        eprintln!("    {}  {}", dim(&format!("{:<38}", name)), dim(&format_size(*size)));
     }
 
     eprintln!();
+    print_route_summary(&scan.routes, &scan.api_routes);
+    eprintln!();
     Ok(())
+}
+
+// --- Display helpers ---
+
+fn bold(s: &str) -> String {
+    format!("\x1b[1m{s}\x1b[0m")
+}
+
+fn dim(s: &str) -> String {
+    format!("\x1b[2m{s}\x1b[0m")
+}
+
+fn cyan_bold(s: &str) -> String {
+    format!("\x1b[1;36m{s}\x1b[0m")
+}
+
+fn green_bold(s: &str) -> String {
+    format!("\x1b[1;32m{s}\x1b[0m")
+}
+
+fn format_duration(d: std::time::Duration) -> String {
+    let ms = d.as_millis();
+    if ms >= 1000 {
+        format!("{:.2}s", d.as_secs_f64())
+    } else {
+        format!("{ms}ms")
+    }
 }
 
 fn format_size(bytes: u64) -> String {
@@ -265,9 +306,39 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
+fn print_route_summary(routes: &[rex_core::Route], api_routes: &[rex_core::Route]) {
+    let page_count = routes.len();
+    let api_count = api_routes.len();
+
+    let mut parts = Vec::new();
+    if page_count > 0 {
+        parts.push(format!(
+            "{} {}",
+            page_count,
+            if page_count == 1 { "page" } else { "pages" }
+        ));
+    }
+    if api_count > 0 {
+        parts.push(format!(
+            "{} API {}",
+            api_count,
+            if api_count == 1 { "route" } else { "routes" }
+        ));
+    }
+
+    if !parts.is_empty() {
+        eprintln!("  {}", dim(&parts.join(" · ")));
+    }
+}
+
 async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
+    let start = std::time::Instant::now();
     let root = std::fs::canonicalize(&root)?;
     let config = RexConfig::new(root).with_port(port);
+
+    eprintln!();
+    eprintln!("  {} {} {}", cyan_bold("▲ rex"), dim(env!("CARGO_PKG_VERSION")), dim("(production)"));
+    eprintln!();
 
     // Load manifest
     let manifest = AssetManifest::load(&config.manifest_path())?;
@@ -305,7 +376,14 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
         scan.document.is_some(),
     );
 
-    info!("Rex production server starting on http://localhost:{port}");
+    let elapsed = start.elapsed();
+    eprintln!("  {} {}", green_bold("✓ Ready in"), green_bold(&format_duration(elapsed)));
+    eprintln!();
+    eprintln!("  {} {}", dim("➜ Local:"), bold(&format!("http://localhost:{port}")));
+    eprintln!();
+    print_route_summary(&scan.routes, &scan.api_routes);
+    eprintln!();
+
     server.serve().await
 }
 
