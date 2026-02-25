@@ -557,10 +557,9 @@ globalThis.__rex_resolve_gssp = function() {
         pages: &[(&str, &str, Option<&str>)],
     ) -> Router {
         rex_v8::init_v8();
-        let bundle = make_server_bundle(pages);
+        let bundle = format!("{}\n{}", MOCK_REACT_RUNTIME, make_server_bundle(pages));
         let pool = rex_v8::IsolatePool::new(
             1,
-            Arc::new(MOCK_REACT_RUNTIME.to_string()),
             Arc::new(bundle),
         )
         .expect("failed to create pool");

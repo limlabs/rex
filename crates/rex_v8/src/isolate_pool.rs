@@ -20,10 +20,9 @@ pub struct IsolatePool {
 
 impl IsolatePool {
     /// Create a new pool with `size` isolates.
-    /// Each isolate is initialized with the given React runtime and server bundle JS.
+    /// Each isolate is initialized with the self-contained server bundle JS.
     pub fn new(
         size: usize,
-        react_runtime_js: Arc<String>,
         server_bundle_js: Arc<String>,
     ) -> Result<Self> {
         let mut senders = Vec::with_capacity(size);
@@ -31,7 +30,6 @@ impl IsolatePool {
 
         for i in 0..size {
             let (tx, rx) = bounded::<WorkItem>(64);
-            let react_js = react_runtime_js.clone();
             let bundle_js = server_bundle_js.clone();
 
             let handle = thread::Builder::new()
@@ -40,7 +38,7 @@ impl IsolatePool {
                     // Initialize V8 on this thread (safe to call multiple times)
                     crate::init_v8();
 
-                    let mut isolate = match crate::SsrIsolate::new(&react_js, &bundle_js) {
+                    let mut isolate = match crate::SsrIsolate::new(&bundle_js) {
                         Ok(iso) => iso,
                         Err(e) => {
                             error!("Failed to create V8 isolate {i}: {e:#}");

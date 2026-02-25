@@ -1,6 +1,5 @@
 use crate::entries::generate_build_id;
 use crate::manifest::AssetManifest;
-use crate::transform::{TransformOptions, transform_file};
 use anyhow::Result;
 use rex_core::RexConfig;
 use rex_router::ScanResult;
@@ -27,7 +26,7 @@ pub async fn build_bundles(config: &RexConfig, scan: &ScanResult) -> Result<Buil
     fs::create_dir_all(&client_dir)?;
 
     info!("Building server bundle...");
-    let server_bundle_path = build_server_bundle(config, scan, &server_dir)?;
+    let server_bundle_path = build_server_bundle(config, scan, &server_dir).await?;
 
     info!("Building client bundles...");
     let manifest = build_client_bundles(config, scan, &client_dir, &build_id).await?;
@@ -42,168 +41,87 @@ pub async fn build_bundles(config: &RexConfig, scan: &ScanResult) -> Result<Buil
     })
 }
 
-/// Append a CJS module IIFE to the bundle, assigning the result to `target`.
-fn append_page_iife(bundle: &mut String, comment: &str, target: &str, transformed: &str) {
-    bundle.push_str(&format!("// {comment}\n"));
-    bundle.push_str(&format!(
-        "{target} = (function() {{\n  var exports = {{}};\n  var module = {{ exports: exports }};\n"
-    ));
-    bundle.push_str("  (function(exports, module, require) {\n");
-    for line in transformed.lines() {
-        bundle.push_str("    ");
-        bundle.push_str(line);
-        bundle.push('\n');
-    }
-    bundle.push_str("  })(exports, module, require);\n");
-    bundle.push_str("  return module.exports;\n");
-    bundle.push_str("})();\n\n");
+/// V8 polyfills for bare V8 environment (React 19 needs these).
+/// Injected as a rolldown banner so they run before any bundled code.
+const V8_POLYFILLS: &str = r#"
+if (typeof globalThis.process === 'undefined') {
+    globalThis.process = { env: { NODE_ENV: 'production' } };
 }
-
-/// Build the server bundle: transform all pages and concatenate with React SSR runtime
-fn build_server_bundle(
-    _config: &RexConfig,
-    scan: &ScanResult,
-    output_dir: &Path,
-) -> Result<std::path::PathBuf> {
-    let mut bundle = String::new();
-
-    // Preamble: we'll load React/ReactDOMServer separately in V8
-    bundle.push_str("// Rex Server Bundle - Auto-generated\n");
-    bundle.push_str("'use strict';\n\n");
-
-    let server_opts = TransformOptions {
-        server: true,
-        cjs: true,
-        classic_jsx: true,
-        typescript: true,
-        jsx: true,
-        ..Default::default()
+if (typeof globalThis.setTimeout === 'undefined') {
+    globalThis.setTimeout = function(fn) { fn(); return 0; };
+    globalThis.clearTimeout = function() {};
+}
+if (typeof globalThis.queueMicrotask === 'undefined') {
+    globalThis.queueMicrotask = function(fn) { fn(); };
+}
+if (typeof globalThis.MessageChannel === 'undefined') {
+    globalThis.MessageChannel = function() {
+        var cb = null;
+        this.port1 = {};
+        this.port2 = { postMessage: function() { if (cb) cb({ data: undefined }); } };
+        Object.defineProperty(this.port1, 'onmessage', {
+            set: function(fn) { cb = fn; }, get: function() { return cb; }
+        });
     };
+}
+if (typeof globalThis.TextEncoder === 'undefined') {
+    globalThis.TextEncoder = function() {};
+    globalThis.TextEncoder.prototype.encode = function(str) {
+        var arr = []; for (var i = 0; i < str.length; i++) arr.push(str.charCodeAt(i));
+        return new Uint8Array(arr);
+    };
+}
+if (typeof globalThis.TextDecoder === 'undefined') {
+    globalThis.TextDecoder = function() {};
+    globalThis.TextDecoder.prototype.decode = function(buf) {
+        return String.fromCharCode.apply(null, new Uint8Array(buf));
+    };
+}
+if (typeof globalThis.performance === 'undefined') {
+    globalThis.performance = { now: function() { return Date.now(); } };
+}
+"#;
 
-    // require() shim for CJS modules — maps known packages to V8 globals
-    bundle.push_str(
-        r#"var require = function(name) {
-    if (name === 'react') return { default: globalThis.__React, createElement: globalThis.__React.createElement };
-    if (name === 'rex/head') return { default: globalThis.__rex_head_component, __esModule: true };
-    if (name === 'rex/link') return { default: globalThis.__rex_link_component, __esModule: true };
-    if (name === 'rex/document') return { default: (globalThis.__rex_document_components || {}).Html, Html: (globalThis.__rex_document_components || {}).Html, Head: (globalThis.__rex_document_components || {}).Head, Main: (globalThis.__rex_document_components || {}).Main, NextScript: (globalThis.__rex_document_components || {}).NextScript, __esModule: true };
-    return {};
-};
-"#,
-    );
-
-    // Transform and include each page as a module in a registry
-    bundle.push_str("globalThis.__rex_pages = globalThis.__rex_pages || {};\n\n");
-
-    // Transform all route pages (SWC CJS transform handles imports/exports)
-    for route in &scan.routes {
-        let source = fs::read_to_string(&route.abs_path)?;
-        let result =
-            transform_file(&source, &route.abs_path.to_string_lossy(), &server_opts)?;
-        let module_name = route.module_name();
-        append_page_iife(&mut bundle, &format!("Page: {module_name}"), &format!("globalThis.__rex_pages['{module_name}']"), &result.code);
-    }
-
-    // Include special pages (404, _error) in the registry so they can be SSR'd
-    for (label, route_opt) in [("404", &scan.not_found), ("_error", &scan.error)] {
-        if let Some(route) = route_opt {
-            let source = fs::read_to_string(&route.abs_path)?;
-            let result =
-                transform_file(&source, &route.abs_path.to_string_lossy(), &server_opts)?;
-            append_page_iife(&mut bundle, label, &format!("globalThis.__rex_pages['{label}']"), &result.code);
-        }
-    }
-
-    // Transform API route handlers
-    if !scan.api_routes.is_empty() {
-        bundle.push_str("globalThis.__rex_api_handlers = globalThis.__rex_api_handlers || {};\n\n");
-        for route in &scan.api_routes {
-            let source = fs::read_to_string(&route.abs_path)?;
-            let result =
-                transform_file(&source, &route.abs_path.to_string_lossy(), &server_opts)?;
-            let module_name = route.module_name();
-            append_page_iife(
-                &mut bundle,
-                &format!("API: {module_name}"),
-                &format!("globalThis.__rex_api_handlers['{module_name}']"),
-                &result.code,
-            );
-        }
-    }
-
-    // Transform _app if present
-    if let Some(app) = &scan.app {
-        let source = fs::read_to_string(&app.abs_path)?;
-        let result =
-            transform_file(&source, &app.abs_path.to_string_lossy(), &server_opts)?;
-        append_page_iife(&mut bundle, "_app", "globalThis.__rex_app", &result.code);
-    }
-
-    // Transform _document if present
-    if let Some(doc) = &scan.document {
-        let source = fs::read_to_string(&doc.abs_path)?;
-        let result =
-            transform_file(&source, &doc.abs_path.to_string_lossy(), &server_opts)?;
-        append_page_iife(&mut bundle, "_document", "globalThis.__rex_document", &result.code);
-    }
-
-    // SSR functions
-    bundle.push_str(
-        r#"
+/// SSR runtime functions appended to the virtual entry.
+/// These are bundled into the IIFE by rolldown alongside React and page code.
+const SSR_RUNTIME: &str = r#"
 // SSR render function — returns JSON { body, head }
 globalThis.__rex_render_page = function(routeKey, propsJson) {
-    var React = globalThis.__React;
-    var ReactDOMServer = globalThis.__ReactDOMServer;
-    if (!React || !ReactDOMServer) {
-        throw new Error('React/ReactDOMServer not loaded. Ensure react runtime is evaluated first.');
-    }
-
     var page = globalThis.__rex_pages[routeKey];
-    if (!page) {
-        throw new Error('Page not found in registry: ' + routeKey);
-    }
-
+    if (!page) throw new Error('Page not found in registry: ' + routeKey);
     var Component = page.default;
-    if (!Component) {
-        throw new Error('Page has no default export: ' + routeKey);
-    }
+    if (!Component) throw new Error('Page has no default export: ' + routeKey);
 
     var props = JSON.parse(propsJson);
-    var element = React.createElement(Component, props);
+    var element = __rex_createElement(Component, props);
 
-    // Wrap with _app if present
     if (globalThis.__rex_app && globalThis.__rex_app.default) {
-        var App = globalThis.__rex_app.default;
-        element = React.createElement(App, { Component: Component, pageProps: props });
+        element = __rex_createElement(globalThis.__rex_app.default, {
+            Component: Component, pageProps: props
+        });
     }
 
-    // Reset head collector, render, then collect head elements
     globalThis.__rex_head_elements = [];
-    var bodyHtml = ReactDOMServer.renderToString(element);
+    var bodyHtml = __rex_renderToString(element);
 
-    // Render collected head elements to HTML
     var headHtml = '';
     for (var i = 0; i < globalThis.__rex_head_elements.length; i++) {
-        headHtml += ReactDOMServer.renderToString(globalThis.__rex_head_elements[i]);
+        headHtml += __rex_renderToString(globalThis.__rex_head_elements[i]);
     }
 
     return JSON.stringify({ body: bodyHtml, head: headHtml });
 };
 
-// getServerSideProps executor
 globalThis.__rex_gssp_resolved = null;
 globalThis.__rex_gssp_rejected = null;
 
 globalThis.__rex_get_server_side_props = function(routeKey, contextJson) {
     var page = globalThis.__rex_pages[routeKey];
-    if (!page || !page.getServerSideProps) {
-        return JSON.stringify({ props: {} });
-    }
+    if (!page || !page.getServerSideProps) return JSON.stringify({ props: {} });
 
     var context = JSON.parse(contextJson);
     var result = page.getServerSideProps(context);
 
-    // Handle sync result or immediately-resolved promise
     if (result && typeof result.then === 'function') {
         globalThis.__rex_gssp_resolved = null;
         globalThis.__rex_gssp_rejected = null;
@@ -211,24 +129,17 @@ globalThis.__rex_get_server_side_props = function(routeKey, contextJson) {
             function(v) { globalThis.__rex_gssp_resolved = v; },
             function(e) { globalThis.__rex_gssp_rejected = e; }
         );
-        // Return sentinel — Rust will pump the microtask queue and call the resolver
         return '__REX_ASYNC__';
     }
-
     return JSON.stringify(result);
 };
 
 globalThis.__rex_resolve_gssp = function() {
-    if (globalThis.__rex_gssp_rejected) {
-        throw globalThis.__rex_gssp_rejected;
-    }
-    if (globalThis.__rex_gssp_resolved !== null) {
-        return JSON.stringify(globalThis.__rex_gssp_resolved);
-    }
+    if (globalThis.__rex_gssp_rejected) throw globalThis.__rex_gssp_rejected;
+    if (globalThis.__rex_gssp_resolved !== null) return JSON.stringify(globalThis.__rex_gssp_resolved);
     throw new Error('getServerSideProps promise did not resolve after microtask checkpoint');
 };
 
-// API route handler executor
 globalThis.__rex_call_api_handler = function(routeKey, reqJson) {
     var handlers = globalThis.__rex_api_handlers;
     if (!handlers) throw new Error('No API handlers registered');
@@ -239,70 +150,24 @@ globalThis.__rex_call_api_handler = function(routeKey, reqJson) {
 
     var reqData = JSON.parse(reqJson);
     var res = {
-        _statusCode: 200,
-        _headers: {},
-        _body: '',
+        _statusCode: 200, _headers: {}, _body: '',
         status: function(code) { this._statusCode = code; return this; },
         setHeader: function(name, value) { this._headers[name.toLowerCase()] = value; return this; },
-        json: function(data) {
-            this._headers['content-type'] = 'application/json';
-            this._body = JSON.stringify(data);
-            return this;
-        },
-        send: function(body) {
-            if (typeof body === 'object' && !this._headers['content-type']) {
-                return this.json(body);
-            }
-            this._body = typeof body === 'string' ? body : String(body);
-            return this;
-        },
-        end: function(body) {
-            if (body !== undefined) this._body = String(body);
-            return this;
-        },
-        redirect: function(statusOrUrl, maybeUrl) {
-            if (typeof statusOrUrl === 'string') {
-                this._statusCode = 307;
-                this._headers['location'] = statusOrUrl;
-            } else {
-                this._statusCode = statusOrUrl;
-                this._headers['location'] = maybeUrl;
-            }
-            return this;
-        }
+        json: function(data) { this._headers['content-type'] = 'application/json'; this._body = JSON.stringify(data); return this; },
+        send: function(body) { if (typeof body === 'object' && !this._headers['content-type']) return this.json(body); this._body = typeof body === 'string' ? body : String(body); return this; },
+        end: function(body) { if (body !== undefined) this._body = String(body); return this; },
+        redirect: function(statusOrUrl, maybeUrl) { if (typeof statusOrUrl === 'string') { this._statusCode = 307; this._headers['location'] = statusOrUrl; } else { this._statusCode = statusOrUrl; this._headers['location'] = maybeUrl; } return this; }
     };
-    var req = {
-        method: reqData.method,
-        url: reqData.url,
-        headers: reqData.headers || {},
-        query: reqData.query || {},
-        body: reqData.body,
-        cookies: reqData.cookies || {}
-    };
+    var req = { method: reqData.method, url: reqData.url, headers: reqData.headers || {}, query: reqData.query || {}, body: reqData.body, cookies: reqData.cookies || {} };
 
     var result = handlerFn(req, res);
-
     if (result && typeof result.then === 'function') {
         globalThis.__rex_api_resolved = null;
         globalThis.__rex_api_rejected = null;
-        result.then(
-            function() {
-                globalThis.__rex_api_resolved = {
-                    statusCode: res._statusCode,
-                    headers: res._headers,
-                    body: res._body
-                };
-            },
-            function(e) { globalThis.__rex_api_rejected = e; }
-        );
+        result.then(function() { globalThis.__rex_api_resolved = { statusCode: res._statusCode, headers: res._headers, body: res._body }; }, function(e) { globalThis.__rex_api_rejected = e; });
         return '__REX_API_ASYNC__';
     }
-
-    return JSON.stringify({
-        statusCode: res._statusCode,
-        headers: res._headers,
-        body: res._body
-    });
+    return JSON.stringify({ statusCode: res._statusCode, headers: res._headers, body: res._body });
 };
 
 globalThis.__rex_resolve_api = function() {
@@ -310,13 +175,166 @@ globalThis.__rex_resolve_api = function() {
     if (globalThis.__rex_api_resolved !== null) return JSON.stringify(globalThis.__rex_api_resolved);
     throw new Error('API handler promise did not resolve');
 };
-"#,
-    );
+"#;
+
+/// Build the server bundle using rolldown.
+///
+/// Produces a self-contained IIFE that includes React, all pages, and SSR
+/// runtime functions. Runs in bare V8 with no module loader.
+async fn build_server_bundle(
+    config: &RexConfig,
+    scan: &ScanResult,
+    output_dir: &Path,
+) -> Result<PathBuf> {
+    let runtime_dir = runtime_server_dir()?;
+
+    // Generate virtual entry that imports everything and registers on globalThis
+    let entries_dir = output_dir.join("_server_entry");
+    fs::create_dir_all(&entries_dir)?;
+
+    let mut entry = String::new();
+
+    // Import React (resolved from node_modules by rolldown)
+    entry.push_str("import { createElement } from 'react';\n");
+    entry.push_str("import { renderToString } from 'react-dom/server';\n");
+    // Make these available to runtime functions via globals
+    entry.push_str("var __rex_createElement = createElement;\n");
+    entry.push_str("var __rex_renderToString = renderToString;\n\n");
+
+    // Import server-side head runtime (side effect: sets up globalThis.__rex_head_elements)
+    entry.push_str("import 'rex/head';\n\n");
+
+    // Import and register pages
+    entry.push_str("globalThis.__rex_pages = {};\n");
+    for (i, route) in scan.routes.iter().enumerate() {
+        let page_path = route.abs_path.to_string_lossy().replace('\\', "/");
+        let module_name = route.module_name();
+        entry.push_str(&format!("import * as __page{i} from '{page_path}';\n"));
+        entry.push_str(&format!(
+            "globalThis.__rex_pages['{module_name}'] = __page{i};\n"
+        ));
+    }
+
+    // Special pages (404, _error)
+    for (label, route_opt) in [("404", &scan.not_found), ("_error", &scan.error)] {
+        if let Some(route) = route_opt {
+            let page_path = route.abs_path.to_string_lossy().replace('\\', "/");
+            entry.push_str(&format!("import * as __page_{label} from '{page_path}';\n"));
+            entry.push_str(&format!(
+                "globalThis.__rex_pages['{label}'] = __page_{label};\n"
+            ));
+        }
+    }
+
+    // API routes
+    if !scan.api_routes.is_empty() {
+        entry.push_str("\nglobalThis.__rex_api_handlers = {};\n");
+        for (i, route) in scan.api_routes.iter().enumerate() {
+            let api_path = route.abs_path.to_string_lossy().replace('\\', "/");
+            let module_name = route.module_name();
+            entry.push_str(&format!("import * as __api{i} from '{api_path}';\n"));
+            entry.push_str(&format!(
+                "globalThis.__rex_api_handlers['{module_name}'] = __api{i};\n"
+            ));
+        }
+    }
+
+    // _app
+    if let Some(app) = &scan.app {
+        let app_path = app.abs_path.to_string_lossy().replace('\\', "/");
+        entry.push_str(&format!("\nimport * as __app from '{app_path}';\n"));
+        entry.push_str("globalThis.__rex_app = __app;\n");
+    }
+
+    // _document (imports rex/document which sets up __rex_render_document)
+    if let Some(doc) = &scan.document {
+        entry.push_str("\nimport 'rex/document';\n");
+        let doc_path = doc.abs_path.to_string_lossy().replace('\\', "/");
+        entry.push_str(&format!("import * as __doc from '{doc_path}';\n"));
+        entry.push_str("globalThis.__rex_document = __doc;\n");
+    }
+
+    // SSR runtime functions
+    entry.push_str(SSR_RUNTIME);
+
+    let entry_path = entries_dir.join("server-entry.js");
+    fs::write(&entry_path, &entry)?;
+
+    // CSS → empty module (server doesn't need CSS)
+    let mut module_types = rustc_hash::FxHashMap::default();
+    module_types.insert(".css".to_string(), rolldown::ModuleType::Empty);
+
+    let options = rolldown::BundlerOptions {
+        input: Some(vec![rolldown::InputItem {
+            name: Some("server-bundle".to_string()),
+            import: entry_path.to_string_lossy().to_string(),
+        }]),
+        cwd: Some(config.project_root.clone()),
+        format: Some(rolldown::OutputFormat::Iife),
+        dir: Some(output_dir.to_string_lossy().to_string()),
+        entry_filenames: Some("server-bundle.js".to_string().into()),
+        platform: Some(rolldown::Platform::Browser),
+        module_types: Some(module_types),
+        banner: Some(rolldown::AddonOutputOption::String(Some(
+            V8_POLYFILLS.to_string(),
+        ))),
+        // In IIFE mode, rolldown generates global references for imported
+        // packages at the call site: `})(react, react_dom_server)`.
+        // React is fully bundled inside the IIFE, so these params are unused,
+        // but we must map them to something that exists to avoid ReferenceError.
+        globals: Some(rolldown_common::GlobalsOutputOption::FxHashMap({
+            let mut m = rustc_hash::FxHashMap::default();
+            m.insert("react".to_string(), "globalThis".to_string());
+            m.insert("react-dom/server".to_string(), "globalThis".to_string());
+            m
+        })),
+        resolve: Some(rolldown::ResolveOptions {
+            alias: Some(vec![
+                (
+                    "rex/head".to_string(),
+                    vec![Some(
+                        runtime_dir.join("head.js").to_string_lossy().to_string(),
+                    )],
+                ),
+                (
+                    "rex/link".to_string(),
+                    vec![Some(
+                        runtime_dir.join("link.js").to_string_lossy().to_string(),
+                    )],
+                ),
+                (
+                    "rex/document".to_string(),
+                    vec![Some(
+                        runtime_dir
+                            .join("document.js")
+                            .to_string_lossy()
+                            .to_string(),
+                    )],
+                ),
+            ]),
+            extensions: Some(vec![
+                ".tsx".to_string(),
+                ".ts".to_string(),
+                ".jsx".to_string(),
+                ".js".to_string(),
+            ]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let mut bundler = rolldown::Bundler::new(options)
+        .map_err(|e| anyhow::anyhow!("Failed to create rolldown bundler: {e}"))?;
+
+    bundler
+        .write()
+        .await
+        .map_err(|e| anyhow::anyhow!("Server bundle failed: {e:?}"))?;
+
+    let _ = fs::remove_dir_all(&entries_dir);
 
     let bundle_path = output_dir.join("server-bundle.js");
-    fs::write(&bundle_path, &bundle)?;
     info!(path = %bundle_path.display(), "Server bundle written");
-
     Ok(bundle_path)
 }
 
@@ -603,6 +621,21 @@ fn runtime_client_dir() -> Result<PathBuf> {
     anyhow::bail!("Could not find runtime/client directory")
 }
 
+/// Get the path to the server runtime files.
+/// These are embedded in the source tree at runtime/server/.
+fn runtime_server_dir() -> Result<PathBuf> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let runtime_dir = manifest_dir.join("../../runtime/server");
+    if runtime_dir.exists() {
+        return Ok(runtime_dir.canonicalize()?);
+    }
+    let cwd_runtime = PathBuf::from("runtime/server");
+    if cwd_runtime.exists() {
+        return Ok(cwd_runtime.canonicalize()?);
+    }
+    anyhow::bail!("Could not find runtime/server directory")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -716,28 +749,24 @@ mod tests {
         let result = build_bundles(&config, &scan).await.unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
-        // Preamble
-        assert!(bundle.starts_with("// Rex Server Bundle"), "should start with preamble");
-        assert!(bundle.contains("'use strict'"), "should have strict mode");
+        // V8 polyfills (injected as banner)
+        assert!(bundle.contains("globalThis.process"), "should have process polyfill");
+        assert!(bundle.contains("MessageChannel"), "should have MessageChannel polyfill");
 
         // Page registry
-        assert!(bundle.contains("globalThis.__rex_pages"), "should init page registry");
-        assert!(
-            bundle.contains("globalThis.__rex_pages['index']"),
-            "should register index page"
-        );
+        assert!(bundle.contains("__rex_pages"), "should init page registry");
 
         // SSR runtime functions
         assert!(
-            bundle.contains("globalThis.__rex_render_page"),
+            bundle.contains("__rex_render_page"),
             "should have render function"
         );
         assert!(
-            bundle.contains("globalThis.__rex_get_server_side_props"),
+            bundle.contains("__rex_get_server_side_props"),
             "should have GSSP executor"
         );
         assert!(
-            bundle.contains("globalThis.__rex_resolve_gssp"),
+            bundle.contains("__rex_resolve_gssp"),
             "should have GSSP resolver"
         );
         assert!(
@@ -747,7 +776,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_server_bundle_cjs_format() {
+    async fn test_server_bundle_iife_format() {
         let (_tmp, config, scan) = setup_test_project(
             &[(
                 "index.tsx",
@@ -766,39 +795,20 @@ mod tests {
         let result = build_bundles(&config, &scan).await.unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
-        // Should use CJS, not ESM
-        // The page code is inside IIFEs, check it doesn't have raw ESM
+        // Should be IIFE format — no raw ESM import/export at top level
         assert!(
-            !bundle.contains("export default"),
-            "should not have ESM export default"
+            !bundle.contains("\nimport "),
+            "should not have ESM import statements"
         );
         assert!(
-            !bundle.contains("import React"),
-            "should not have ESM import"
-        );
-
-        // Should have require() shim
-        assert!(
-            bundle.contains("var require = function(name)"),
-            "should have require shim"
-        );
-        assert!(
-            bundle.contains("globalThis.__React"),
-            "require shim should reference React global"
+            !bundle.contains("\nexport "),
+            "should not have ESM export statements"
         );
 
-        // CJS module wrapper
+        // Should be self-contained (React bundled in, not externalized)
         assert!(
-            bundle.contains("var exports = {}"),
-            "should have CJS exports"
-        );
-        assert!(
-            bundle.contains("var module = { exports: exports }"),
-            "should have CJS module"
-        );
-        assert!(
-            bundle.contains("return module.exports"),
-            "should return module.exports"
+            bundle.contains("createElement"),
+            "should contain bundled React createElement"
         );
     }
 
@@ -825,15 +835,15 @@ mod tests {
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         assert!(
-            bundle.contains("globalThis.__rex_pages['index']"),
+            bundle.contains("__rex_pages[\"index\"]") || bundle.contains("__rex_pages['index']"),
             "should have index page"
         );
         assert!(
-            bundle.contains("globalThis.__rex_pages['about']"),
+            bundle.contains("__rex_pages[\"about\"]") || bundle.contains("__rex_pages['about']"),
             "should have about page"
         );
         assert!(
-            bundle.contains("globalThis.__rex_pages['blog/[slug]']"),
+            bundle.contains("__rex_pages[\"blog/[slug]\"]") || bundle.contains("__rex_pages['blog/[slug]']"),
             "should have dynamic page"
         );
     }
@@ -857,12 +867,8 @@ mod tests {
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         assert!(
-            bundle.contains("globalThis.__rex_app"),
+            bundle.contains("__rex_app"),
             "should register _app"
-        );
-        assert!(
-            bundle.contains("// _app"),
-            "should have _app comment marker"
         );
     }
 
@@ -985,13 +991,18 @@ mod tests {
         fs::create_dir_all(&react_dom_dir).unwrap();
         fs::write(
             react_dom_dir.join("package.json"),
-            r#"{"name":"react-dom","version":"19.0.0","main":"index.js","exports":{".":{"default":"./index.js"},"./client":{"default":"./client.js"}}}"#,
+            r#"{"name":"react-dom","version":"19.0.0","main":"index.js","exports":{".":{"default":"./index.js"},"./client":{"default":"./client.js"},"./server":{"default":"./server.js"}}}"#,
         )
         .unwrap();
         fs::write(react_dom_dir.join("index.js"), "export default {};\n").unwrap();
         fs::write(
             react_dom_dir.join("client.js"),
             "export function hydrateRoot() {}\nexport function createRoot() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            react_dom_dir.join("server.js"),
+            "export function renderToString(el) { return ''; }\n",
         )
         .unwrap();
     }
@@ -1017,12 +1028,8 @@ mod tests {
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         assert!(
-            bundle.contains("globalThis.__rex_document"),
+            bundle.contains("__rex_document"),
             "should register _document"
-        );
-        assert!(
-            bundle.contains("// _document"),
-            "should have _document comment marker"
         );
     }
 

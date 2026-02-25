@@ -5,7 +5,6 @@ use rex_core::RexConfig;
 use rex_router::{scan_pages, RouteTrie};
 use rex_server::RexServer;
 use rex_v8::{init_v8, IsolatePool};
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
@@ -88,16 +87,10 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
     let build_result = build_bundles(&config, &scan).await?;
     info!(build_id = %build_result.build_id, "Build complete");
 
-    // Load environment variables from .env files
-    let env_vars = load_env_vars(&config);
-
     // Initialize V8
     init_v8();
 
-    // Load React runtime (minimal CJS shim for V8)
-    let react_runtime = load_react_runtime(&config, &env_vars)?;
-
-    // Load server bundle
+    // Load self-contained server bundle (includes React, polyfills, pages, SSR runtime)
     let server_bundle = std::fs::read_to_string(&build_result.server_bundle_path)?;
 
     // Create isolate pool
@@ -108,7 +101,6 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
 
     let pool = IsolatePool::new(
         pool_size,
-        Arc::new(react_runtime),
         Arc::new(server_bundle),
     )?;
 
@@ -227,13 +219,9 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
     let trie = RouteTrie::from_routes(&scan.routes);
     let api_trie = RouteTrie::from_routes(&scan.api_routes);
 
-    // Load environment variables from .env files
-    let env_vars = load_env_vars(&config);
-
     // Initialize V8
     init_v8();
 
-    let react_runtime = load_react_runtime(&config, &env_vars)?;
     let server_bundle = std::fs::read_to_string(config.server_bundle_path())?;
 
     let pool_size = std::thread::available_parallelism()
@@ -242,7 +230,6 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
 
     let pool = IsolatePool::new(
         pool_size,
-        Arc::new(react_runtime),
         Arc::new(server_bundle),
     )?;
 
@@ -262,293 +249,6 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
 
     info!("Rex production server starting on http://localhost:{port}");
     server.serve().await
-}
-
-/// Load environment variables from .env files following Next.js priority order.
-/// Later files take precedence over earlier ones; explicit env vars override all.
-fn load_env_vars(config: &RexConfig) -> BTreeMap<String, String> {
-    let root = &config.project_root;
-    let mode = if config.dev { "development" } else { "production" };
-
-    // Next.js load order (lowest to highest priority):
-    // .env, .env.local, .env.{mode}, .env.{mode}.local
-    let files = [
-        root.join(".env"),
-        root.join(".env.local"),
-        root.join(format!(".env.{mode}")),
-        root.join(format!(".env.{mode}.local")),
-    ];
-
-    let mut vars = BTreeMap::new();
-
-    for file in &files {
-        if file.exists() {
-            match dotenvy::from_path_iter(file) {
-                Ok(iter) => {
-                    for item in iter {
-                        if let Ok((key, value)) = item {
-                            vars.insert(key, value);
-                        }
-                    }
-                    info!(file = %file.display(), "Loaded env file");
-                }
-                Err(e) => {
-                    tracing::warn!(file = %file.display(), error = %e, "Failed to load env file");
-                }
-            }
-        }
-    }
-
-    // Always set NODE_ENV
-    vars.entry("NODE_ENV".to_string())
-        .or_insert_with(|| mode.to_string());
-
-    vars
-}
-
-/// Generate a JS object literal for process.env from loaded environment variables.
-fn env_vars_to_js(vars: &BTreeMap<String, String>) -> String {
-    let mut js = String::from("{ ");
-    for (i, (key, value)) in vars.iter().enumerate() {
-        if i > 0 {
-            js.push_str(", ");
-        }
-        // Escape key (identifiers) and value (strings)
-        let escaped_value = value.replace('\\', "\\\\").replace('\'', "\\'");
-        js.push_str(&format!("'{}': '{}'", key, escaped_value));
-    }
-    js.push_str(" }");
-    js
-}
-
-/// Rex Head component runtime — loaded into V8 alongside React
-const REX_HEAD_RUNTIME: &str = include_str!("../../../runtime/head.js");
-
-/// Rex Document component runtime — loaded into V8 for _document support
-const REX_DOCUMENT_RUNTIME: &str = include_str!("../../../runtime/document.js");
-
-/// Load React runtime for V8 SSR from node_modules.
-/// Supports both CJS (React 19+) and UMD (React 18) builds.
-fn load_react_runtime(config: &RexConfig, env_vars: &BTreeMap<String, String>) -> Result<String> {
-    let nm = config.node_modules_dir();
-    let env_js = env_vars_to_js(env_vars);
-
-    // Try CJS paths first (React 19+)
-    let react_cjs = nm.join("react/cjs/react.production.js");
-    // React 19 moved renderToString to the "legacy" server module;
-    // the non-legacy module only exposes renderToReadableStream.
-    let react_dom_server_cjs = nm.join("react-dom/cjs/react-dom-server-legacy.browser.production.js");
-
-    if react_cjs.exists() && react_dom_server_cjs.exists() {
-        let react_js = std::fs::read_to_string(&react_cjs)?;
-        let react_dom_server_js = std::fs::read_to_string(&react_dom_server_cjs)?;
-
-        // react-dom-server requires 'react' and 'react-dom', so load react-dom base too
-        let react_dom_cjs = nm.join("react-dom/cjs/react-dom.production.js");
-        let react_dom_js = if react_dom_cjs.exists() {
-            std::fs::read_to_string(&react_dom_cjs)?
-        } else {
-            String::new()
-        };
-
-        let mut runtime = format!(
-            r#"// React Runtime for V8 SSR (CJS)
-if (typeof process === 'undefined') {{
-    globalThis.process = {{ env: {env_js} }};
-}}
-
-// Polyfill Web APIs that React expects but V8 doesn't provide.
-// Use Promise.resolve().then() to defer callbacks to the microtask queue
-// instead of calling them synchronously. V8's perform_microtask_checkpoint()
-// will drain these at the right time.
-if (typeof MessageChannel === 'undefined') {{
-    globalThis.MessageChannel = function() {{
-        var channel = this;
-        this.port1 = {{ onmessage: null }};
-        this.port2 = {{
-            postMessage: function() {{
-                if (channel.port1.onmessage) {{
-                    var cb = channel.port1.onmessage;
-                    Promise.resolve().then(function() {{ cb({{ data: undefined }}); }});
-                }}
-            }}
-        }};
-    }};
-}}
-if (typeof setTimeout === 'undefined') {{
-    var __timerIdCounter = 1;
-    var __pendingTimers = {{}};
-    globalThis.setTimeout = function(fn) {{
-        var id = __timerIdCounter++;
-        __pendingTimers[id] = true;
-        Promise.resolve().then(function() {{
-            if (__pendingTimers[id]) {{
-                delete __pendingTimers[id];
-                fn();
-            }}
-        }});
-        return id;
-    }};
-    globalThis.clearTimeout = function(id) {{
-        delete __pendingTimers[id];
-    }};
-}}
-if (typeof queueMicrotask === 'undefined') {{
-    globalThis.queueMicrotask = function(fn) {{ Promise.resolve().then(fn); }};
-}}
-if (typeof performance === 'undefined') {{
-    globalThis.performance = {{ now: function() {{ return Date.now(); }} }};
-}}
-if (typeof TextEncoder === 'undefined') {{
-    globalThis.TextEncoder = function() {{}};
-    globalThis.TextEncoder.prototype.encode = function(s) {{
-        var arr = [];
-        for (var i = 0; i < s.length; i++) arr.push(s.charCodeAt(i));
-        return new Uint8Array(arr);
-    }};
-}}
-if (typeof TextDecoder === 'undefined') {{
-    globalThis.TextDecoder = function() {{}};
-    globalThis.TextDecoder.prototype.decode = function(arr) {{
-        var s = '';
-        for (var i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i]);
-        return s;
-    }};
-}}
-
-var __modules = {{}};
-
-// React CJS
-(function() {{
-    var exports = {{}};
-    var module = {{ exports: exports }};
-{react_js}
-    __modules['react'] = module.exports;
-}})();
-globalThis.__React = __modules['react'];
-globalThis.React = __modules['react'];
-
-// ReactDOM CJS
-(function() {{
-    var exports = {{}};
-    var module = {{ exports: exports }};
-    var require = function(name) {{ return __modules[name]; }};
-{react_dom_js}
-    __modules['react-dom'] = module.exports;
-}})();
-
-// ReactDOMServer CJS
-(function() {{
-    var exports = {{}};
-    var module = {{ exports: exports }};
-    var require = function(name) {{ return __modules[name]; }};
-{react_dom_server_js}
-    __modules['react-dom/server'] = module.exports;
-}})();
-globalThis.__ReactDOMServer = __modules['react-dom/server'];
-globalThis.ReactDOMServer = __modules['react-dom/server'];
-"#
-        );
-
-        runtime.push_str(REX_HEAD_RUNTIME);
-        runtime.push_str(REX_DOCUMENT_RUNTIME);
-        return Ok(runtime);
-    }
-
-    // Try UMD paths (React 18)
-    let react_umd = nm.join("react/umd/react.production.min.js");
-    let react_dom_server_umd = nm.join("react-dom/umd/react-dom-server.browser.production.min.js");
-
-    if react_umd.exists() && react_dom_server_umd.exists() {
-        let react_js = std::fs::read_to_string(&react_umd)?;
-        let react_dom_js = std::fs::read_to_string(&react_dom_server_umd)?;
-
-        let mut runtime = format!(
-            r#"// React Runtime for V8 SSR (UMD)
-if (typeof process === 'undefined') {{
-    globalThis.process = {{ env: {env_js} }};
-}}
-
-(function() {{
-{react_js}
-}})();
-globalThis.__React = globalThis.React;
-
-(function() {{
-{react_dom_js}
-}})();
-globalThis.__ReactDOMServer = globalThis.ReactDOMServer;
-"#
-        );
-
-        runtime.push_str(REX_HEAD_RUNTIME);
-        runtime.push_str(REX_DOCUMENT_RUNTIME);
-        return Ok(runtime);
-    }
-
-    // Fallback: provide a stub that will error clearly
-    info!("React not found in node_modules, using stub. Run `npm install react react-dom` in your project.");
-    let mut stub = format!(r#"
-// Stub React runtime - install react and react-dom for real SSR
-if (typeof process === 'undefined') {{
-    globalThis.process = {{ env: {env_js} }};
-}}
-globalThis.__React = {{
-    createElement: function(type, props) {{
-        var children = Array.prototype.slice.call(arguments, 2);
-        return {{ type: type, props: props || {{}}, children: children, $$typeof: Symbol.for('react.element') }};
-    }},
-    Fragment: Symbol.for('react.fragment'),
-}};
-globalThis.__ReactDOMServer = {{
-    renderToString: function(element) {{
-        if (!element) return '';
-        if (typeof element === 'string') return element;
-        if (typeof element.type === 'function') {{
-            var result = element.type(element.props);
-            return globalThis.__ReactDOMServer.renderToString(result);
-        }}
-        if (typeof element.type === 'string') {{
-            var tag = element.type;
-            var html = '<' + tag;
-            if (element.props) {{
-                Object.keys(element.props).forEach(function(key) {{
-                    if (key === 'children' || key === 'dangerouslySetInnerHTML') return;
-                    if (key === 'className') {{
-                        html += ' class="' + element.props[key] + '"';
-                    }} else if (typeof element.props[key] === 'string') {{
-                        html += ' ' + key + '="' + element.props[key] + '"';
-                    }}
-                }});
-            }}
-            html += '>';
-            var children = element.props && element.props.children;
-            if (children) {{
-                if (Array.isArray(children)) {{
-                    children.forEach(function(child) {{
-                        html += globalThis.__ReactDOMServer.renderToString(child);
-                    }});
-                }} else {{
-                    html += globalThis.__ReactDOMServer.renderToString(children);
-                }}
-            }}
-            if (element.children && element.children.length > 0) {{
-                element.children.forEach(function(child) {{
-                    html += globalThis.__ReactDOMServer.renderToString(child);
-                }});
-            }}
-            html += '</' + tag + '>';
-            return html;
-        }}
-        return '';
-    }},
-}};
-globalThis.React = globalThis.__React;
-globalThis.ReactDOMServer = globalThis.__ReactDOMServer;
-"#);
-    stub.push_str(REX_HEAD_RUNTIME);
-    stub.push_str(REX_DOCUMENT_RUNTIME);
-    Ok(stub)
 }
 
 async fn hmr_client_handler() -> impl axum::response::IntoResponse {

@@ -3,7 +3,7 @@
 ## Quick Reference
 
 - **Build**: `cargo build` (first build is slow due to V8 compilation)
-- **Test**: `cargo test` — 43 tests across rex_router, rex_build, rex_v8, and rex_server
+- **Test**: `cargo test` — 44 tests across rex_router, rex_build, rex_v8, and rex_server
 - **Check**: `cargo check` — must be zero warnings
 - **Run dev server**: `cargo run -- dev --root fixtures/basic`
 - **Verbose logging**: `RUST_LOG=rex=debug cargo run -- dev --root fixtures/basic`
@@ -15,11 +15,11 @@
 |-------|---------|-----------|
 | `rex_core` | Config, shared types | `config.rs`, `route.rs` |
 | `rex_router` | File scanner + trie matcher | `scanner.rs`, `matcher.rs` |
-| `rex_build` | SWC transforms + bundler | `transform.rs`, `bundler.rs` |
+| `rex_build` | Rolldown bundler (server + client) | `bundler.rs` |
 | `rex_v8` | V8 isolate pool + SSR | `ssr_isolate.rs`, `isolate_pool.rs` |
 | `rex_server` | Axum handlers + HTML doc | `handlers.rs`, `document.rs`, `server.rs` |
 | `rex_dev` | File watcher + HMR WS | `watcher.rs`, `hmr.rs` |
-| `rex_cli` | CLI entry, React loader | `main.rs` |
+| `rex_cli` | CLI entry | `main.rs` |
 
 ## V8 Crate (v146) Patterns
 
@@ -37,27 +37,40 @@ Async GSSP functions return promises. Resolve them with:
 self.isolate.perform_microtask_checkpoint();
 ```
 
-## SWC (latest) Patterns
+## Rolldown (Bundler)
 
-```rust
-let mut program = Program::Module(module);
-strip(unresolved_mark, top_level_mark).process(&mut program);
-```
+All bundles built by rolldown (Rust-native, OXC-based). Git dependency from `main` branch. OXC handles TSX/JSX parsing, TypeScript stripping, and module resolution — no SWC dependency.
 
-Server bundles use `Runtime::Classic` (React.createElement), not automatic JSX runtime.
+### Client Bundles
+- **ESM output** with code splitting — React becomes a shared chunk
+- No vendor scripts or externals — rolldown resolves all deps from `node_modules`
+- CSS imports mapped to `ModuleType::Empty` (CSS collected separately)
+- `rolldown_common::Output` enum for matching `Chunk`/`Asset` in build output
+- Virtual entry files generated per page, written to temp `_entries/` dir
+- `<script type="module">` in HTML document
+- Resolve aliases: `rex/link` and `rex/head` → `runtime/client/` stubs
 
-## React 19 Compatibility
+### Server Bundle
+- **IIFE output** — self-contained, runs in bare V8 with no module loader
+- Single virtual entry imports React, all pages, and SSR runtime
+- V8 polyfills injected as rolldown banner (runs before IIFE)
+- React bundled directly (not loaded separately as V8 global)
+- Resolve aliases: `rex/head`, `rex/link`, `rex/document` → `runtime/server/` stubs
+- `SsrIsolate::new(bundle_js)` takes single self-contained bundle
+- `IsolatePool::new(size, bundle_js)` — no separate React runtime parameter
 
-- No UMD builds — use CJS from `react/cjs/react.production.js`
-- `renderToString` is in the **legacy** module: `react-dom/cjs/react-dom-server-legacy.browser.production.js`
-- CJS modules need `require()` polyfill and `__modules` registry in V8
-- Needs Web API polyfills: `MessageChannel`, `setTimeout`, `queueMicrotask`, `TextEncoder`, `TextDecoder`, `performance`
+### Common
+- `build_bundles()` is async (rolldown requires it)
+- CSS handled separately (scanned from source, copied to output)
+- `Platform::Neutral` for server, `Platform::Browser` for client
 
 ## Server Bundle Format
 
-Pages registered at `globalThis.__rex_pages[routeKey]`. ESM converted to CJS via SWC `common_js` AST transform. Bundle preamble includes `require()` shim mapping `'react'` to V8 globals. Two global runtime functions:
-- `__rex_render_page(routeKey, propsJson)` → HTML
+Pages registered at `globalThis.__rex_pages[routeKey]`. Global runtime functions:
+- `__rex_render_page(routeKey, propsJson)` → JSON `{ body, head }`
 - `__rex_get_server_side_props(routeKey, contextJson)` → JSON (returns `"__REX_ASYNC__"` for promises)
+- `__rex_call_api_handler(routeKey, reqJson)` → JSON (returns `"__REX_API_ASYNC__"` for promises)
+- `__rex_render_document()` → JSON `{ htmlAttrs, bodyAttrs, headContent }`
 
 ## Plane Project Tracker
 

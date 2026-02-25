@@ -74,7 +74,10 @@ macro_rules! v8_call {
 
 impl SsrIsolate {
     /// Create a new SSR isolate and evaluate the server bundle.
-    pub fn new(react_runtime_js: &str, server_bundle_js: &str) -> Result<Self> {
+    ///
+    /// The bundle is self-contained: it includes V8 polyfills, React,
+    /// all pages, and SSR runtime functions in a single IIFE.
+    pub fn new(server_bundle_js: &str) -> Result<Self> {
         let mut isolate = v8::Isolate::new(v8::CreateParams::default());
 
         let (context, render_fn, gssp_fn, api_handler_fn, document_fn) = {
@@ -116,11 +119,7 @@ impl SsrIsolate {
                 global.set(scope, k.into(), global.into());
             }
 
-            // Evaluate React runtime
-            v8_eval!(scope, react_runtime_js, "react-runtime.js")
-                .context("Failed to evaluate React runtime")?;
-
-            // Evaluate server bundle
+            // Evaluate the self-contained server bundle
             v8_eval!(scope, server_bundle_js, "server-bundle.js")
                 .context("Failed to evaluate server bundle")?;
 
@@ -480,8 +479,8 @@ globalThis.__rex_resolve_gssp = function() {
 
     fn make_isolate(pages: &[(&str, &str, Option<&str>)]) -> SsrIsolate {
         crate::init_v8();
-        let bundle = make_server_bundle(pages);
-        SsrIsolate::new(MOCK_REACT_RUNTIME, &bundle).expect("failed to create isolate")
+        let bundle = format!("{}\n{}", MOCK_REACT_RUNTIME, make_server_bundle(pages));
+        SsrIsolate::new(&bundle).expect("failed to create isolate")
     }
 
     #[test]
@@ -674,7 +673,7 @@ globalThis.__rex_resolve_gssp = function() {
     #[test]
     fn test_invalid_server_bundle() {
         crate::init_v8();
-        let result = SsrIsolate::new(MOCK_REACT_RUNTIME, "this is not valid javascript {{{{");
+        let result = SsrIsolate::new("this is not valid javascript {{{{");
         assert!(result.is_err());
     }
 
