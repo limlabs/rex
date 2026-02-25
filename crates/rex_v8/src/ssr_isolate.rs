@@ -1,5 +1,14 @@
 use anyhow::{Context, Result};
+use serde::Deserialize;
 use tracing::debug;
+
+/// Result of SSR page rendering, containing both body HTML and head elements.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RenderResult {
+    pub body: String,
+    #[serde(default)]
+    pub head: String,
+}
 
 /// An SSR isolate that owns a V8 isolate and can render pages.
 /// Must be used on the same OS thread that created it (V8 isolates are !Send).
@@ -144,8 +153,8 @@ impl SsrIsolate {
         })
     }
 
-    /// Call __rex_render_page(routeKey, propsJson) and return the HTML string.
-    pub fn render_page(&mut self, route_key: &str, props_json: &str) -> Result<String> {
+    /// Call __rex_render_page(routeKey, propsJson) and return the rendered body + head HTML.
+    pub fn render_page(&mut self, route_key: &str, props_json: &str) -> Result<RenderResult> {
         v8::scope_with_context!(scope, &mut self.isolate, &self.context);
 
         let func = v8::Local::new(scope, &self.render_fn);
@@ -158,7 +167,9 @@ impl SsrIsolate {
         let result = v8_call!(scope, func, undef.into(), &[arg0.into(), arg1.into()])
             .map_err(|e| anyhow::anyhow!("SSR render error: {e}"))?;
 
-        Ok(result.to_rust_string_lossy(scope))
+        let json_str = result.to_rust_string_lossy(scope);
+        serde_json::from_str(&json_str)
+            .context("Failed to parse render result JSON")
     }
 
     /// Call __rex_get_server_side_props(routeKey, contextJson) and return JSON.
@@ -309,6 +320,17 @@ mod tests {
         // SSR runtime (same as bundler.rs produces)
         bundle.push_str(
             r#"
+globalThis.__rex_head_elements = [];
+globalThis.__rex_head_component = function Head(props) {
+    if (props.children) {
+        var children = Array.isArray(props.children) ? props.children : [props.children];
+        for (var i = 0; i < children.length; i++) {
+            if (children[i]) globalThis.__rex_head_elements.push(children[i]);
+        }
+    }
+    return null;
+};
+
 globalThis.__rex_render_page = function(routeKey, propsJson) {
     var React = globalThis.__React;
     var ReactDOMServer = globalThis.__ReactDOMServer;
@@ -320,8 +342,17 @@ globalThis.__rex_render_page = function(routeKey, propsJson) {
     var Component = page.default;
     if (!Component) throw new Error('No default export: ' + routeKey);
     var props = JSON.parse(propsJson);
+
+    globalThis.__rex_head_elements = [];
     var element = React.createElement(Component, props);
-    return ReactDOMServer.renderToString(element);
+    var bodyHtml = ReactDOMServer.renderToString(element);
+
+    var headHtml = '';
+    for (var i = 0; i < globalThis.__rex_head_elements.length; i++) {
+        headHtml += ReactDOMServer.renderToString(globalThis.__rex_head_elements[i]);
+    }
+
+    return JSON.stringify({ body: bodyHtml, head: headHtml });
 };
 
 globalThis.__rex_gssp_resolved = null;
@@ -369,8 +400,9 @@ globalThis.__rex_resolve_gssp = function() {
             "function Index() { return React.createElement('h1', null, 'Hello'); }",
             None,
         )]);
-        let html = iso.render_page("index", "{}").unwrap();
-        assert_eq!(html, "<h1>Hello</h1>");
+        let result = iso.render_page("index", "{}").unwrap();
+        assert_eq!(result.body, "<h1>Hello</h1>");
+        assert_eq!(result.head, "");
     }
 
     #[test]
@@ -380,8 +412,8 @@ globalThis.__rex_resolve_gssp = function() {
             "function Greet(props) { return React.createElement('p', null, 'Hi ' + props.name); }",
             None,
         )]);
-        let html = iso.render_page("greet", r#"{"name":"Rex"}"#).unwrap();
-        assert_eq!(html, "<p>Hi Rex</p>");
+        let result = iso.render_page("greet", r#"{"name":"Rex"}"#).unwrap();
+        assert_eq!(result.body, "<p>Hi Rex</p>");
     }
 
     #[test]
@@ -396,8 +428,8 @@ globalThis.__rex_resolve_gssp = function() {
             }"#,
             None,
         )]);
-        let html = iso.render_page("nested", "{}").unwrap();
-        assert_eq!(html, r#"<div class="wrapper"><h1>Title</h1><p>Body</p></div>"#);
+        let result = iso.render_page("nested", "{}").unwrap();
+        assert_eq!(result.body, r#"<div class="wrapper"><h1>Title</h1><p>Body</p></div>"#);
     }
 
     #[test]
@@ -513,7 +545,7 @@ globalThis.__rex_resolve_gssp = function() {
             "function Page() { return React.createElement('p', null, 'v1'); }",
             None,
         )]);
-        assert_eq!(iso.render_page("page", "{}").unwrap(), "<p>v1</p>");
+        assert_eq!(iso.render_page("page", "{}").unwrap().body, "<p>v1</p>");
 
         let new_bundle = make_server_bundle(&[(
             "page",
@@ -521,7 +553,7 @@ globalThis.__rex_resolve_gssp = function() {
             None,
         )]);
         iso.reload(&new_bundle).unwrap();
-        assert_eq!(iso.render_page("page", "{}").unwrap(), "<p>v2</p>");
+        assert_eq!(iso.render_page("page", "{}").unwrap().body, "<p>v2</p>");
     }
 
     #[test]
@@ -545,7 +577,7 @@ globalThis.__rex_resolve_gssp = function() {
             ),
         ]);
         iso.reload(&new_bundle).unwrap();
-        assert_eq!(iso.render_page("about", "{}").unwrap(), "<h1>About</h1>");
+        assert_eq!(iso.render_page("about", "{}").unwrap().body, "<h1>About</h1>");
     }
 
     #[test]
@@ -563,8 +595,59 @@ globalThis.__rex_resolve_gssp = function() {
             None,
         )]);
         for i in 0..5 {
-            let html = iso.render_page("page", &format!(r#"{{"n":{i}}}"#)).unwrap();
-            assert_eq!(html, format!("<b>{i}</b>"));
+            let result = iso.render_page("page", &format!(r#"{{"n":{i}}}"#)).unwrap();
+            assert_eq!(result.body, format!("<b>{i}</b>"));
         }
+    }
+
+    #[test]
+    fn test_render_with_head_elements() {
+        let mut iso = make_isolate(&[(
+            "seo",
+            r#"function SeoPage(props) {
+                var Head = globalThis.__rex_head_component;
+                return React.createElement('div', null,
+                    React.createElement(Head, null,
+                        React.createElement('title', null, props.title),
+                        React.createElement('meta', { name: 'description', content: 'A test page' })
+                    ),
+                    React.createElement('h1', null, props.title)
+                );
+            }"#,
+            None,
+        )]);
+        let result = iso.render_page("seo", r#"{"title":"My Page"}"#).unwrap();
+        assert!(result.body.contains("<h1>My Page</h1>"), "body should have h1: {}", result.body);
+        assert!(!result.body.contains("<title>"), "body should NOT contain title: {}", result.body);
+        assert!(result.head.contains("<title>My Page</title>"), "head should contain title: {}", result.head);
+        assert!(result.head.contains("description"), "head should contain meta description: {}", result.head);
+    }
+
+    #[test]
+    fn test_head_reset_between_renders() {
+        let mut iso = make_isolate(&[
+            (
+                "page1",
+                r#"function Page1() {
+                    var Head = globalThis.__rex_head_component;
+                    return React.createElement('div', null,
+                        React.createElement(Head, null, React.createElement('title', null, 'Page 1'))
+                    );
+                }"#,
+                None,
+            ),
+            (
+                "page2",
+                r#"function Page2() {
+                    return React.createElement('div', null, 'No head');
+                }"#,
+                None,
+            ),
+        ]);
+        let r1 = iso.render_page("page1", "{}").unwrap();
+        assert!(r1.head.contains("<title>Page 1</title>"), "page1 should have title");
+
+        let r2 = iso.render_page("page2", "{}").unwrap();
+        assert_eq!(r2.head, "", "page2 should have empty head (no leak from page1)");
     }
 }

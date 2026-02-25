@@ -1,6 +1,7 @@
 /// Assemble the final HTML document
 pub fn assemble_document(
     ssr_html: &str,
+    head_html: &str,
     props_json: &str,
     vendor_scripts: &[String],
     client_scripts: &[String],
@@ -15,6 +16,13 @@ pub fn assemble_document(
     html.push_str("<html>\n<head>\n");
     html.push_str("  <meta charset=\"utf-8\" />\n");
     html.push_str("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n");
+
+    // Inject head elements from rex/head (title, meta, etc.)
+    if !head_html.is_empty() {
+        html.push_str("  ");
+        html.push_str(head_html);
+        html.push('\n');
+    }
 
     // Preload client chunks
     for script in client_scripts {

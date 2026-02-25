@@ -35,12 +35,12 @@ async fn render_error_page(
         .execute(move |iso| iso.render_page(&key, &props_clone))
         .await;
 
-    let ssr_html = match ssr_result {
-        Ok(Ok(html)) => html,
+    let render = match ssr_result {
+        Ok(Ok(r)) => r,
         _ => return (status, Html(format!("{} Error", status.as_u16()))).into_response(),
     };
 
-    let document = assemble_document(&ssr_html, props, &state.manifest.vendor_scripts, &[], &state.build_id, state.is_dev);
+    let document = assemble_document(&render.body, &render.head, props, &state.manifest.vendor_scripts, &[], &state.build_id, state.is_dev);
 
     (status, Html(document)).into_response()
 }
@@ -164,12 +164,14 @@ pub async fn page_handler(
         .execute(move |iso| iso.render_page(&route_key_clone, &render_props_clone))
         .await;
 
-    let ssr_html = match ssr_result {
-        Ok(Ok(html)) => html,
+    let render = match ssr_result {
+        Ok(Ok(r)) => r,
         Ok(Err(e)) => {
             error!("SSR render error: {e}");
             if state.is_dev {
-                format!("<div style=\"color:red;font-family:monospace;padding:20px;\"><h2>SSR Error</h2><pre>{e}</pre></div>")
+                let err_html = format!("<div style=\"color:red;font-family:monospace;padding:20px;\"><h2>SSR Error</h2><pre>{e}</pre></div>");
+                let document = assemble_document(&err_html, "", &render_props, &state.manifest.vendor_scripts, &[], &state.build_id, state.is_dev);
+                return Html(document).into_response();
             } else if state.has_custom_error {
                 let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
                 return render_error_page(&state, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
@@ -196,7 +198,8 @@ pub async fn page_handler(
         .unwrap_or_default();
 
     let document = assemble_document(
-        &ssr_html,
+        &render.body,
+        &render.head,
         &render_props,
         &state.manifest.vendor_scripts,
         &client_scripts,
@@ -334,6 +337,17 @@ mod tests {
 
         bundle.push_str(
             r#"
+globalThis.__rex_head_elements = [];
+globalThis.__rex_head_component = function Head(props) {
+    if (props.children) {
+        var children = Array.isArray(props.children) ? props.children : [props.children];
+        for (var i = 0; i < children.length; i++) {
+            if (children[i]) globalThis.__rex_head_elements.push(children[i]);
+        }
+    }
+    return null;
+};
+
 globalThis.__rex_render_page = function(routeKey, propsJson) {
     var React = globalThis.__React;
     var ReactDOMServer = globalThis.__ReactDOMServer;
@@ -343,7 +357,14 @@ globalThis.__rex_render_page = function(routeKey, propsJson) {
     var Component = page.default;
     if (!Component) throw new Error('No default export: ' + routeKey);
     var props = JSON.parse(propsJson);
-    return ReactDOMServer.renderToString(React.createElement(Component, props));
+
+    globalThis.__rex_head_elements = [];
+    var bodyHtml = ReactDOMServer.renderToString(React.createElement(Component, props));
+    var headHtml = '';
+    for (var i = 0; i < globalThis.__rex_head_elements.length; i++) {
+        headHtml += ReactDOMServer.renderToString(globalThis.__rex_head_elements[i]);
+    }
+    return JSON.stringify({ body: bodyHtml, head: headHtml });
 };
 
 globalThis.__rex_gssp_resolved = null;

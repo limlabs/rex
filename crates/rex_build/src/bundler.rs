@@ -81,6 +81,7 @@ fn build_server_bundle(
     bundle.push_str(
         r#"var require = function(name) {
     if (name === 'react') return { default: globalThis.__React, createElement: globalThis.__React.createElement };
+    if (name === 'rex/head') return { default: globalThis.__rex_head_component, __esModule: true };
     return {};
 };
 "#,
@@ -119,7 +120,7 @@ fn build_server_bundle(
     // SSR functions
     bundle.push_str(
         r#"
-// SSR render function
+// SSR render function — returns JSON { body, head }
 globalThis.__rex_render_page = function(routeKey, propsJson) {
     var React = globalThis.__React;
     var ReactDOMServer = globalThis.__ReactDOMServer;
@@ -146,7 +147,17 @@ globalThis.__rex_render_page = function(routeKey, propsJson) {
         element = React.createElement(App, { Component: Component, pageProps: props });
     }
 
-    return ReactDOMServer.renderToString(element);
+    // Reset head collector, render, then collect head elements
+    globalThis.__rex_head_elements = [];
+    var bodyHtml = ReactDOMServer.renderToString(element);
+
+    // Render collected head elements to HTML
+    var headHtml = '';
+    for (var i = 0; i < globalThis.__rex_head_elements.length; i++) {
+        headHtml += ReactDOMServer.renderToString(globalThis.__rex_head_elements[i]);
+    }
+
+    return JSON.stringify({ body: bodyHtml, head: headHtml });
 };
 
 // getServerSideProps executor

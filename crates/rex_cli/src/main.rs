@@ -315,6 +315,9 @@ fn env_vars_to_js(vars: &BTreeMap<String, String>) -> String {
     js
 }
 
+/// Rex Head component runtime — loaded into V8 alongside React
+const REX_HEAD_RUNTIME: &str = include_str!("../../../runtime/head.js");
+
 /// Load React runtime for V8 SSR from node_modules.
 /// Supports both CJS (React 19+) and UMD (React 18) builds.
 fn load_react_runtime(config: &RexConfig, env_vars: &BTreeMap<String, String>) -> Result<String> {
@@ -339,7 +342,7 @@ fn load_react_runtime(config: &RexConfig, env_vars: &BTreeMap<String, String>) -
             String::new()
         };
 
-        let runtime = format!(
+        let mut runtime = format!(
             r#"// React Runtime for V8 SSR (CJS)
 if (typeof process === 'undefined') {{
     globalThis.process = {{ env: {env_js} }};
@@ -438,6 +441,7 @@ globalThis.ReactDOMServer = __modules['react-dom/server'];
 "#
         );
 
+        runtime.push_str(REX_HEAD_RUNTIME);
         return Ok(runtime);
     }
 
@@ -449,7 +453,7 @@ globalThis.ReactDOMServer = __modules['react-dom/server'];
         let react_js = std::fs::read_to_string(&react_umd)?;
         let react_dom_js = std::fs::read_to_string(&react_dom_server_umd)?;
 
-        let runtime = format!(
+        let mut runtime = format!(
             r#"// React Runtime for V8 SSR (UMD)
 if (typeof process === 'undefined') {{
     globalThis.process = {{ env: {env_js} }};
@@ -467,12 +471,13 @@ globalThis.__ReactDOMServer = globalThis.ReactDOMServer;
 "#
         );
 
+        runtime.push_str(REX_HEAD_RUNTIME);
         return Ok(runtime);
     }
 
     // Fallback: provide a stub that will error clearly
     info!("React not found in node_modules, using stub. Run `npm install react react-dom` in your project.");
-    Ok(format!(r#"
+    let mut stub = format!(r#"
 // Stub React runtime - install react and react-dom for real SSR
 if (typeof process === 'undefined') {{
     globalThis.process = {{ env: {env_js} }};
@@ -529,7 +534,9 @@ globalThis.__ReactDOMServer = {{
 }};
 globalThis.React = globalThis.__React;
 globalThis.ReactDOMServer = globalThis.__ReactDOMServer;
-"#))
+"#);
+    stub.push_str(REX_HEAD_RUNTIME);
+    Ok(stub)
 }
 
 async fn hmr_client_handler() -> impl axum::response::IntoResponse {
