@@ -1,4 +1,4 @@
-use crate::handlers::{self, AppState};
+use crate::handlers::{self, AppState, HotState};
 use anyhow::Result;
 use axum::routing::{any, get};
 use axum::Router;
@@ -7,7 +7,7 @@ use rex_router::RouteTrie;
 use rex_v8::IsolatePool;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tower_http::services::ServeDir;
 use tracing::info;
 
@@ -44,15 +44,17 @@ impl RexServer {
         has_custom_document: bool,
     ) -> Self {
         let state = Arc::new(AppState {
-            route_trie,
-            api_route_trie,
             isolate_pool,
-            manifest,
-            build_id,
             is_dev,
-            has_custom_404,
-            has_custom_error,
-            has_custom_document,
+            hot: RwLock::new(HotState {
+                route_trie,
+                api_route_trie,
+                manifest,
+                build_id,
+                has_custom_404,
+                has_custom_error,
+                has_custom_document,
+            }),
         });
 
         Self {

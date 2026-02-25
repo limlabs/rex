@@ -5,27 +5,39 @@ use axum::response::{Html, IntoResponse, Response};
 use rex_core::{ServerSidePropsContext, ServerSidePropsResult};
 use rex_router::RouteTrie;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tracing::{debug, error, info};
 
 use crate::document::{assemble_document, DocumentDescriptor};
 
-/// Shared application state
-pub struct AppState {
+/// State that can change during dev-mode rebuilds.
+#[derive(Clone)]
+pub struct HotState {
     pub route_trie: RouteTrie,
     pub api_route_trie: RouteTrie,
-    pub isolate_pool: rex_v8::IsolatePool,
     pub manifest: rex_build::AssetManifest,
     pub build_id: String,
-    pub is_dev: bool,
     pub has_custom_404: bool,
     pub has_custom_error: bool,
     pub has_custom_document: bool,
 }
 
+/// Shared application state
+pub struct AppState {
+    pub isolate_pool: rex_v8::IsolatePool,
+    pub is_dev: bool,
+    pub hot: RwLock<HotState>,
+}
+
+/// Snapshot the hot state (cheap clone, no lock held across await).
+fn snapshot(state: &Arc<AppState>) -> HotState {
+    state.hot.read().unwrap().clone()
+}
+
 /// Render a custom error page (404 or _error) via SSR, returning the full HTML document.
 async fn render_error_page(
     state: &Arc<AppState>,
+    hot: &HotState,
     page_key: &str,
     status: StatusCode,
     props: &str,
@@ -43,22 +55,22 @@ async fn render_error_page(
     };
 
     // Render _document if present
-    let doc_desc = get_document_descriptor(&state).await;
+    let doc_desc = get_document_descriptor(state, hot).await;
 
     let manifest_json = serde_json::to_string(&serde_json::json!({
-        "build_id": state.build_id,
-        "pages": state.manifest.pages,
+        "build_id": hot.build_id,
+        "pages": hot.manifest.pages,
     })).unwrap();
 
     let document = assemble_document(
         &render.body,
         &render.head,
         props,
-        &state.manifest.vendor_scripts,
+        &hot.manifest.vendor_scripts,
         &[],
-        &state.manifest.global_css,
-        state.manifest.app_script.as_deref(),
-        &state.build_id,
+        &hot.manifest.global_css,
+        hot.manifest.app_script.as_deref(),
+        &hot.build_id,
         state.is_dev,
         doc_desc.as_ref(),
         Some(&manifest_json),
@@ -68,8 +80,8 @@ async fn render_error_page(
 }
 
 /// Get document descriptor from _document rendering, if present.
-async fn get_document_descriptor(state: &Arc<AppState>) -> Option<DocumentDescriptor> {
-    if !state.has_custom_document {
+async fn get_document_descriptor(state: &Arc<AppState>, hot: &HotState) -> Option<DocumentDescriptor> {
+    if !hot.has_custom_document {
         return None;
     }
     let result = state
@@ -106,7 +118,8 @@ pub async fn api_handler(
     let path = uri.path();
     info!(path, method = %method, "Handling API request");
 
-    let route_match = match state.api_route_trie.match_path(path) {
+    let hot = snapshot(&state);
+    let route_match = match hot.api_route_trie.match_path(path) {
         Some(m) => m,
         None => return StatusCode::NOT_FOUND.into_response(),
     };
@@ -192,13 +205,15 @@ pub async fn page_handler(
     let path = uri.path();
     info!(path, "Handling page request");
 
+    let hot = snapshot(&state);
+
     // Try to match the route
-    let route_match = match state.route_trie.match_path(path) {
+    let route_match = match hot.route_trie.match_path(path) {
         Some(m) => m,
         None => {
             debug!(path, "No route matched");
-            if state.has_custom_404 {
-                return render_error_page(&state, "404", StatusCode::NOT_FOUND, "{}").await;
+            if hot.has_custom_404 {
+                return render_error_page(&state, &hot, "404", StatusCode::NOT_FOUND, "{}").await;
             }
             return (StatusCode::NOT_FOUND, Html("404 - Page Not Found".to_string())).into_response();
         }
@@ -268,17 +283,17 @@ pub async fn page_handler(
         Ok(Ok(json)) => json,
         Ok(Err(e)) => {
             error!("GSSP error: {e}");
-            if state.has_custom_error {
+            if hot.has_custom_error {
                 let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
-                return render_error_page(&state, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
+                return render_error_page(&state, &hot, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
             }
             return (StatusCode::INTERNAL_SERVER_ERROR, Html(format!("Server error: {e}"))).into_response();
         }
         Err(e) => {
             error!("Isolate pool error: {e}");
-            if state.has_custom_error {
+            if hot.has_custom_error {
                 let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
-                return render_error_page(&state, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
+                return render_error_page(&state, &hot, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
             }
             return (StatusCode::INTERNAL_SERVER_ERROR, Html("Internal server error".to_string())).into_response();
         }
@@ -296,8 +311,8 @@ pub async fn page_handler(
                 .unwrap();
         }
         Ok(ServerSidePropsResult::NotFound { not_found: true }) => {
-            if state.has_custom_404 {
-                return render_error_page(&state, "404", StatusCode::NOT_FOUND, "{}").await;
+            if hot.has_custom_404 {
+                return render_error_page(&state, &hot, "404", StatusCode::NOT_FOUND, "{}").await;
             }
             return (StatusCode::NOT_FOUND, Html("404 - Not Found".to_string())).into_response();
         }
@@ -330,54 +345,54 @@ pub async fn page_handler(
             error!("SSR render error: {e}");
             if state.is_dev {
                 let err_html = format!("<div style=\"color:red;font-family:monospace;padding:20px;\"><h2>SSR Error</h2><pre>{e}</pre></div>");
-                let document = assemble_document(&err_html, "", &render_props, &state.manifest.vendor_scripts, &[], &state.manifest.global_css, state.manifest.app_script.as_deref(), &state.build_id, state.is_dev, None, None);
+                let document = assemble_document(&err_html, "", &render_props, &hot.manifest.vendor_scripts, &[], &hot.manifest.global_css, hot.manifest.app_script.as_deref(), &hot.build_id, state.is_dev, None, None);
                 return Html(document).into_response();
-            } else if state.has_custom_error {
+            } else if hot.has_custom_error {
                 let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
-                return render_error_page(&state, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
+                return render_error_page(&state, &hot, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
             } else {
                 return (StatusCode::INTERNAL_SERVER_ERROR, Html("Internal server error".to_string())).into_response();
             }
         }
         Err(e) => {
             error!("Isolate pool error: {e}");
-            if state.has_custom_error {
+            if hot.has_custom_error {
                 let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
-                return render_error_page(&state, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
+                return render_error_page(&state, &hot, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
             }
             return (StatusCode::INTERNAL_SERVER_ERROR, Html("Internal server error".to_string())).into_response();
         }
     };
 
     // Look up client assets for this route
-    let page_assets = state.manifest.pages.get(&route_match.route.pattern);
+    let page_assets = hot.manifest.pages.get(&route_match.route.pattern);
     let client_scripts: Vec<String> = page_assets
         .map(|assets| vec![assets.js.clone()])
         .unwrap_or_default();
 
     // Collect CSS: global (from _app) + per-page
-    let mut css_files = state.manifest.global_css.clone();
+    let mut css_files = hot.manifest.global_css.clone();
     if let Some(assets) = page_assets {
         css_files.extend(assets.css.iter().cloned());
     }
 
     // Render _document if present
-    let doc_desc = get_document_descriptor(&state).await;
+    let doc_desc = get_document_descriptor(&state, &hot).await;
 
     let manifest_json = serde_json::to_string(&serde_json::json!({
-        "build_id": state.build_id,
-        "pages": state.manifest.pages,
+        "build_id": hot.build_id,
+        "pages": hot.manifest.pages,
     })).unwrap();
 
     let document = assemble_document(
         &render.body,
         &render.head,
         &render_props,
-        &state.manifest.vendor_scripts,
+        &hot.manifest.vendor_scripts,
         &client_scripts,
         &css_files,
-        state.manifest.app_script.as_deref(),
-        &state.build_id,
+        hot.manifest.app_script.as_deref(),
+        &hot.build_id,
         state.is_dev,
         doc_desc.as_ref(),
         Some(&manifest_json),
@@ -393,14 +408,16 @@ pub async fn data_handler(
     Path((build_id, page_path)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Response {
+    let hot = snapshot(&state);
+
     // Build ID mismatch = stale client
-    if build_id != state.build_id {
+    if build_id != hot.build_id {
         return StatusCode::NOT_FOUND.into_response();
     }
 
     let path = format!("/{}", page_path.trim_end_matches(".json"));
 
-    let route_match = match state.route_trie.match_path(&path) {
+    let route_match = match hot.route_trie.match_path(&path) {
         Some(m) => m,
         None => return StatusCode::NOT_FOUND.into_response(),
     };
@@ -661,15 +678,17 @@ globalThis.__rex_resolve_gsp = function() {
         let manifest = rex_build::AssetManifest::new("test-build-id".to_string());
 
         let state = Arc::new(AppState {
-            route_trie: trie,
-            api_route_trie: RouteTrie::from_routes(&[]),
             isolate_pool: pool,
-            manifest,
-            build_id: "test-build-id".to_string(),
             is_dev: false,
-            has_custom_404: false,
-            has_custom_error: false,
-            has_custom_document: false,
+            hot: RwLock::new(HotState {
+                route_trie: trie,
+                api_route_trie: RouteTrie::from_routes(&[]),
+                manifest,
+                build_id: "test-build-id".to_string(),
+                has_custom_404: false,
+                has_custom_error: false,
+                has_custom_document: false,
+            }),
         });
 
         Router::new()

@@ -2,7 +2,7 @@ use rex_core::{Route, RouteMatch};
 use std::collections::HashMap;
 
 /// A trie node for route matching
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TrieNode {
     /// Static children: segment string -> child node
     children: HashMap<String, TrieNode>,
@@ -26,7 +26,7 @@ impl TrieNode {
 }
 
 /// Trie-based route matcher with priority: static > dynamic > catch-all
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RouteTrie {
     root: TrieNode,
 }

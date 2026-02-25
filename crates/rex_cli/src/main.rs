@@ -162,7 +162,7 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
                 match rex_dev::rebuild::handle_file_event(
                     event,
                     &rebuild_config,
-                    &rebuild_state.isolate_pool,
+                    &rebuild_state,
                     &rebuild_hmr,
                 )
                 .await
