@@ -55,6 +55,41 @@ pub struct RouteMatch {
     pub params: HashMap<String, String>,
 }
 
+/// How a page fetches its data
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DataStrategy {
+    /// No data fetching — rendered with empty props
+    None,
+    /// getStaticProps — pre-rendered at build time
+    StaticProps,
+    /// getServerSideProps — rendered per-request
+    ServerSideProps,
+}
+
+/// Context passed to getStaticProps
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StaticPropsContext {
+    pub params: HashMap<String, String>,
+}
+
+/// Result from getStaticProps (same shape as GSSP result, plus revalidate)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum StaticPropsResult {
+    Props {
+        props: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        revalidate: Option<u64>,
+    },
+    Redirect {
+        redirect: RedirectConfig,
+    },
+    NotFound {
+        #[serde(rename = "notFound")]
+        not_found: bool,
+    },
+}
+
 /// Context passed to getServerSideProps
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSidePropsContext {

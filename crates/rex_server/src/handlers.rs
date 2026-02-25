@@ -235,12 +235,34 @@ pub async fn page_handler(
     };
     let context_json = serde_json::to_string(&context).unwrap();
 
-    // Execute getServerSideProps
-    let route_key_clone = route_key.clone();
-    let gssp_result = state
+    // Detect data strategy and execute the appropriate data function
+    let route_key_for_detect = route_key.clone();
+    let strategy = state
         .isolate_pool
-        .execute(move |iso| iso.get_server_side_props(&route_key_clone, &context_json))
-        .await;
+        .execute(move |iso| iso.detect_data_strategy(&route_key_for_detect))
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .unwrap_or_else(|| "getServerSideProps".to_string());
+
+    let route_key_clone = route_key.clone();
+    let gssp_result = match strategy.as_str() {
+        "getStaticProps" => {
+            // In dev mode, re-execute GSP on each request (like Next.js)
+            let ctx_json = serde_json::json!({ "params": context.params }).to_string();
+            state
+                .isolate_pool
+                .execute(move |iso| iso.get_static_props(&route_key_clone, &ctx_json))
+                .await
+        }
+        _ => {
+            // getServerSideProps or none
+            state
+                .isolate_pool
+                .execute(move |iso| iso.get_server_side_props(&route_key_clone, &context_json))
+                .await
+        }
+    };
 
     let props_json = match gssp_result {
         Ok(Ok(json)) => json,
@@ -384,22 +406,44 @@ pub async fn data_handler(
     };
 
     let route_key = route_match.route.module_name();
-    let context = ServerSidePropsContext {
-        params: route_match.params,
-        query: HashMap::new(),
-        resolved_url: path,
-        headers: headers
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect(),
-        cookies: HashMap::new(),
-    };
-    let context_json = serde_json::to_string(&context).unwrap();
+    let params = route_match.params.clone();
 
-    let result = state
+    // Detect data strategy
+    let route_key_detect = route_key.clone();
+    let strategy = state
         .isolate_pool
-        .execute(move |iso| iso.get_server_side_props(&route_key, &context_json))
-        .await;
+        .execute(move |iso| iso.detect_data_strategy(&route_key_detect))
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .unwrap_or_else(|| "getServerSideProps".to_string());
+
+    let result = match strategy.as_str() {
+        "getStaticProps" => {
+            let ctx_json = serde_json::json!({ "params": params }).to_string();
+            state
+                .isolate_pool
+                .execute(move |iso| iso.get_static_props(&route_key, &ctx_json))
+                .await
+        }
+        _ => {
+            let context = ServerSidePropsContext {
+                params,
+                query: HashMap::new(),
+                resolved_url: path,
+                headers: headers
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+                    .collect(),
+                cookies: HashMap::new(),
+            };
+            let context_json = serde_json::to_string(&context).unwrap();
+            state
+                .isolate_pool
+                .execute(move |iso| iso.get_server_side_props(&route_key, &context_json))
+                .await
+        }
+    };
 
     match result {
         Ok(Ok(json)) => Response::builder()
@@ -545,6 +589,43 @@ globalThis.__rex_resolve_gssp = function() {
     if (globalThis.__rex_gssp_rejected) throw globalThis.__rex_gssp_rejected;
     if (globalThis.__rex_gssp_resolved !== null) return JSON.stringify(globalThis.__rex_gssp_resolved);
     throw new Error('GSSP promise did not resolve');
+};
+
+globalThis.__rex_detect_data_strategy = function(routeKey) {
+    var page = globalThis.__rex_pages[routeKey];
+    if (!page) return 'none';
+    if (page.getStaticProps && page.getServerSideProps) {
+        throw new Error('Page exports both getStaticProps and getServerSideProps.');
+    }
+    if (page.getStaticProps) return 'getStaticProps';
+    if (page.getServerSideProps) return 'getServerSideProps';
+    return 'none';
+};
+
+globalThis.__rex_gsp_resolved = null;
+globalThis.__rex_gsp_rejected = null;
+
+globalThis.__rex_get_static_props = function(routeKey, contextJson) {
+    var page = globalThis.__rex_pages[routeKey];
+    if (!page || !page.getStaticProps) return JSON.stringify({ props: {} });
+    var context = JSON.parse(contextJson);
+    var result = page.getStaticProps(context);
+    if (result && typeof result.then === 'function') {
+        globalThis.__rex_gsp_resolved = null;
+        globalThis.__rex_gsp_rejected = null;
+        result.then(
+            function(v) { globalThis.__rex_gsp_resolved = v; },
+            function(e) { globalThis.__rex_gsp_rejected = e; }
+        );
+        return '__REX_GSP_ASYNC__';
+    }
+    return JSON.stringify(result);
+};
+
+globalThis.__rex_resolve_gsp = function() {
+    if (globalThis.__rex_gsp_rejected) throw globalThis.__rex_gsp_rejected;
+    if (globalThis.__rex_gsp_resolved !== null) return JSON.stringify(globalThis.__rex_gsp_resolved);
+    throw new Error('GSP promise did not resolve');
 };
 "#,
         );

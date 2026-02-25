@@ -175,6 +175,47 @@ globalThis.__rex_resolve_api = function() {
     if (globalThis.__rex_api_resolved !== null) return JSON.stringify(globalThis.__rex_api_resolved);
     throw new Error('API handler promise did not resolve');
 };
+
+// Detect data strategy for a page
+globalThis.__rex_detect_data_strategy = function(routeKey) {
+    var page = globalThis.__rex_pages[routeKey];
+    if (!page) return 'none';
+    if (page.getStaticProps && page.getServerSideProps) {
+        throw new Error('Page "' + routeKey + '" exports both getStaticProps and getServerSideProps. Use one or the other.');
+    }
+    if (page.getStaticProps) return 'getStaticProps';
+    if (page.getServerSideProps) return 'getServerSideProps';
+    return 'none';
+};
+
+// getStaticProps execution (parallel structure to GSSP)
+globalThis.__rex_gsp_resolved = null;
+globalThis.__rex_gsp_rejected = null;
+
+globalThis.__rex_get_static_props = function(routeKey, contextJson) {
+    var page = globalThis.__rex_pages[routeKey];
+    if (!page || !page.getStaticProps) return JSON.stringify({ props: {} });
+
+    var context = JSON.parse(contextJson);
+    var result = page.getStaticProps(context);
+
+    if (result && typeof result.then === 'function') {
+        globalThis.__rex_gsp_resolved = null;
+        globalThis.__rex_gsp_rejected = null;
+        result.then(
+            function(v) { globalThis.__rex_gsp_resolved = v; },
+            function(e) { globalThis.__rex_gsp_rejected = e; }
+        );
+        return '__REX_GSP_ASYNC__';
+    }
+    return JSON.stringify(result);
+};
+
+globalThis.__rex_resolve_gsp = function() {
+    if (globalThis.__rex_gsp_rejected) throw globalThis.__rex_gsp_rejected;
+    if (globalThis.__rex_gsp_resolved !== null) return JSON.stringify(globalThis.__rex_gsp_resolved);
+    throw new Error('getStaticProps promise did not resolve after microtask checkpoint');
+};
 "#;
 
 /// Build the server bundle using rolldown.
