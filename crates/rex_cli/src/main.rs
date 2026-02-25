@@ -112,8 +112,9 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
         Arc::new(server_bundle),
     )?;
 
-    // Build route trie
+    // Build route tries
     let trie = RouteTrie::from_routes(&scan.routes);
+    let api_trie = RouteTrie::from_routes(&scan.api_routes);
 
     // Create HMR broadcast
     let hmr = rex_dev::HmrBroadcast::new();
@@ -143,6 +144,7 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
 
     let server = RexServer::with_error_pages(
         trie,
+        api_trie,
         pool,
         build_result.manifest,
         build_result.build_id,
@@ -222,6 +224,7 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
     // Scan routes (for trie)
     let scan = scan_pages(&config.pages_dir)?;
     let trie = RouteTrie::from_routes(&scan.routes);
+    let api_trie = RouteTrie::from_routes(&scan.api_routes);
 
     // Load environment variables from .env files
     let env_vars = load_env_vars(&config);
@@ -244,6 +247,7 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
 
     let server = RexServer::with_error_pages(
         trie,
+        api_trie,
         pool,
         manifest.clone(),
         manifest.build_id.clone(),

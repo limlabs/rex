@@ -15,6 +15,7 @@ pub enum DynamicSegment {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PageType {
     Regular,
+    Api,      // pages/api/*
     App,      // _app
     Document, // _document
     Error,    // _error

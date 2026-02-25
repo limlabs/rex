@@ -109,6 +109,23 @@ fn build_server_bundle(
         }
     }
 
+    // Transform API route handlers
+    if !scan.api_routes.is_empty() {
+        bundle.push_str("globalThis.__rex_api_handlers = globalThis.__rex_api_handlers || {};\n\n");
+        for route in &scan.api_routes {
+            let source = fs::read_to_string(&route.abs_path)?;
+            let transformed =
+                transform_file(&source, &route.abs_path.to_string_lossy(), &server_opts)?;
+            let module_name = route.module_name();
+            append_page_iife(
+                &mut bundle,
+                &format!("API: {module_name}"),
+                &format!("globalThis.__rex_api_handlers['{module_name}']"),
+                &transformed,
+            );
+        }
+    }
+
     // Transform _app if present
     if let Some(app) = &scan.app {
         let source = fs::read_to_string(&app.abs_path)?;
@@ -196,6 +213,89 @@ globalThis.__rex_resolve_gssp = function() {
         return JSON.stringify(globalThis.__rex_gssp_resolved);
     }
     throw new Error('getServerSideProps promise did not resolve after microtask checkpoint');
+};
+
+// API route handler executor
+globalThis.__rex_call_api_handler = function(routeKey, reqJson) {
+    var handlers = globalThis.__rex_api_handlers;
+    if (!handlers) throw new Error('No API handlers registered');
+    var handler = handlers[routeKey];
+    if (!handler) throw new Error('API handler not found: ' + routeKey);
+    var handlerFn = handler.default;
+    if (!handlerFn) throw new Error('No default export for API route: ' + routeKey);
+
+    var reqData = JSON.parse(reqJson);
+    var res = {
+        _statusCode: 200,
+        _headers: {},
+        _body: '',
+        status: function(code) { this._statusCode = code; return this; },
+        setHeader: function(name, value) { this._headers[name.toLowerCase()] = value; return this; },
+        json: function(data) {
+            this._headers['content-type'] = 'application/json';
+            this._body = JSON.stringify(data);
+            return this;
+        },
+        send: function(body) {
+            if (typeof body === 'object' && !this._headers['content-type']) {
+                return this.json(body);
+            }
+            this._body = typeof body === 'string' ? body : String(body);
+            return this;
+        },
+        end: function(body) {
+            if (body !== undefined) this._body = String(body);
+            return this;
+        },
+        redirect: function(statusOrUrl, maybeUrl) {
+            if (typeof statusOrUrl === 'string') {
+                this._statusCode = 307;
+                this._headers['location'] = statusOrUrl;
+            } else {
+                this._statusCode = statusOrUrl;
+                this._headers['location'] = maybeUrl;
+            }
+            return this;
+        }
+    };
+    var req = {
+        method: reqData.method,
+        url: reqData.url,
+        headers: reqData.headers || {},
+        query: reqData.query || {},
+        body: reqData.body,
+        cookies: reqData.cookies || {}
+    };
+
+    var result = handlerFn(req, res);
+
+    if (result && typeof result.then === 'function') {
+        globalThis.__rex_api_resolved = null;
+        globalThis.__rex_api_rejected = null;
+        result.then(
+            function() {
+                globalThis.__rex_api_resolved = {
+                    statusCode: res._statusCode,
+                    headers: res._headers,
+                    body: res._body
+                };
+            },
+            function(e) { globalThis.__rex_api_rejected = e; }
+        );
+        return '__REX_API_ASYNC__';
+    }
+
+    return JSON.stringify({
+        statusCode: res._statusCode,
+        headers: res._headers,
+        body: res._body
+    });
+};
+
+globalThis.__rex_resolve_api = function() {
+    if (globalThis.__rex_api_rejected) throw globalThis.__rex_api_rejected;
+    if (globalThis.__rex_api_resolved !== null) return JSON.stringify(globalThis.__rex_api_resolved);
+    throw new Error('API handler promise did not resolve');
 };
 "#,
     );
@@ -341,6 +441,7 @@ mod tests {
         let config = RexConfig::new(root);
         let scan = ScanResult {
             routes,
+            api_routes: vec![],
             app,
             document: None,
             error: None,

@@ -1,6 +1,6 @@
 use crate::handlers::{self, AppState};
 use anyhow::Result;
-use axum::routing::get;
+use axum::routing::{any, get};
 use axum::Router;
 use rex_build::AssetManifest;
 use rex_router::RouteTrie;
@@ -27,11 +27,12 @@ impl RexServer {
         port: u16,
         is_dev: bool,
     ) -> Self {
-        Self::with_error_pages(route_trie, isolate_pool, manifest, build_id, static_dir, port, is_dev, false, false)
+        Self::with_error_pages(route_trie, RouteTrie::from_routes(&[]), isolate_pool, manifest, build_id, static_dir, port, is_dev, false, false)
     }
 
     pub fn with_error_pages(
         route_trie: RouteTrie,
+        api_route_trie: RouteTrie,
         isolate_pool: IsolatePool,
         manifest: AssetManifest,
         build_id: String,
@@ -43,6 +44,7 @@ impl RexServer {
     ) -> Self {
         let state = Arc::new(AppState {
             route_trie,
+            api_route_trie,
             isolate_pool,
             manifest,
             build_id,
@@ -79,6 +81,8 @@ impl RexServer {
             .merge(extra_routes)
             // Static file serving
             .nest_service("/_rex/static", static_service)
+            // API routes: all HTTP methods on /api/*
+            .route("/api/{*path}", any(handlers::api_handler))
             // Fallback: all other routes go through SSR
             .fallback(handlers::page_handler)
             .with_state(self.state.clone())

@@ -6,6 +6,7 @@ use tracing::debug;
 #[derive(Debug, Clone)]
 pub struct ScanResult {
     pub routes: Vec<Route>,
+    pub api_routes: Vec<Route>,
     pub app: Option<Route>,
     pub document: Option<Route>,
     pub error: Option<Route>,
@@ -15,6 +16,7 @@ pub struct ScanResult {
 /// Scan the pages/ directory and produce routes
 pub fn scan_pages(pages_dir: &Path) -> anyhow::Result<ScanResult> {
     let mut routes = Vec::new();
+    let mut api_routes = Vec::new();
     let mut app = None;
     let mut document = None;
     let mut error = None;
@@ -29,15 +31,18 @@ pub fn scan_pages(pages_dir: &Path) -> anyhow::Result<ScanResult> {
             PageType::Document => document = Some(route),
             PageType::Error => error = Some(route),
             PageType::NotFound => not_found = Some(route),
+            PageType::Api => api_routes.push(route),
             PageType::Regular => routes.push(route),
         }
     })?;
 
     // Sort routes by specificity (highest first)
     routes.sort_by(|a, b| b.specificity.cmp(&a.specificity));
+    api_routes.sort_by(|a, b| b.specificity.cmp(&a.specificity));
 
     Ok(ScanResult {
         routes,
+        api_routes,
         app,
         document,
         error,
@@ -64,7 +69,7 @@ fn walk_dir(
         if path.is_dir() {
             // Skip directories starting with _ (except pages themselves can have _app etc.)
             let dir_name = path.file_name().unwrap().to_string_lossy();
-            if dir_name.starts_with('.') || dir_name == "node_modules" || dir_name == "api" {
+            if dir_name.starts_with('.') || dir_name == "node_modules" {
                 continue;
             }
             walk_dir(base, &path, callback)?;
@@ -88,13 +93,17 @@ fn parse_route(rel_path: &Path, abs_path: &Path) -> Route {
     let stem = rel_path.with_extension("");
     let stem_str = stem.to_string_lossy().replace('\\', "/");
 
-    // Detect special pages
-    let page_type = match stem_str.as_str() {
-        "_app" => PageType::App,
-        "_document" => PageType::Document,
-        "_error" => PageType::Error,
-        "404" => PageType::NotFound,
-        _ => PageType::Regular,
+    // Detect special pages and API routes
+    let page_type = if stem_str.starts_with("api/") || stem_str == "api" {
+        PageType::Api
+    } else {
+        match stem_str.as_str() {
+            "_app" => PageType::App,
+            "_document" => PageType::Document,
+            "_error" => PageType::Error,
+            "404" => PageType::NotFound,
+            _ => PageType::Regular,
+        }
     };
 
     // Convert file path to URL pattern
@@ -224,5 +233,32 @@ mod tests {
             Some(DynamicSegment::OptionalCatchAll("slug".to_string()))
         );
         assert_eq!(parse_dynamic_segment("about"), None);
+    }
+
+    #[test]
+    fn test_parse_route_api() {
+        let route = parse_route(
+            Path::new("api/hello.ts"),
+            Path::new("/tmp/pages/api/hello.ts"),
+        );
+        assert_eq!(route.page_type, PageType::Api);
+        assert_eq!(route.pattern, "/api/hello");
+        assert_eq!(route.module_name(), "api/hello");
+
+        // Nested API route
+        let route = parse_route(
+            Path::new("api/users/[id].ts"),
+            Path::new("/tmp/pages/api/users/[id].ts"),
+        );
+        assert_eq!(route.page_type, PageType::Api);
+        assert_eq!(route.pattern, "/api/users/:id");
+        assert_eq!(route.module_name(), "api/users/[id]");
+
+        // Non-API route should be Regular
+        let route = parse_route(
+            Path::new("about.tsx"),
+            Path::new("/tmp/pages/about.tsx"),
+        );
+        assert_eq!(route.page_type, PageType::Regular);
     }
 }

@@ -17,6 +17,7 @@ pub struct SsrIsolate {
     context: v8::Global<v8::Context>,
     render_fn: v8::Global<v8::Function>,
     gssp_fn: v8::Global<v8::Function>,
+    api_handler_fn: Option<v8::Global<v8::Function>>,
 }
 
 /// Evaluate a script in the given scope, using TryCatch for error handling.
@@ -75,7 +76,7 @@ impl SsrIsolate {
     pub fn new(react_runtime_js: &str, server_bundle_js: &str) -> Result<Self> {
         let mut isolate = v8::Isolate::new(v8::CreateParams::default());
 
-        let (context, render_fn, gssp_fn) = {
+        let (context, render_fn, gssp_fn, api_handler_fn) = {
             v8::scope!(scope, &mut isolate);
 
             let context = v8::Context::new(scope, Default::default());
@@ -138,10 +139,19 @@ impl SsrIsolate {
             let gssp_fn = v8::Local::<v8::Function>::try_from(v)
                 .map_err(|_| anyhow::anyhow!("__rex_get_server_side_props is not a function"))?;
 
+            // API handler is optional — only present when api/ routes exist
+            let api_handler_fn = {
+                let k = v8::String::new(scope, "__rex_call_api_handler").unwrap();
+                global.get(scope, k.into()).and_then(|v| {
+                    v8::Local::<v8::Function>::try_from(v).ok()
+                }).map(|f| v8::Global::new(scope, f))
+            };
+
             (
                 v8::Global::new(scope, context),
                 v8::Global::new(scope, render_fn),
                 v8::Global::new(scope, gssp_fn),
+                api_handler_fn,
             )
         };
 
@@ -150,6 +160,7 @@ impl SsrIsolate {
             context,
             render_fn,
             gssp_fn,
+            api_handler_fn,
         })
     }
 
@@ -204,6 +215,40 @@ impl SsrIsolate {
         }
     }
 
+    /// Call __rex_call_api_handler(routeKey, reqJson) and return JSON response.
+    /// Handles async handlers by pumping V8's microtask queue.
+    pub fn call_api_handler(&mut self, route_key: &str, req_json: &str) -> Result<String> {
+        let api_fn = self.api_handler_fn.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("API handlers not loaded"))?;
+
+        let result_str = {
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+            let func = v8::Local::new(scope, api_fn);
+            let undef = v8::undefined(scope);
+            let arg0 = v8::String::new(scope, route_key)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+            let arg1 = v8::String::new(scope, req_json)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+
+            let result = v8_call!(scope, func, undef.into(), &[arg0.into(), arg1.into()])
+                .map_err(|e| anyhow::anyhow!("API handler error: {e}"))?;
+
+            result.to_rust_string_lossy(scope)
+        };
+
+        if result_str == "__REX_API_ASYNC__" {
+            self.isolate.perform_microtask_checkpoint();
+
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+            let resolve_result = v8_eval!(scope, "globalThis.__rex_resolve_api()", "<api-resolve>")
+                .map_err(|e| anyhow::anyhow!("API handler error: {e}"))?;
+            Ok(resolve_result.to_rust_string_lossy(scope))
+        } else {
+            Ok(result_str)
+        }
+    }
+
     /// Reload the server bundle (for dev mode hot reload)
     pub fn reload(&mut self, server_bundle_js: &str) -> Result<()> {
         v8::scope_with_context!(scope, &mut self.isolate, &self.context);
@@ -225,6 +270,14 @@ impl SsrIsolate {
 
         self.render_fn = v8::Global::new(scope, render_fn);
         self.gssp_fn = v8::Global::new(scope, gssp_fn);
+
+        // Re-lookup API handler (may be added/removed on reload)
+        self.api_handler_fn = {
+            let k = v8::String::new(scope, "__rex_call_api_handler").unwrap();
+            global.get(scope, k.into()).and_then(|v| {
+                v8::Local::<v8::Function>::try_from(v).ok()
+            }).map(|f| v8::Global::new(scope, f))
+        };
 
         debug!("SSR isolate reloaded");
         Ok(())
