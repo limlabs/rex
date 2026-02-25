@@ -27,7 +27,7 @@ impl RexServer {
         port: u16,
         is_dev: bool,
     ) -> Self {
-        Self::with_error_pages(route_trie, RouteTrie::from_routes(&[]), isolate_pool, manifest, build_id, static_dir, port, is_dev, false, false)
+        Self::with_error_pages(route_trie, RouteTrie::from_routes(&[]), isolate_pool, manifest, build_id, static_dir, port, is_dev, false, false, false)
     }
 
     pub fn with_error_pages(
@@ -41,6 +41,7 @@ impl RexServer {
         is_dev: bool,
         has_custom_404: bool,
         has_custom_error: bool,
+        has_custom_document: bool,
     ) -> Self {
         let state = Arc::new(AppState {
             route_trie,
@@ -51,6 +52,7 @@ impl RexServer {
             is_dev,
             has_custom_404,
             has_custom_error,
+            has_custom_document,
         });
 
         Self {

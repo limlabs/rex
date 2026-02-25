@@ -153,6 +153,7 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
         true,
         scan.not_found.is_some(),
         scan.error.is_some(),
+        scan.document.is_some(),
     );
 
     let router = server.build_router_with_extra(extra_routes);
@@ -256,6 +257,7 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
         false,
         scan.not_found.is_some(),
         scan.error.is_some(),
+        scan.document.is_some(),
     );
 
     info!("Rex production server starting on http://localhost:{port}");
@@ -321,6 +323,9 @@ fn env_vars_to_js(vars: &BTreeMap<String, String>) -> String {
 
 /// Rex Head component runtime — loaded into V8 alongside React
 const REX_HEAD_RUNTIME: &str = include_str!("../../../runtime/head.js");
+
+/// Rex Document component runtime — loaded into V8 for _document support
+const REX_DOCUMENT_RUNTIME: &str = include_str!("../../../runtime/document.js");
 
 /// Load React runtime for V8 SSR from node_modules.
 /// Supports both CJS (React 19+) and UMD (React 18) builds.
@@ -446,6 +451,7 @@ globalThis.ReactDOMServer = __modules['react-dom/server'];
         );
 
         runtime.push_str(REX_HEAD_RUNTIME);
+        runtime.push_str(REX_DOCUMENT_RUNTIME);
         return Ok(runtime);
     }
 
@@ -476,6 +482,7 @@ globalThis.__ReactDOMServer = globalThis.ReactDOMServer;
         );
 
         runtime.push_str(REX_HEAD_RUNTIME);
+        runtime.push_str(REX_DOCUMENT_RUNTIME);
         return Ok(runtime);
     }
 
@@ -540,6 +547,7 @@ globalThis.React = globalThis.__React;
 globalThis.ReactDOMServer = globalThis.__ReactDOMServer;
 "#);
     stub.push_str(REX_HEAD_RUNTIME);
+    stub.push_str(REX_DOCUMENT_RUNTIME);
     Ok(stub)
 }
 

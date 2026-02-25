@@ -18,6 +18,7 @@ pub struct SsrIsolate {
     render_fn: v8::Global<v8::Function>,
     gssp_fn: v8::Global<v8::Function>,
     api_handler_fn: Option<v8::Global<v8::Function>>,
+    document_fn: Option<v8::Global<v8::Function>>,
 }
 
 /// Evaluate a script in the given scope, using TryCatch for error handling.
@@ -76,7 +77,7 @@ impl SsrIsolate {
     pub fn new(react_runtime_js: &str, server_bundle_js: &str) -> Result<Self> {
         let mut isolate = v8::Isolate::new(v8::CreateParams::default());
 
-        let (context, render_fn, gssp_fn, api_handler_fn) = {
+        let (context, render_fn, gssp_fn, api_handler_fn, document_fn) = {
             v8::scope!(scope, &mut isolate);
 
             let context = v8::Context::new(scope, Default::default());
@@ -147,11 +148,20 @@ impl SsrIsolate {
                 }).map(|f| v8::Global::new(scope, f))
             };
 
+            // Document renderer is optional — only present when _document exists
+            let document_fn = {
+                let k = v8::String::new(scope, "__rex_render_document").unwrap();
+                global.get(scope, k.into()).and_then(|v| {
+                    v8::Local::<v8::Function>::try_from(v).ok()
+                }).map(|f| v8::Global::new(scope, f))
+            };
+
             (
                 v8::Global::new(scope, context),
                 v8::Global::new(scope, render_fn),
                 v8::Global::new(scope, gssp_fn),
                 api_handler_fn,
+                document_fn,
             )
         };
 
@@ -161,6 +171,7 @@ impl SsrIsolate {
             render_fn,
             gssp_fn,
             api_handler_fn,
+            document_fn,
         })
     }
 
@@ -249,6 +260,25 @@ impl SsrIsolate {
         }
     }
 
+    /// Call __rex_render_document() to get document descriptor JSON.
+    /// Returns None if no custom _document is loaded.
+    pub fn render_document(&mut self) -> Result<Option<String>> {
+        if self.document_fn.is_none() {
+            return Ok(None);
+        }
+        let doc_fn = self.document_fn.as_ref().unwrap();
+
+        v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+        let func = v8::Local::new(scope, doc_fn);
+        let undef = v8::undefined(scope);
+
+        let result = v8_call!(scope, func, undef.into(), &[])
+            .map_err(|e| anyhow::anyhow!("Document render error: {e}"))?;
+
+        Ok(Some(result.to_rust_string_lossy(scope)))
+    }
+
     /// Reload the server bundle (for dev mode hot reload)
     pub fn reload(&mut self, server_bundle_js: &str) -> Result<()> {
         v8::scope_with_context!(scope, &mut self.isolate, &self.context);
@@ -274,6 +304,14 @@ impl SsrIsolate {
         // Re-lookup API handler (may be added/removed on reload)
         self.api_handler_fn = {
             let k = v8::String::new(scope, "__rex_call_api_handler").unwrap();
+            global.get(scope, k.into()).and_then(|v| {
+                v8::Local::<v8::Function>::try_from(v).ok()
+            }).map(|f| v8::Global::new(scope, f))
+        };
+
+        // Re-lookup document renderer (may be added/removed on reload)
+        self.document_fn = {
+            let k = v8::String::new(scope, "__rex_render_document").unwrap();
             global.get(scope, k.into()).and_then(|v| {
                 v8::Local::<v8::Function>::try_from(v).ok()
             }).map(|f| v8::Global::new(scope, f))

@@ -82,6 +82,7 @@ fn build_server_bundle(
         r#"var require = function(name) {
     if (name === 'react') return { default: globalThis.__React, createElement: globalThis.__React.createElement };
     if (name === 'rex/head') return { default: globalThis.__rex_head_component, __esModule: true };
+    if (name === 'rex/document') return { default: (globalThis.__rex_document_components || {}).Html, Html: (globalThis.__rex_document_components || {}).Html, Head: (globalThis.__rex_document_components || {}).Head, Main: (globalThis.__rex_document_components || {}).Main, NextScript: (globalThis.__rex_document_components || {}).NextScript, __esModule: true };
     return {};
 };
 "#,
@@ -132,6 +133,14 @@ fn build_server_bundle(
         let transformed =
             transform_file(&source, &app.abs_path.to_string_lossy(), &server_opts)?;
         append_page_iife(&mut bundle, "_app", "globalThis.__rex_app", &transformed);
+    }
+
+    // Transform _document if present
+    if let Some(doc) = &scan.document {
+        let source = fs::read_to_string(&doc.abs_path)?;
+        let transformed =
+            transform_file(&source, &doc.abs_path.to_string_lossy(), &server_opts)?;
+        append_page_iife(&mut bundle, "_document", "globalThis.__rex_document", &transformed);
     }
 
     // SSR functions
@@ -326,6 +335,30 @@ fn build_client_bundles(
         fast_refresh: config.dev,
     };
 
+    // Build client _app chunk if present
+    if let Some(app) = &scan.app {
+        let source = fs::read_to_string(&app.abs_path)?;
+        let transformed =
+            transform_file(&source, &app.abs_path.to_string_lossy(), &client_opts)?;
+        let filename = format!("_app-{}.js", &build_id[..8]);
+
+        let mut app_js = String::new();
+        app_js.push_str("// Rex _app Client Chunk - Auto-generated\n");
+        app_js.push_str("(function() {\n");
+        app_js.push_str("'use strict';\n");
+        app_js.push_str(&transformed);
+        app_js.push_str("\n");
+        app_js.push_str("  if (typeof exports !== 'undefined' && exports.default) {\n");
+        app_js.push_str("    window.__REX_APP__ = exports.default;\n");
+        app_js.push_str("  }\n");
+        app_js.push_str("})();\n");
+
+        let chunk_path = output_dir.join(&filename);
+        fs::write(&chunk_path, &app_js)?;
+
+        manifest.app_script = Some(filename);
+    }
+
     for route in &scan.routes {
         let source = fs::read_to_string(&route.abs_path)?;
         let transformed =
@@ -350,7 +383,7 @@ fn build_client_bundles(
         client_js.push_str(&transformed);
         client_js.push_str("\n");
 
-        // Hydration bootstrap
+        // Hydration bootstrap — wraps with _app if present
         client_js.push_str(&format!(
             r#"
   var React = window.React;
@@ -360,7 +393,12 @@ fn build_client_bundles(
     var pageProps = dataEl ? JSON.parse(dataEl.textContent) : {{}};
     var container = document.getElementById('__rex');
     if (container && ReactDOM.hydrateRoot) {{
-      var element = React.createElement(exports.default, pageProps);
+      var element;
+      if (window.__REX_APP__) {{
+        element = React.createElement(window.__REX_APP__, {{ Component: exports.default, pageProps: pageProps }});
+      }} else {{
+        element = React.createElement(exports.default, pageProps);
+      }}
       window.__REX_ROOT__ = ReactDOM.hydrateRoot(container, element);
     }}
   }}
@@ -384,10 +422,18 @@ mod tests {
     use rex_core::{PageType, Route};
     use std::path::PathBuf;
 
-    /// Create a temp project directory with page files, returning (config, scan)
     fn setup_test_project(
         pages: &[(&str, &str)],
         app_source: Option<&str>,
+    ) -> (tempfile::TempDir, RexConfig, ScanResult) {
+        setup_test_project_full(pages, app_source, None)
+    }
+
+    /// Create a temp project directory with page files, returning (config, scan)
+    fn setup_test_project_full(
+        pages: &[(&str, &str)],
+        app_source: Option<&str>,
+        doc_source: Option<&str>,
     ) -> (tempfile::TempDir, RexConfig, ScanResult) {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().to_path_buf();
@@ -438,12 +484,25 @@ mod tests {
             }
         });
 
+        let document = doc_source.map(|src| {
+            let abs = pages_dir.join("_document.tsx");
+            fs::write(&abs, src).unwrap();
+            Route {
+                pattern: String::new(),
+                file_path: PathBuf::from("_document.tsx"),
+                abs_path: abs,
+                dynamic_segments: vec![],
+                page_type: PageType::Document,
+                specificity: 0,
+            }
+        });
+
         let config = RexConfig::new(root);
         let scan = ScanResult {
             routes,
             api_routes: vec![],
             app,
-            document: None,
+            document,
             error: None,
             not_found: None,
         };
@@ -844,6 +903,76 @@ mod tests {
         assert!(
             result.manifest.vendor_scripts.is_empty(),
             "should have no vendor scripts when React not found"
+        );
+    }
+
+    #[test]
+    fn test_server_bundle_with_document() {
+        let (_tmp, config, scan) = setup_test_project_full(
+            &[(
+                "index.tsx",
+                "export default function Home() { return <div>Home</div>; }",
+            )],
+            None,
+            Some(
+                r#"
+                import React from 'react';
+                export default function Document() {
+                    return React.createElement('html', { lang: 'en' });
+                }
+                "#,
+            ),
+        );
+        let result = build_bundles(&config, &scan).unwrap();
+        let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
+
+        assert!(
+            bundle.contains("globalThis.__rex_document"),
+            "should register _document"
+        );
+        assert!(
+            bundle.contains("// _document"),
+            "should have _document comment marker"
+        );
+    }
+
+    #[test]
+    fn test_client_bundle_app_wrapping() {
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                "export default function Home() { return <div>Home</div>; }",
+            )],
+            Some(
+                r#"
+                export default function App({ Component, pageProps }) {
+                    return <Component {...pageProps} />;
+                }
+                "#,
+            ),
+        );
+        let result = build_bundles(&config, &scan).unwrap();
+
+        // _app client chunk should exist
+        assert!(
+            result.manifest.app_script.is_some(),
+            "should have app_script in manifest"
+        );
+        let app_script = result.manifest.app_script.as_ref().unwrap();
+        assert!(
+            app_script.starts_with("_app-"),
+            "app script should be named _app-*"
+        );
+
+        // Client page chunk should have _app wrapping logic
+        let client_dir = config.client_build_dir();
+        let index_js = fs::read_to_string(
+            client_dir.join(result.manifest.pages["/"].js.clone()),
+        )
+        .unwrap();
+        assert!(
+            index_js.contains("__REX_APP__"),
+            "page hydration should check for __REX_APP__"
         );
     }
 }

@@ -11,6 +11,9 @@ pub struct AssetManifest {
     /// Vendor scripts (e.g. React runtime) to load before page scripts
     #[serde(default)]
     pub vendor_scripts: Vec<String>,
+    /// Client _app chunk filename (loaded before page scripts for hydration wrapping)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_script: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,6 +27,7 @@ impl AssetManifest {
             build_id,
             pages: HashMap::new(),
             vendor_scripts: Vec::new(),
+            app_script: None,
         }
     }
 

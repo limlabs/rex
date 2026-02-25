@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
-use crate::document::assemble_document;
+use crate::document::{assemble_document, DocumentDescriptor};
 
 /// Shared application state
 pub struct AppState {
@@ -20,6 +20,7 @@ pub struct AppState {
     pub is_dev: bool,
     pub has_custom_404: bool,
     pub has_custom_error: bool,
+    pub has_custom_document: bool,
 }
 
 /// Render a custom error page (404 or _error) via SSR, returning the full HTML document.
@@ -41,9 +42,39 @@ async fn render_error_page(
         _ => return (status, Html(format!("{} Error", status.as_u16()))).into_response(),
     };
 
-    let document = assemble_document(&render.body, &render.head, props, &state.manifest.vendor_scripts, &[], &state.build_id, state.is_dev);
+    // Render _document if present
+    let doc_desc = get_document_descriptor(&state).await;
+
+    let document = assemble_document(
+        &render.body,
+        &render.head,
+        props,
+        &state.manifest.vendor_scripts,
+        &[],
+        state.manifest.app_script.as_deref(),
+        &state.build_id,
+        state.is_dev,
+        doc_desc.as_ref(),
+    );
 
     (status, Html(document)).into_response()
+}
+
+/// Get document descriptor from _document rendering, if present.
+async fn get_document_descriptor(state: &Arc<AppState>) -> Option<DocumentDescriptor> {
+    if !state.has_custom_document {
+        return None;
+    }
+    let result = state
+        .isolate_pool
+        .execute(move |iso| iso.render_document())
+        .await;
+    match result {
+        Ok(Ok(Some(json))) => {
+            serde_json::from_str(&json).ok()
+        }
+        _ => None,
+    }
 }
 
 /// API response from V8 handler execution
@@ -270,7 +301,7 @@ pub async fn page_handler(
             error!("SSR render error: {e}");
             if state.is_dev {
                 let err_html = format!("<div style=\"color:red;font-family:monospace;padding:20px;\"><h2>SSR Error</h2><pre>{e}</pre></div>");
-                let document = assemble_document(&err_html, "", &render_props, &state.manifest.vendor_scripts, &[], &state.build_id, state.is_dev);
+                let document = assemble_document(&err_html, "", &render_props, &state.manifest.vendor_scripts, &[], state.manifest.app_script.as_deref(), &state.build_id, state.is_dev, None);
                 return Html(document).into_response();
             } else if state.has_custom_error {
                 let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
@@ -297,14 +328,19 @@ pub async fn page_handler(
         .map(|assets| vec![assets.js.clone()])
         .unwrap_or_default();
 
+    // Render _document if present
+    let doc_desc = get_document_descriptor(&state).await;
+
     let document = assemble_document(
         &render.body,
         &render.head,
         &render_props,
         &state.manifest.vendor_scripts,
         &client_scripts,
+        state.manifest.app_script.as_deref(),
         &state.build_id,
         state.is_dev,
+        doc_desc.as_ref(),
     );
 
     Html(document).into_response()
@@ -535,6 +571,7 @@ globalThis.__rex_resolve_gssp = function() {
             is_dev: false,
             has_custom_404: false,
             has_custom_error: false,
+            has_custom_document: false,
         });
 
         Router::new()
