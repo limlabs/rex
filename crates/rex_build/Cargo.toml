@@ -21,3 +21,4 @@ dashmap = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+rex_v8 = { path = "../rex_v8" }

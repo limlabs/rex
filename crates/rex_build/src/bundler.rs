@@ -1544,7 +1544,36 @@ mod tests {
         .unwrap();
         fs::write(
             react_dom_dir.join("server.js"),
-            "export function renderToString(el) { return ''; }\n",
+            r#"
+function renderEl(el) {
+  if (el == null || el === false) return '';
+  if (typeof el === 'string') return el;
+  if (typeof el === 'number') return '' + el;
+  if (Array.isArray(el)) return el.map(renderEl).join('');
+  if (typeof el === 'object' && el.type) {
+    if (typeof el.type === 'function') {
+      var p = Object.assign({}, el.props || {});
+      if (el.children && el.children.length) p.children = el.children.length === 1 ? el.children[0] : el.children;
+      return renderEl(el.type(p));
+    }
+    var tag = el.type;
+    var attrs = '';
+    var pr = el.props || {};
+    for (var k in pr) {
+      if (k === 'children' || k === 'key' || k === 'ref') continue;
+      if (typeof pr[k] === 'function' || typeof pr[k] === 'object') continue;
+      if (k === 'className') attrs += ' class="' + pr[k] + '"';
+      else attrs += ' ' + k + '="' + pr[k] + '"';
+    }
+    var ch = '';
+    if (el.children && el.children.length) ch += el.children.map(renderEl).join('');
+    if (pr.children != null && !(el.children && el.children.length)) ch += renderEl(pr.children);
+    return '<' + tag + attrs + '>' + ch + '</' + tag + '>';
+  }
+  return '' + el;
+}
+export function renderToString(el) { return renderEl(el); }
+"#,
         )
         .unwrap();
     }
@@ -1874,6 +1903,207 @@ export default function Home() {
         assert!(proxy.contains("\"container\": \"Home_container_abc\""));
         assert!(proxy.contains("\"title\": \"Home_title_abc\""));
         assert!(proxy.contains("export default"));
+    }
+
+    // --- Integration tests: build → V8 SSR ---
+
+    /// Build a project and load the server bundle into V8 for SSR testing.
+    async fn build_and_load(
+        config: &RexConfig,
+        scan: &ScanResult,
+    ) -> (BuildResult, rex_v8::IsolatePool) {
+        let result = build_bundles(config, scan).await.expect("build failed");
+        let bundle = fs::read_to_string(&result.server_bundle_path).expect("read bundle");
+        rex_v8::init_v8();
+        let pool = rex_v8::IsolatePool::new(1, std::sync::Arc::new(bundle))
+            .expect("create pool");
+        (result, pool)
+    }
+
+    #[tokio::test]
+    async fn test_integration_basic_ssr() {
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                r#"
+                export default function Home() {
+                    return <div><h1>Hello Rex</h1><p>Welcome</p></div>;
+                }
+                "#,
+            )],
+            None,
+        );
+
+        let (_result, pool) = build_and_load(&config, &scan).await;
+
+        let render = pool
+            .execute(|iso| iso.render_page("index", "{}"))
+            .await
+            .expect("pool execute")
+            .expect("render_page");
+
+        assert!(render.body.contains("Hello Rex"), "SSR should render heading: {}", render.body);
+        assert!(render.body.contains("Welcome"), "SSR should render paragraph: {}", render.body);
+        assert!(render.body.contains("<div>"), "SSR should produce HTML tags: {}", render.body);
+    }
+
+    #[tokio::test]
+    async fn test_integration_ssr_with_props() {
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                r#"
+                export default function Home({ message }) {
+                    return <div><h1>{message}</h1></div>;
+                }
+                export function getServerSideProps() {
+                    return { props: { message: "Dynamic content" } };
+                }
+                "#,
+            )],
+            None,
+        );
+
+        let (_result, pool) = build_and_load(&config, &scan).await;
+
+        // Test GSSP
+        let gssp_json = pool
+            .execute(|iso| {
+                iso.get_server_side_props("index", "{\"params\":{},\"query\":{}}")
+            })
+            .await
+            .expect("pool execute")
+            .expect("gssp");
+
+        let gssp: serde_json::Value = serde_json::from_str(&gssp_json).unwrap();
+        assert_eq!(
+            gssp["props"]["message"].as_str(),
+            Some("Dynamic content"),
+            "GSSP should return props"
+        );
+
+        // Test SSR with those props
+        let render = pool
+            .execute(|iso| {
+                iso.render_page("index", "{\"message\":\"Dynamic content\"}")
+            })
+            .await
+            .expect("pool execute")
+            .expect("render_page");
+
+        assert!(
+            render.body.contains("Dynamic content"),
+            "SSR should render GSSP props: {}", render.body
+        );
+    }
+
+    #[tokio::test]
+    async fn test_integration_multiple_pages() {
+        let (_tmp, config, scan) = setup_test_project(
+            &[
+                (
+                    "index.tsx",
+                    r#"
+                    export default function Home() {
+                        return <div><h1>Home Page</h1></div>;
+                    }
+                    "#,
+                ),
+                (
+                    "about.tsx",
+                    r#"
+                    export default function About() {
+                        return <div><h1>About Page</h1></div>;
+                    }
+                    "#,
+                ),
+            ],
+            None,
+        );
+
+        let (_result, pool) = build_and_load(&config, &scan).await;
+
+        // Render home
+        let home = pool
+            .execute(|iso| iso.render_page("index", "{}"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(home.body.contains("Home Page"), "home: {}", home.body);
+
+        // Render about
+        let about = pool
+            .execute(|iso| iso.render_page("about", "{}"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(about.body.contains("About Page"), "about: {}", about.body);
+    }
+
+    #[tokio::test]
+    async fn test_integration_css_module_in_ssr() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        setup_mock_node_modules(&root);
+
+        let pages_dir = root.join("pages");
+        let styles_dir = root.join("styles");
+        fs::create_dir_all(&pages_dir).unwrap();
+        fs::create_dir_all(&styles_dir).unwrap();
+
+        fs::write(
+            styles_dir.join("Home.module.css"),
+            ".wrapper { padding: 20px; }\n.heading { color: blue; }\n",
+        )
+        .unwrap();
+
+        let index_path = pages_dir.join("index.tsx");
+        fs::write(
+            &index_path,
+            r#"import styles from '../styles/Home.module.css';
+export default function Home() {
+    return <div className={styles.wrapper}><h1 className={styles.heading}>Styled</h1></div>;
+}
+"#,
+        )
+        .unwrap();
+
+        let config = RexConfig::new(root).with_dev(true);
+        let scan = ScanResult {
+            routes: vec![Route {
+                pattern: "/".to_string(),
+                file_path: PathBuf::from("index.tsx"),
+                abs_path: index_path,
+                dynamic_segments: vec![],
+                page_type: PageType::Regular,
+                specificity: 10,
+            }],
+            api_routes: vec![],
+            app: None,
+            document: None,
+            error: None,
+            not_found: None,
+        };
+
+        let (_result, pool) = build_and_load(&config, &scan).await;
+
+        let render = pool
+            .execute(|iso| iso.render_page("index", "{}"))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert!(render.body.contains("Styled"), "should render page content: {}", render.body);
+        // Scoped class names should appear in the HTML
+        assert!(
+            render.body.contains("Home_wrapper_"),
+            "should have scoped class name for wrapper: {}", render.body
+        );
+        assert!(
+            render.body.contains("Home_heading_"),
+            "should have scoped class name for heading: {}", render.body
+        );
     }
 }
 
