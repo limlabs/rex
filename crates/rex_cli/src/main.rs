@@ -79,6 +79,8 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
     info!(
         routes = scan.routes.len(),
         has_app = scan.app.is_some(),
+        has_404 = scan.not_found.is_some(),
+        has_error = scan.error.is_some(),
         "Routes scanned"
     );
 
@@ -139,7 +141,7 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
         .route("/_rex/hmr", hmr_route)
         .route("/_rex/hmr-client.js", axum::routing::get(hmr_client_handler));
 
-    let server = RexServer::new(
+    let server = RexServer::with_error_pages(
         trie,
         pool,
         build_result.manifest,
@@ -147,6 +149,8 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
         config.client_build_dir(),
         port,
         true,
+        scan.not_found.is_some(),
+        scan.error.is_some(),
     );
 
     let router = server.build_router_with_extra(extra_routes);
@@ -238,7 +242,7 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
         Arc::new(server_bundle),
     )?;
 
-    let server = RexServer::new(
+    let server = RexServer::with_error_pages(
         trie,
         pool,
         manifest.clone(),
@@ -246,6 +250,8 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
         config.client_build_dir(),
         port,
         false,
+        scan.not_found.is_some(),
+        scan.error.is_some(),
     );
 
     info!("Rex production server starting on http://localhost:{port}");

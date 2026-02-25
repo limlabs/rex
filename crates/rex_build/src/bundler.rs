@@ -41,6 +41,23 @@ pub fn build_bundles(config: &RexConfig, scan: &ScanResult) -> Result<BuildResul
     })
 }
 
+/// Append a CJS module IIFE to the bundle, assigning the result to `target`.
+fn append_page_iife(bundle: &mut String, comment: &str, target: &str, transformed: &str) {
+    bundle.push_str(&format!("// {comment}\n"));
+    bundle.push_str(&format!(
+        "{target} = (function() {{\n  var exports = {{}};\n  var module = {{ exports: exports }};\n"
+    ));
+    bundle.push_str("  (function(exports, module, require) {\n");
+    for line in transformed.lines() {
+        bundle.push_str("    ");
+        bundle.push_str(line);
+        bundle.push('\n');
+    }
+    bundle.push_str("  })(exports, module, require);\n");
+    bundle.push_str("  return module.exports;\n");
+    bundle.push_str("})();\n\n");
+}
+
 /// Build the server bundle: transform all pages and concatenate with React SSR runtime
 fn build_server_bundle(
     _config: &RexConfig,
@@ -78,21 +95,17 @@ fn build_server_bundle(
         let transformed =
             transform_file(&source, &route.abs_path.to_string_lossy(), &server_opts)?;
         let module_name = route.module_name();
+        append_page_iife(&mut bundle, &format!("Page: {module_name}"), &format!("globalThis.__rex_pages['{module_name}']"), &transformed);
+    }
 
-        bundle.push_str(&format!("// Page: {}\n", module_name));
-        bundle.push_str(&format!(
-            "globalThis.__rex_pages['{}'] = (function() {{\n  var exports = {{}};\n  var module = {{ exports: exports }};\n",
-            module_name
-        ));
-        bundle.push_str("  (function(exports, module, require) {\n");
-        for line in transformed.lines() {
-            bundle.push_str("    ");
-            bundle.push_str(line);
-            bundle.push('\n');
+    // Include special pages (404, _error) in the registry so they can be SSR'd
+    for (label, route_opt) in [("404", &scan.not_found), ("_error", &scan.error)] {
+        if let Some(route) = route_opt {
+            let source = fs::read_to_string(&route.abs_path)?;
+            let transformed =
+                transform_file(&source, &route.abs_path.to_string_lossy(), &server_opts)?;
+            append_page_iife(&mut bundle, label, &format!("globalThis.__rex_pages['{label}']"), &transformed);
         }
-        bundle.push_str("  })(exports, module, require);\n");
-        bundle.push_str("  return module.exports;\n");
-        bundle.push_str("})();\n\n");
     }
 
     // Transform _app if present
@@ -100,17 +113,7 @@ fn build_server_bundle(
         let source = fs::read_to_string(&app.abs_path)?;
         let transformed =
             transform_file(&source, &app.abs_path.to_string_lossy(), &server_opts)?;
-        bundle.push_str("// _app\n");
-        bundle.push_str("globalThis.__rex_app = (function() {\n  var exports = {};\n  var module = { exports: exports };\n");
-        bundle.push_str("  (function(exports, module, require) {\n");
-        for line in transformed.lines() {
-            bundle.push_str("    ");
-            bundle.push_str(line);
-            bundle.push('\n');
-        }
-        bundle.push_str("  })(exports, module, require);\n");
-        bundle.push_str("  return module.exports;\n");
-        bundle.push_str("})();\n\n");
+        append_page_iife(&mut bundle, "_app", "globalThis.__rex_app", &transformed);
     }
 
     // SSR functions

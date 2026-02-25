@@ -3,7 +3,7 @@
 ## Quick Reference
 
 - **Build**: `cargo build` (first build is slow due to V8 compilation)
-- **Test**: `cargo test` — 33 tests across rex_router, rex_build, rex_v8, and rex_server
+- **Test**: `cargo test` — 43 tests across rex_router, rex_build, rex_v8, and rex_server
 - **Check**: `cargo check` — must be zero warnings
 - **Run dev server**: `cargo run -- dev --root fixtures/basic`
 - **Verbose logging**: `RUST_LOG=rex=debug cargo run -- dev --root fixtures/basic`
@@ -55,7 +55,7 @@ Server bundles use `Runtime::Classic` (React.createElement), not automatic JSX r
 
 ## Server Bundle Format
 
-Pages registered at `globalThis.__rex_pages[routeKey]`. ESM converted to CJS via line-matching (fragile — tracked as REX-4). Two global runtime functions:
+Pages registered at `globalThis.__rex_pages[routeKey]`. ESM converted to CJS via SWC `common_js` AST transform. Bundle preamble includes `require()` shim mapping `'react'` to V8 globals. Two global runtime functions:
 - `__rex_render_page(routeKey, propsJson)` → HTML
 - `__rex_get_server_side_props(routeKey, contextJson)` → JSON (returns `"__REX_ASYNC__"` for promises)
 

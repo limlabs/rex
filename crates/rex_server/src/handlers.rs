@@ -17,6 +17,32 @@ pub struct AppState {
     pub manifest: rex_build::AssetManifest,
     pub build_id: String,
     pub is_dev: bool,
+    pub has_custom_404: bool,
+    pub has_custom_error: bool,
+}
+
+/// Render a custom error page (404 or _error) via SSR, returning the full HTML document.
+async fn render_error_page(
+    state: &Arc<AppState>,
+    page_key: &str,
+    status: StatusCode,
+    props: &str,
+) -> Response {
+    let key = page_key.to_string();
+    let props_clone = props.to_string();
+    let ssr_result = state
+        .isolate_pool
+        .execute(move |iso| iso.render_page(&key, &props_clone))
+        .await;
+
+    let ssr_html = match ssr_result {
+        Ok(Ok(html)) => html,
+        _ => return (status, Html(format!("{} Error", status.as_u16()))).into_response(),
+    };
+
+    let document = assemble_document(&ssr_html, props, &state.manifest.vendor_scripts, &[], &state.build_id, state.is_dev);
+
+    (status, Html(document)).into_response()
 }
 
 /// Main page handler - catches all routes and performs SSR
@@ -33,6 +59,9 @@ pub async fn page_handler(
         Some(m) => m,
         None => {
             debug!(path, "No route matched");
+            if state.has_custom_404 {
+                return render_error_page(&state, "404", StatusCode::NOT_FOUND, "{}").await;
+            }
             return (StatusCode::NOT_FOUND, Html("404 - Page Not Found".to_string())).into_response();
         }
     };
@@ -79,10 +108,18 @@ pub async fn page_handler(
         Ok(Ok(json)) => json,
         Ok(Err(e)) => {
             error!("GSSP error: {e}");
+            if state.has_custom_error {
+                let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
+                return render_error_page(&state, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
+            }
             return (StatusCode::INTERNAL_SERVER_ERROR, Html(format!("Server error: {e}"))).into_response();
         }
         Err(e) => {
             error!("Isolate pool error: {e}");
+            if state.has_custom_error {
+                let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
+                return render_error_page(&state, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
+            }
             return (StatusCode::INTERNAL_SERVER_ERROR, Html("Internal server error".to_string())).into_response();
         }
     };
@@ -99,6 +136,9 @@ pub async fn page_handler(
                 .unwrap();
         }
         Ok(ServerSidePropsResult::NotFound { not_found: true }) => {
+            if state.has_custom_404 {
+                return render_error_page(&state, "404", StatusCode::NOT_FOUND, "{}").await;
+            }
             return (StatusCode::NOT_FOUND, Html("404 - Not Found".to_string())).into_response();
         }
         _ => {}
@@ -130,12 +170,19 @@ pub async fn page_handler(
             error!("SSR render error: {e}");
             if state.is_dev {
                 format!("<div style=\"color:red;font-family:monospace;padding:20px;\"><h2>SSR Error</h2><pre>{e}</pre></div>")
+            } else if state.has_custom_error {
+                let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
+                return render_error_page(&state, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
             } else {
                 return (StatusCode::INTERNAL_SERVER_ERROR, Html("Internal server error".to_string())).into_response();
             }
         }
         Err(e) => {
             error!("Isolate pool error: {e}");
+            if state.has_custom_error {
+                let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
+                return render_error_page(&state, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
+            }
             return (StatusCode::INTERNAL_SERVER_ERROR, Html("Internal server error".to_string())).into_response();
         }
     };
@@ -364,6 +411,8 @@ globalThis.__rex_resolve_gssp = function() {
             manifest,
             build_id: "test-build-id".to_string(),
             is_dev: false,
+            has_custom_404: false,
+            has_custom_error: false,
         });
 
         Router::new()
