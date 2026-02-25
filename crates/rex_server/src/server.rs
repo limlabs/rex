@@ -79,6 +79,8 @@ impl RexServer {
                 "/_rex/data/{build_id}/{*path}",
                 get(handlers::data_handler),
             )
+            // Client-side router script
+            .route("/_rex/router.js", get(router_js_handler))
             // Merge any extra routes (e.g., HMR websocket)
             .merge(extra_routes)
             // Static file serving
@@ -101,4 +103,11 @@ impl RexServer {
 
         Ok(())
     }
+}
+
+async fn router_js_handler() -> impl axum::response::IntoResponse {
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/javascript")],
+        include_str!("../../../runtime/client/router.js"),
+    )
 }

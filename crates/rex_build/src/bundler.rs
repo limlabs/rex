@@ -390,6 +390,21 @@ import Page from '{page_path}';
 window.__REX_PAGES = window.__REX_PAGES || {{}};
 window.__REX_PAGES['{route_pattern}'] = {{ default: Page }};
 
+// Expose render function for client-side navigation (used by router.js)
+if (!window.__REX_RENDER__) {{
+  window.__REX_RENDER__ = function(Component, props) {{
+    var element;
+    if (window.__REX_APP__) {{
+      element = createElement(window.__REX_APP__, {{ Component: Component, pageProps: props }});
+    }} else {{
+      element = createElement(Component, props);
+    }}
+    if (window.__REX_ROOT__) {{
+      window.__REX_ROOT__.render(element);
+    }}
+  }};
+}}
+
 if (!window.__REX_NAVIGATING__) {{
   var dataEl = document.getElementById('__REX_DATA__');
   var pageProps = dataEl ? JSON.parse(dataEl.textContent) : {{}};
@@ -492,7 +507,10 @@ if (!window.__REX_NAVIGATING__) {{
 /// Map a route to a chunk name for rolldown entry naming.
 fn route_to_chunk_name(route: &rex_core::Route) -> String {
     let module_name = route.module_name();
-    let cn = module_name.replace('/', "-");
+    let cn = module_name
+        .replace('/', "-")
+        .replace('[', "_")
+        .replace(']', "_");
     if cn.is_empty() {
         "index".to_string()
     } else {

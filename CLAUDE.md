@@ -62,7 +62,28 @@ All bundles built by rolldown (Rust-native, OXC-based). Git dependency from `mai
 ### Common
 - `build_bundles()` is async (rolldown requires it)
 - CSS handled separately (scanned from source, copied to output)
-- `Platform::Neutral` for server, `Platform::Browser` for client
+- `Platform::Browser` for both (server needs browser-compat react-dom/server)
+
+## Client-Side Router
+
+Handles client navigation without full page reloads. File: `runtime/client/router.js`
+
+### Architecture
+- `window.__REX_MANIFEST__` — embedded in HTML by `document.rs`, contains `build_id` and `pages` (route→chunk map)
+- `window.__REX_ROUTER` — public API: `push(url)`, `replace(url)`, `prefetch(url)`
+- `window.__REX_RENDER__(Component, props)` — set by page entries, re-renders via `createRoot().render()`
+- `window.__REX_PAGES[pattern]` — registry of loaded page components
+- `window.__REX_NAVIGATING__` — flag to prevent hydration during client-side navigation
+
+### Navigation Flow
+1. `rex/link` onClick → `__REX_ROUTER.push(url)`
+2. Router matches URL to route pattern via manifest
+3. Parallel: fetch page data (`/_rex/data/{buildId}/{path}.json`) + load page chunk (`import()`)
+4. Update history, `__REX_DATA__`, CSS, and call `__REX_RENDER__`
+
+### Endpoints
+- `/_rex/router.js` — served from `server.rs` via `include_str!`
+- `/_rex/data/{buildId}/{path}.json` — GSSP data for client transitions
 
 ## Server Bundle Format
 

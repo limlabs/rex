@@ -23,6 +23,7 @@ pub fn assemble_document(
     _build_id: &str,
     is_dev: bool,
     doc_descriptor: Option<&DocumentDescriptor>,
+    manifest_json: Option<&str>,
 ) -> String {
     let escaped_props = escape_script_content(props_json);
 
@@ -88,6 +89,14 @@ pub fn assemble_document(
         "  <script id=\"__REX_DATA__\" type=\"application/json\">{escaped_props}</script>\n"
     ));
 
+    // Route manifest for client-side navigation
+    if let Some(manifest) = manifest_json {
+        let escaped_manifest = escape_script_content(manifest);
+        html.push_str(&format!(
+            "  <script>window.__REX_MANIFEST__={escaped_manifest}</script>\n"
+        ));
+    }
+
     // React vendor scripts (built from node_modules at build time)
     for script in vendor_scripts {
         html.push_str(&format!(
@@ -107,6 +116,11 @@ pub fn assemble_document(
         html.push_str(&format!(
             "  <script type=\"module\" src=\"/_rex/static/{script}\"></script>\n"
         ));
+    }
+
+    // Client-side router (must load after page scripts register __REX_RENDER__)
+    if manifest_json.is_some() {
+        html.push_str("  <script src=\"/_rex/router.js\"></script>\n");
     }
 
     // HMR client in dev mode

@@ -45,6 +45,11 @@ async fn render_error_page(
     // Render _document if present
     let doc_desc = get_document_descriptor(&state).await;
 
+    let manifest_json = serde_json::to_string(&serde_json::json!({
+        "build_id": state.build_id,
+        "pages": state.manifest.pages,
+    })).unwrap();
+
     let document = assemble_document(
         &render.body,
         &render.head,
@@ -56,6 +61,7 @@ async fn render_error_page(
         &state.build_id,
         state.is_dev,
         doc_desc.as_ref(),
+        Some(&manifest_json),
     );
 
     (status, Html(document)).into_response()
@@ -302,7 +308,7 @@ pub async fn page_handler(
             error!("SSR render error: {e}");
             if state.is_dev {
                 let err_html = format!("<div style=\"color:red;font-family:monospace;padding:20px;\"><h2>SSR Error</h2><pre>{e}</pre></div>");
-                let document = assemble_document(&err_html, "", &render_props, &state.manifest.vendor_scripts, &[], &state.manifest.global_css, state.manifest.app_script.as_deref(), &state.build_id, state.is_dev, None);
+                let document = assemble_document(&err_html, "", &render_props, &state.manifest.vendor_scripts, &[], &state.manifest.global_css, state.manifest.app_script.as_deref(), &state.build_id, state.is_dev, None, None);
                 return Html(document).into_response();
             } else if state.has_custom_error {
                 let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
@@ -336,6 +342,11 @@ pub async fn page_handler(
     // Render _document if present
     let doc_desc = get_document_descriptor(&state).await;
 
+    let manifest_json = serde_json::to_string(&serde_json::json!({
+        "build_id": state.build_id,
+        "pages": state.manifest.pages,
+    })).unwrap();
+
     let document = assemble_document(
         &render.body,
         &render.head,
@@ -347,6 +358,7 @@ pub async fn page_handler(
         &state.build_id,
         state.is_dev,
         doc_desc.as_ref(),
+        Some(&manifest_json),
     );
 
     Html(document).into_response()
