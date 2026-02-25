@@ -14,11 +14,17 @@ pub struct AssetManifest {
     /// Client _app chunk filename (loaded before page scripts for hydration wrapping)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_script: Option<String>,
+    /// Global CSS files (from _app imports), included on every page
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub global_css: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PageAssets {
     pub js: String,
+    /// Per-page CSS files
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub css: Vec<String>,
 }
 
 impl AssetManifest {
@@ -28,6 +34,7 @@ impl AssetManifest {
             pages: HashMap::new(),
             vendor_scripts: Vec::new(),
             app_script: None,
+            global_css: Vec::new(),
         }
     }
 
@@ -36,6 +43,22 @@ impl AssetManifest {
             route_pattern.to_string(),
             PageAssets {
                 js: js_filename.to_string(),
+                css: Vec::new(),
+            },
+        );
+    }
+
+    pub fn add_page_with_css(
+        &mut self,
+        route_pattern: &str,
+        js_filename: &str,
+        css_filenames: &[String],
+    ) {
+        self.pages.insert(
+            route_pattern.to_string(),
+            PageAssets {
+                js: js_filename.to_string(),
+                css: css_filenames.to_vec(),
             },
         );
     }

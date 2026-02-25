@@ -94,19 +94,19 @@ fn build_server_bundle(
     // Transform all route pages (SWC CJS transform handles imports/exports)
     for route in &scan.routes {
         let source = fs::read_to_string(&route.abs_path)?;
-        let transformed =
+        let result =
             transform_file(&source, &route.abs_path.to_string_lossy(), &server_opts)?;
         let module_name = route.module_name();
-        append_page_iife(&mut bundle, &format!("Page: {module_name}"), &format!("globalThis.__rex_pages['{module_name}']"), &transformed);
+        append_page_iife(&mut bundle, &format!("Page: {module_name}"), &format!("globalThis.__rex_pages['{module_name}']"), &result.code);
     }
 
     // Include special pages (404, _error) in the registry so they can be SSR'd
     for (label, route_opt) in [("404", &scan.not_found), ("_error", &scan.error)] {
         if let Some(route) = route_opt {
             let source = fs::read_to_string(&route.abs_path)?;
-            let transformed =
+            let result =
                 transform_file(&source, &route.abs_path.to_string_lossy(), &server_opts)?;
-            append_page_iife(&mut bundle, label, &format!("globalThis.__rex_pages['{label}']"), &transformed);
+            append_page_iife(&mut bundle, label, &format!("globalThis.__rex_pages['{label}']"), &result.code);
         }
     }
 
@@ -115,14 +115,14 @@ fn build_server_bundle(
         bundle.push_str("globalThis.__rex_api_handlers = globalThis.__rex_api_handlers || {};\n\n");
         for route in &scan.api_routes {
             let source = fs::read_to_string(&route.abs_path)?;
-            let transformed =
+            let result =
                 transform_file(&source, &route.abs_path.to_string_lossy(), &server_opts)?;
             let module_name = route.module_name();
             append_page_iife(
                 &mut bundle,
                 &format!("API: {module_name}"),
                 &format!("globalThis.__rex_api_handlers['{module_name}']"),
-                &transformed,
+                &result.code,
             );
         }
     }
@@ -130,17 +130,17 @@ fn build_server_bundle(
     // Transform _app if present
     if let Some(app) = &scan.app {
         let source = fs::read_to_string(&app.abs_path)?;
-        let transformed =
+        let result =
             transform_file(&source, &app.abs_path.to_string_lossy(), &server_opts)?;
-        append_page_iife(&mut bundle, "_app", "globalThis.__rex_app", &transformed);
+        append_page_iife(&mut bundle, "_app", "globalThis.__rex_app", &result.code);
     }
 
     // Transform _document if present
     if let Some(doc) = &scan.document {
         let source = fs::read_to_string(&doc.abs_path)?;
-        let transformed =
+        let result =
             transform_file(&source, &doc.abs_path.to_string_lossy(), &server_opts)?;
-        append_page_iife(&mut bundle, "_document", "globalThis.__rex_document", &transformed);
+        append_page_iife(&mut bundle, "_document", "globalThis.__rex_document", &result.code);
     }
 
     // SSR functions
@@ -336,9 +336,10 @@ fn build_client_bundles(
     };
 
     // Build client _app chunk if present
+    // _app may import global CSS — collect and add to manifest as global_css
     if let Some(app) = &scan.app {
         let source = fs::read_to_string(&app.abs_path)?;
-        let transformed =
+        let result =
             transform_file(&source, &app.abs_path.to_string_lossy(), &client_opts)?;
         let filename = format!("_app-{}.js", &build_id[..8]);
 
@@ -346,7 +347,7 @@ fn build_client_bundles(
         app_js.push_str("// Rex _app Client Chunk - Auto-generated\n");
         app_js.push_str("(function() {\n");
         app_js.push_str("'use strict';\n");
-        app_js.push_str(&transformed);
+        app_js.push_str(&result.code);
         app_js.push_str("\n");
         app_js.push_str("  if (typeof exports !== 'undefined' && exports.default) {\n");
         app_js.push_str("    window.__REX_APP__ = exports.default;\n");
@@ -357,11 +358,22 @@ fn build_client_bundles(
         fs::write(&chunk_path, &app_js)?;
 
         manifest.app_script = Some(filename);
+
+        // Copy global CSS from _app
+        for css_import in &result.css_imports {
+            let css_abs = app.abs_path.parent().unwrap().join(css_import);
+            if let Ok(css_abs) = css_abs.canonicalize() {
+                let css_stem = css_abs.file_stem().unwrap().to_string_lossy();
+                let css_filename = format!("{css_stem}-{}.css", &build_id[..8]);
+                fs::copy(&css_abs, output_dir.join(&css_filename))?;
+                manifest.global_css.push(css_filename);
+            }
+        }
     }
 
     for route in &scan.routes {
         let source = fs::read_to_string(&route.abs_path)?;
-        let transformed =
+        let result =
             transform_file(&source, &route.abs_path.to_string_lossy(), &client_opts)?;
         let module_name = route.module_name();
 
@@ -374,13 +386,25 @@ fn build_client_bundles(
         };
         let filename = format!("{chunk_name}-{}.js", &build_id[..8]);
 
+        // Resolve and copy CSS imports for this page
+        let mut css_filenames = Vec::new();
+        for css_import in &result.css_imports {
+            let css_abs = route.abs_path.parent().unwrap().join(css_import);
+            if let Ok(css_abs) = css_abs.canonicalize() {
+                let css_stem = css_abs.file_stem().unwrap().to_string_lossy();
+                let css_filename = format!("{css_stem}-{}.css", &build_id[..8]);
+                fs::copy(&css_abs, output_dir.join(&css_filename))?;
+                css_filenames.push(css_filename);
+            }
+        }
+
         // For the prototype, write the transformed page as a standalone script
         // that expects React to be globally available
         let mut client_js = String::new();
         client_js.push_str("// Rex Client Chunk - Auto-generated\n");
         client_js.push_str("(function() {\n");
         client_js.push_str("'use strict';\n");
-        client_js.push_str(&transformed);
+        client_js.push_str(&result.code);
         client_js.push_str("\n");
 
         // Hydration bootstrap — wraps with _app if present
@@ -410,7 +434,7 @@ fn build_client_bundles(
         let chunk_path = output_dir.join(&filename);
         fs::write(&chunk_path, &client_js)?;
 
-        manifest.add_page(&route.pattern, &filename);
+        manifest.add_page_with_css(&route.pattern, &filename, &css_filenames);
     }
 
     Ok(manifest)
@@ -934,6 +958,91 @@ mod tests {
             bundle.contains("// _document"),
             "should have _document comment marker"
         );
+    }
+
+    #[test]
+    fn test_global_css_from_app() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        let pages_dir = root.join("pages");
+        let styles_dir = root.join("styles");
+        fs::create_dir_all(&pages_dir).unwrap();
+        fs::create_dir_all(&styles_dir).unwrap();
+
+        // Create CSS file
+        fs::write(styles_dir.join("globals.css"), "body { color: red; }").unwrap();
+
+        // Create index page
+        let index_path = pages_dir.join("index.tsx");
+        fs::write(
+            &index_path,
+            "export default function Home() { return <div>Home</div>; }",
+        )
+        .unwrap();
+
+        // Create _app that imports CSS
+        let app_path = pages_dir.join("_app.tsx");
+        fs::write(
+            &app_path,
+            "import '../styles/globals.css';\nexport default function App({ Component, pageProps }) { return <Component {...pageProps} />; }",
+        )
+        .unwrap();
+
+        let config = RexConfig::new(root);
+        let scan = ScanResult {
+            routes: vec![Route {
+                pattern: "/".to_string(),
+                file_path: PathBuf::from("index.tsx"),
+                abs_path: index_path,
+                dynamic_segments: vec![],
+                page_type: PageType::Regular,
+                specificity: 10,
+            }],
+            api_routes: vec![],
+            app: Some(Route {
+                pattern: String::new(),
+                file_path: PathBuf::from("_app.tsx"),
+                abs_path: app_path,
+                dynamic_segments: vec![],
+                page_type: PageType::App,
+                specificity: 0,
+            }),
+            document: None,
+            error: None,
+            not_found: None,
+        };
+
+        let result = build_bundles(&config, &scan).unwrap();
+
+        // Manifest should have global CSS
+        assert_eq!(
+            result.manifest.global_css.len(),
+            1,
+            "should have 1 global CSS file"
+        );
+        assert!(
+            result.manifest.global_css[0].starts_with("globals-"),
+            "CSS filename should be globals-*"
+        );
+        assert!(
+            result.manifest.global_css[0].ends_with(".css"),
+            "CSS filename should end in .css"
+        );
+
+        // CSS file should exist in client output
+        let client_dir = config.client_build_dir();
+        let css_path = client_dir.join(&result.manifest.global_css[0]);
+        assert!(css_path.exists(), "CSS file should exist in client output");
+        let css_content = fs::read_to_string(&css_path).unwrap();
+        assert!(
+            css_content.contains("color: red"),
+            "CSS file should have original content"
+        );
+
+        // Manifest should be loadable and retain global_css
+        let loaded = AssetManifest::load(&config.manifest_path()).unwrap();
+        assert_eq!(loaded.global_css.len(), 1);
     }
 
     #[test]

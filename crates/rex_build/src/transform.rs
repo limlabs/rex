@@ -32,8 +32,15 @@ impl Default for TransformOptions {
     }
 }
 
+/// Result of transforming a file
+#[derive(Debug, Clone)]
+pub struct TransformResult {
+    pub code: String,
+    pub css_imports: Vec<String>,
+}
+
 /// Transform a single source file using SWC
-pub fn transform_file(source: &str, filename: &str, opts: &TransformOptions) -> Result<String> {
+pub fn transform_file(source: &str, filename: &str, opts: &TransformOptions) -> Result<TransformResult> {
     let cm: Lrc<SourceMap> = Lrc::new(SourceMap::default());
     let fm = cm.new_source_file(FileName::Real(filename.into()).into(), source.to_string());
     let comments = SingleThreadedComments::default();
@@ -53,6 +60,9 @@ pub fn transform_file(source: &str, filename: &str, opts: &TransformOptions) -> 
     let module = parser
         .parse_module()
         .map_err(|e| anyhow::anyhow!("Parse error in {}: {:?}", filename, e))?;
+
+    // Strip CSS imports before any transforms (before CJS converts them to require())
+    let (module, css_imports) = strip_css_imports(module);
 
     GLOBALS.set(&Default::default(), || {
         let unresolved_mark = Mark::new();
@@ -138,8 +148,31 @@ pub fn transform_file(source: &str, filename: &str, opts: &TransformOptions) -> 
             emitter.emit_module(&module)?;
         }
 
-        Ok(String::from_utf8(buf)?)
+        Ok(TransformResult {
+            code: String::from_utf8(buf)?,
+            css_imports,
+        })
     })
+}
+
+/// Remove CSS import declarations from the module and collect their paths.
+/// Handles side-effect imports like `import './styles.css'`
+fn strip_css_imports(mut module: Module) -> (Module, Vec<String>) {
+    let mut css_imports = Vec::new();
+
+    module.body.retain(|item| {
+        if let ModuleItem::ModuleDecl(ModuleDecl::Import(import)) = item {
+            if let Some(src) = import.src.value.as_str() {
+                if src.ends_with(".css") {
+                    css_imports.push(src.to_string());
+                    return false;
+                }
+            }
+        }
+        true
+    });
+
+    (module, css_imports)
 }
 
 /// Remove `getServerSideProps` export from a module (for client bundles)
@@ -211,14 +244,14 @@ mod tests {
             server: true,
             ..Default::default()
         }).unwrap();
-        assert!(server_result.contains("getServerSideProps"));
+        assert!(server_result.code.contains("getServerSideProps"));
 
         // Client transform strips GSSP
         let client_result = transform_file(source, "index.tsx", &TransformOptions {
             server: false,
             ..Default::default()
         }).unwrap();
-        assert!(!client_result.contains("getServerSideProps"));
+        assert!(!client_result.code.contains("getServerSideProps"));
     }
 
     #[test]
@@ -245,13 +278,40 @@ mod tests {
         }).unwrap();
 
         // Should use CJS exports, not ESM
-        assert!(!result.contains("export default"), "should not contain ESM export default: {result}");
-        assert!(!result.contains("export async"), "should not contain ESM export async: {result}");
-        assert!(!result.contains("export const"), "should not contain ESM export const: {result}");
+        assert!(!result.code.contains("export default"), "should not contain ESM export default: {}", result.code);
+        assert!(!result.code.contains("export async"), "should not contain ESM export async: {}", result.code);
+        assert!(!result.code.contains("export const"), "should not contain ESM export const: {}", result.code);
         // Should have CJS-style require/exports
-        assert!(result.contains("require("), "should use require(): {result}");
-        assert!(result.contains("exports"), "should use exports: {result}");
-        assert!(result.contains("getServerSideProps"), "should keep GSSP: {result}");
-        assert!(result.contains("PAGE_SIZE"), "should keep named export: {result}");
+        assert!(result.code.contains("require("), "should use require(): {}", result.code);
+        assert!(result.code.contains("exports"), "should use exports: {}", result.code);
+        assert!(result.code.contains("getServerSideProps"), "should keep GSSP: {}", result.code);
+        assert!(result.code.contains("PAGE_SIZE"), "should keep named export: {}", result.code);
+    }
+
+    #[test]
+    fn test_strip_css_imports() {
+        let source = r#"
+            import './styles.css';
+            import React from 'react';
+            import '../globals.css';
+
+            export default function Home() {
+                return <div>Hello</div>;
+            }
+        "#;
+
+        let result = transform_file(source, "index.tsx", &TransformOptions {
+            server: false,
+            ..Default::default()
+        }).unwrap();
+
+        // CSS imports should be stripped
+        assert!(!result.code.contains("styles.css"), "should strip CSS import");
+        assert!(!result.code.contains("globals.css"), "should strip CSS import");
+
+        // CSS paths should be collected
+        assert_eq!(result.css_imports.len(), 2);
+        assert_eq!(result.css_imports[0], "./styles.css");
+        assert_eq!(result.css_imports[1], "../globals.css");
     }
 }

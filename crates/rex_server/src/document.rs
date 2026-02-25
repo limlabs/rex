@@ -18,6 +18,7 @@ pub fn assemble_document(
     props_json: &str,
     vendor_scripts: &[String],
     client_scripts: &[String],
+    css_files: &[String],
     app_script: Option<&str>,
     _build_id: &str,
     is_dev: bool,
@@ -54,6 +55,13 @@ pub fn assemble_document(
             html.push_str(&desc.head_content);
             html.push('\n');
         }
+    }
+
+    // CSS stylesheets
+    for css in css_files {
+        html.push_str(&format!(
+            "  <link rel=\"stylesheet\" href=\"/_rex/static/{css}\" />\n"
+        ));
     }
 
     // Preload client chunks

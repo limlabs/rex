@@ -51,6 +51,7 @@ async fn render_error_page(
         props,
         &state.manifest.vendor_scripts,
         &[],
+        &state.manifest.global_css,
         state.manifest.app_script.as_deref(),
         &state.build_id,
         state.is_dev,
@@ -301,7 +302,7 @@ pub async fn page_handler(
             error!("SSR render error: {e}");
             if state.is_dev {
                 let err_html = format!("<div style=\"color:red;font-family:monospace;padding:20px;\"><h2>SSR Error</h2><pre>{e}</pre></div>");
-                let document = assemble_document(&err_html, "", &render_props, &state.manifest.vendor_scripts, &[], state.manifest.app_script.as_deref(), &state.build_id, state.is_dev, None);
+                let document = assemble_document(&err_html, "", &render_props, &state.manifest.vendor_scripts, &[], &state.manifest.global_css, state.manifest.app_script.as_deref(), &state.build_id, state.is_dev, None);
                 return Html(document).into_response();
             } else if state.has_custom_error {
                 let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
@@ -320,13 +321,17 @@ pub async fn page_handler(
         }
     };
 
-    // Look up client scripts for this route
-    let client_scripts: Vec<String> = state
-        .manifest
-        .pages
-        .get(&route_match.route.pattern)
+    // Look up client assets for this route
+    let page_assets = state.manifest.pages.get(&route_match.route.pattern);
+    let client_scripts: Vec<String> = page_assets
         .map(|assets| vec![assets.js.clone()])
         .unwrap_or_default();
+
+    // Collect CSS: global (from _app) + per-page
+    let mut css_files = state.manifest.global_css.clone();
+    if let Some(assets) = page_assets {
+        css_files.extend(assets.css.iter().cloned());
+    }
 
     // Render _document if present
     let doc_desc = get_document_descriptor(&state).await;
@@ -337,6 +342,7 @@ pub async fn page_handler(
         &render_props,
         &state.manifest.vendor_scripts,
         &client_scripts,
+        &css_files,
         state.manifest.app_script.as_deref(),
         &state.build_id,
         state.is_dev,
