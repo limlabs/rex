@@ -44,14 +44,20 @@ cargo test
 
 Tests live alongside their source files in `#[cfg(test)]` modules. Current test coverage:
 
-- **rex_router** — scanner parses filenames into route patterns, matcher resolves URLs with correct priority
-- **rex_build** — SWC transform strips TypeScript/JSX, GSSP stripping works for client bundles
+- **rex_core** (7) — config pattern matching, `rex.config.json` loading/parsing
+- **rex_router** (9) — scanner parses filenames into route patterns, matcher resolves URLs with correct priority
+- **rex_build** (18) — bundler output structure, CSS modules, integration tests (build → V8 SSR)
+- **rex_server** (14) — page/data/API handlers, GSSP props/redirect/notFound, config redirects/rewrites/headers
+- **rex_v8** (23) — SSR rendering, GSSP/GSP sync+async, data strategy detection, isolate reload
 
 To run a single crate's tests:
 
 ```sh
+cargo test -p rex_core
 cargo test -p rex_router
 cargo test -p rex_build
+cargo test -p rex_server
+cargo test -p rex_v8
 ```
 
 ## Project structure
@@ -60,11 +66,11 @@ cargo test -p rex_build
 crates/
   rex_core/       Shared types, config, errors
   rex_router/     File-system route scanner + trie matcher
-  rex_build/      SWC transforms + server/client bundler
+  rex_build/      Rolldown bundler (server + client)
   rex_v8/         V8 isolate pool + SSR engine
   rex_server/     Axum HTTP handlers + HTML document assembly
   rex_dev/        File watcher + HMR WebSocket
-  rex_cli/        Binary entry point (dev/build/start commands)
+  rex_cli/        Binary entry point (dev/build/start/lint/init commands)
 runtime/          JS evaluated at runtime (HMR client, entry templates)
 packages/rex/     npm package shipped to users (rex/document, rex/link, rex/router)
 fixtures/basic/   Minimal test project with pages
@@ -101,6 +107,9 @@ rex_cli
 GET /blog/hello-world
   │
   ├─ Axum fallback handler (rex_server/src/handlers.rs)
+  │
+  ├─ Check rex.config.json redirects → 301/307 if matched
+  ├─ Check rex.config.json rewrites → transparently rewrite path
   │
   ├─ Route matching: trie.match_path("/blog/hello-world")
   │   → RouteMatch { pattern: "/blog/:slug", params: { slug: "hello-world" } }
@@ -139,27 +148,15 @@ v8::tc_scope!(tc, scope);                                     // TryCatch
 
 Function callbacks use `&mut v8::PinScope` (not `&mut v8::HandleScope`).
 
-### SWC transforms
-
-SWC's current API uses the `Pass` trait with `pass.process(&mut program)` rather than the older `module.fold_with(&mut visitor)` pattern. The `Program` enum wraps `Module`:
-
-```rust
-let mut program = Program::Module(module);
-strip(unresolved_mark, top_level_mark).process(&mut program);
-// extract module back
-let module = match program { Program::Module(m) => m, _ => unreachable!() };
-```
-
-`SourceMap` uses `Lrc` (which is `Rc` or `Arc` depending on the `concurrent` feature flag).
-
 ### Server bundle format
 
-The server bundle is a self-contained JS file that:
-1. Registers each page component into `globalThis.__rex_pages[routeKey]`
-2. Exposes `globalThis.__rex_render_page(routeKey, propsJson)` → HTML string
-3. Exposes `globalThis.__rex_get_server_side_props(routeKey, contextJson)` → JSON string
-
-Each page is wrapped in an IIFE with its own `exports`/`module` scope. React and ReactDOMServer are loaded separately as `globalThis.__React` / `globalThis.__ReactDOMServer`.
+The server bundle is a single self-contained IIFE built by rolldown that:
+1. Includes V8 polyfills as a banner (MessageChannel, setTimeout, TextEncoder, etc.)
+2. Bundles React and ReactDOMServer directly (no separate loading)
+3. Registers each page component into `globalThis.__rex_pages[routeKey]`
+4. Exposes `globalThis.__rex_render_page(routeKey, propsJson)` → JSON `{ body, head }`
+5. Exposes `globalThis.__rex_get_server_side_props(routeKey, contextJson)` → JSON string
+6. Exposes `globalThis.__rex_get_static_props(routeKey, contextJson)` → JSON string
 
 ### HMR flow
 
@@ -171,10 +168,6 @@ Each page is wrapped in an IIFE with its own `exports`/`module` scope. React and
 Full React Fast Refresh (component-level hot reload without page refresh) is not yet implemented.
 
 ## Adding a new feature
-
-### New page transform
-
-Edit `crates/rex_build/src/transform.rs`. The `strip_gssp()` function shows how to walk and modify the AST. Add tests in the `#[cfg(test)]` module at the bottom.
 
 ### New route pattern
 
