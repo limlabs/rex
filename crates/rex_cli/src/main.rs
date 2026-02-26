@@ -6,6 +6,7 @@ use rex_router::{scan_pages, RouteTrie};
 use rex_server::RexServer;
 use rex_v8::{init_v8, IsolatePool};
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Arc;
 use tracing::{debug, info};
 
@@ -46,6 +47,21 @@ enum Commands {
         #[arg(long, default_value = ".")]
         root: PathBuf,
     },
+
+    /// Lint pages with oxlint (React + Next.js rules)
+    Lint {
+        /// Project root directory
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+
+        /// Fix auto-fixable problems
+        #[arg(long)]
+        fix: bool,
+
+        /// Additional arguments passed to oxlint
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 #[tokio::main]
@@ -63,6 +79,7 @@ async fn main() -> Result<()> {
         Commands::Dev { port, root } => cmd_dev(root, port).await,
         Commands::Build { root } => cmd_build(root).await,
         Commands::Start { port, root } => cmd_start(root, port).await,
+        Commands::Lint { root, fix, args } => cmd_lint(root, fix, args),
     }
 }
 
@@ -267,6 +284,102 @@ async fn cmd_build(root: PathBuf) -> Result<()> {
     print_route_summary(&scan.routes, &scan.api_routes);
     eprintln!();
     Ok(())
+}
+
+fn cmd_lint(root: PathBuf, fix: bool, extra_args: Vec<String>) -> Result<()> {
+    let root = std::fs::canonicalize(&root)?;
+
+    // Find oxlint binary
+    let oxlint = find_oxlint(&root).ok_or_else(|| {
+        anyhow::anyhow!(
+            "oxlint not found. Install it:\n\n  \
+             npm install -D oxlint\n  \
+             # or globally: npm install -g oxlint"
+        )
+    })?;
+
+    // Write default config if none exists
+    let config_path = root.join(".oxlintrc.json");
+    if !config_path.exists() {
+        eprintln!("  {} {}", dim("Creating"), dim(".oxlintrc.json with Rex defaults"));
+        std::fs::write(&config_path, default_oxlintrc())?;
+    }
+
+    let pages_dir = root.join("pages");
+    let lint_dir = if pages_dir.is_dir() {
+        pages_dir
+    } else {
+        root.clone()
+    };
+
+    eprintln!();
+    eprintln!("  {} {}", cyan_bold("▲ rex lint"), dim("(oxlint)"));
+    eprintln!();
+
+    let mut cmd = Command::new(&oxlint);
+    cmd.current_dir(&root);
+    cmd.arg(lint_dir);
+    cmd.arg("--config").arg(&config_path);
+
+    if fix {
+        cmd.arg("--fix");
+    }
+
+    for arg in &extra_args {
+        cmd.arg(arg);
+    }
+
+    let status = cmd.status()?;
+
+    if status.success() {
+        eprintln!();
+        eprintln!("  {} {}", green_bold("✓"), green_bold("No lint errors"));
+        eprintln!();
+    }
+
+    std::process::exit(status.code().unwrap_or(1));
+}
+
+fn find_oxlint(root: &std::path::Path) -> Option<PathBuf> {
+    // 1. Local node_modules/.bin/oxlint
+    let local = root.join("node_modules/.bin/oxlint");
+    if local.exists() {
+        return Some(local);
+    }
+
+    // 2. oxlint in PATH
+    if Command::new("oxlint")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+    {
+        return Some(PathBuf::from("oxlint"));
+    }
+
+    None
+}
+
+fn default_oxlintrc() -> &'static str {
+    r#"{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "plugins": ["react", "react-hooks", "nextjs", "import"],
+  "rules": {
+    "react/jsx-no-target-blank": "warn",
+    "react/no-unknown-property": "warn",
+    "react/react-in-jsx-scope": "off",
+    "react-hooks/rules-of-hooks": "error",
+    "react-hooks/exhaustive-deps": "warn",
+    "nextjs/no-html-link-for-pages": "warn",
+    "nextjs/no-img-element": "warn",
+    "nextjs/no-head-import-in-document": "warn",
+    "nextjs/no-duplicate-head": "warn",
+    "import/no-cycle": "warn"
+  },
+  "ignorePatterns": [".rex/", "node_modules/"]
+}
+"#
 }
 
 // --- Display helpers ---
