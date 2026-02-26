@@ -236,6 +236,28 @@ COVERAGE_THRESHOLD=60 ./scripts/coverage.sh   # custom threshold
 cargo llvm-cov --workspace --html   # HTML report in target/llvm-cov/html/
 ```
 
+### Benchmarks
+
+Compare Rex vs Next.js on the same pages (SSR, SSG, dynamic routes, API):
+
+```sh
+# Prerequisites
+cargo build --release
+cd benchmarks/next-basic && npm install && cd ../..
+cargo install oha   # or use ab (comes with macOS)
+
+# Run full suite
+./benchmarks/run.sh
+
+# Rex only
+./benchmarks/run.sh --rex-only
+
+# Tune parameters
+BENCH_REQUESTS=10000 BENCH_CONCURRENCY=100 ./benchmarks/run.sh
+```
+
+Measures cold start, TTFB (p50/p95/p99), throughput (RPS), and memory (RSS).
+
 ## Code style
 
 - No external formatter config — use `cargo fmt`
