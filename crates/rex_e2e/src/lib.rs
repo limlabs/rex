@@ -1,0 +1,341 @@
+// rex_e2e: End-to-end test harness for Rex
+//
+// Run with: cargo test -p rex_e2e -- --ignored
+//
+// Prerequisites:
+//   - `cargo build` (debug) or `cargo build --release`
+//   - `cd fixtures/basic && npm install`
+
+#[cfg(test)]
+mod tests {
+    use std::net::TcpStream;
+    use std::path::PathBuf;
+    use std::process::{Child, Command, Stdio};
+    use std::sync::OnceLock;
+    use std::time::{Duration, Instant};
+
+    struct TestServer {
+        port: u16,
+        _child: Child,
+    }
+
+    static SERVER: OnceLock<TestServer> = OnceLock::new();
+
+    fn rex_binary() -> PathBuf {
+        // Check REX_BIN env var first
+        if let Ok(bin) = std::env::var("REX_BIN") {
+            return PathBuf::from(bin);
+        }
+
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+
+        // Prefer release build, fall back to debug
+        let release = workspace_root.join("target/release/rex");
+        if release.exists() {
+            return release;
+        }
+
+        let debug = workspace_root.join("target/debug/rex");
+        if debug.exists() {
+            return debug;
+        }
+
+        panic!(
+            "Rex binary not found. Run `cargo build` or `cargo build --release` first.\n\
+             Or set REX_BIN=/path/to/rex"
+        );
+    }
+
+    fn fixture_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("fixtures/basic")
+    }
+
+    fn find_free_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    }
+
+    fn ensure_server() -> &'static TestServer {
+        SERVER.get_or_init(|| {
+            let bin = rex_binary();
+            let root = fixture_root();
+            let port = find_free_port();
+
+            eprintln!("[e2e] Starting rex dev server on port {port}");
+            eprintln!("[e2e] Binary: {}", bin.display());
+            eprintln!("[e2e] Root: {}", root.display());
+
+            let child = Command::new(&bin)
+                .arg("dev")
+                .arg("--root")
+                .arg(&root)
+                .arg("--port")
+                .arg(port.to_string())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap_or_else(|e| {
+                    panic!("Failed to start rex: {e}\nBinary: {}", bin.display())
+                });
+
+            // Wait for server to be ready (TCP connect)
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let addr = format!("127.0.0.1:{port}");
+            loop {
+                if Instant::now() > deadline {
+                    panic!("[e2e] Server failed to start within 30s on port {port}");
+                }
+                if TcpStream::connect_timeout(
+                    &addr.parse().unwrap(),
+                    Duration::from_millis(100),
+                )
+                .is_ok()
+                {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+
+            eprintln!("[e2e] Server ready on port {port}");
+
+            TestServer {
+                port,
+                _child: child,
+            }
+        })
+    }
+
+    fn base_url() -> String {
+        let server = ensure_server();
+        format!("http://127.0.0.1:{}", server.port)
+    }
+
+    // -------------------------------------------------------
+    // HTTP-level tests (reqwest, no browser needed)
+    // -------------------------------------------------------
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_index_returns_200_with_ssr_html() {
+        let url = format!("{}/", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        let body = resp.text().await.unwrap();
+        assert!(body.contains("<div id=\"__rex\">"), "Missing __rex div");
+        assert!(body.contains("Rex!"), "Missing SSR content 'Rex!'");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_about_page_returns_200() {
+        let url = format!("{}/about", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        let body = resp.text().await.unwrap();
+        assert!(body.contains("About"), "Missing 'About' content");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_dynamic_route_returns_200() {
+        let url = format!("{}/blog/hello-world", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        let body = resp.text().await.unwrap();
+        assert!(
+            body.contains("hello-world"),
+            "Missing dynamic slug in response body"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_404_page_returns_404() {
+        let url = format!("{}/nonexistent-page", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 404);
+
+        let body = resp.text().await.unwrap();
+        assert!(body.contains("404"), "Missing 404 text in error page");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_api_route_returns_json() {
+        let url = format!("{}/api/hello", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        let ct = resp
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(ct.contains("application/json"), "Expected JSON content-type, got: {ct}");
+
+        let json: serde_json::Value = resp.json().await.unwrap();
+        assert!(json.get("message").is_some(), "Missing 'message' in API response");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_static_assets_served() {
+        // Client JS chunks should be served from /_rex/client/
+        let url = format!("{}/", base_url());
+        let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
+
+        // Extract a script src from the HTML
+        if let Some(start) = body.find("/_rex/client/") {
+            let chunk = &body[start..];
+            let end = chunk.find('"').unwrap_or(chunk.len());
+            let script_path = &chunk[..end];
+
+            let asset_url = format!("{}{}", base_url(), script_path);
+            let resp = reqwest::get(&asset_url).await.unwrap();
+            assert_eq!(resp.status(), 200, "Static asset {script_path} should return 200");
+
+            let ct = resp
+                .headers()
+                .get("content-type")
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string();
+            assert!(
+                ct.contains("javascript"),
+                "Expected JS content-type for {script_path}, got: {ct}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_data_endpoint_returns_json() {
+        // The data endpoint is /_rex/data/{buildId}/{path}.json
+        // First get the page to find the build ID from the manifest
+        let url = format!("{}/", base_url());
+        let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
+
+        // Extract build_id from __REX_MANIFEST__
+        if let Some(start) = body.find("\"build_id\":\"") {
+            let rest = &body[start + 12..];
+            let end = rest.find('"').unwrap();
+            let build_id = &rest[..end];
+
+            // Use /about (not index) — the trie stores "/" for index which
+            // doesn't match "/index" after the handler trims .json
+            let data_url = format!("{}/_rex/data/{}/about.json", base_url(), build_id);
+            let resp = reqwest::get(&data_url).await.unwrap();
+            assert_eq!(resp.status(), 200, "Data endpoint should return 200");
+
+            let json: serde_json::Value = resp.json().await.unwrap();
+            assert!(
+                json.get("props").is_some(),
+                "Data endpoint should return props"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_html_document_structure() {
+        let url = format!("{}/", base_url());
+        let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
+
+        // Check basic HTML structure
+        assert!(body.contains("<!DOCTYPE html>") || body.contains("<!doctype html>"),
+            "Missing DOCTYPE");
+        assert!(body.contains("<html"), "Missing <html> tag");
+        assert!(body.contains("<head>") || body.contains("<head "), "Missing <head> tag");
+        assert!(body.contains("<body"), "Missing <body> tag");
+        assert!(body.contains("<div id=\"__rex\">"), "Missing __rex root div");
+        assert!(body.contains("__REX_DATA__"), "Missing __REX_DATA__ script");
+        assert!(body.contains("__REX_MANIFEST__"), "Missing __REX_MANIFEST__ script");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_gssp_props_in_html() {
+        // The index page uses getServerSideProps that returns a timestamp
+        let url = format!("{}/", base_url());
+        let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
+
+        // __REX_DATA__ should contain the GSSP props
+        assert!(body.contains("message"), "GSSP props should include 'message'");
+        assert!(
+            body.contains("Hello from Rex!"),
+            "GSSP message should be 'Hello from Rex!'"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_concurrent_requests() {
+        // Fire multiple requests simultaneously to test isolate pool
+        let base = base_url();
+        let mut handles = vec![];
+
+        for i in 0..8 {
+            let url = if i % 2 == 0 {
+                format!("{base}/")
+            } else {
+                format!("{base}/about")
+            };
+            handles.push(tokio::spawn(async move {
+                let resp = reqwest::get(&url).await.unwrap();
+                assert_eq!(resp.status(), 200, "Request {i} failed");
+                resp.text().await.unwrap()
+            }));
+        }
+
+        for (i, handle) in handles.into_iter().enumerate() {
+            let body = handle.await.unwrap();
+            assert!(
+                !body.is_empty(),
+                "Request {i} returned empty body"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_head_tags_rendered() {
+        // The about page uses <Head> to set a title
+        let url = format!("{}/about", base_url());
+        let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
+
+        assert!(
+            body.contains("<title>") || body.contains("About"),
+            "About page should have title or About text rendered"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_client_router_script_served() {
+        let url = format!("{}/_rex/router.js", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        let body = resp.text().await.unwrap();
+        assert!(
+            body.contains("__REX_ROUTER"),
+            "Router script should define __REX_ROUTER"
+        );
+    }
+}

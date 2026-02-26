@@ -60,6 +60,22 @@ cargo test -p rex_server
 cargo test -p rex_v8
 ```
 
+### E2E tests
+
+End-to-end tests live in `crates/rex_e2e`. They start a real `rex dev` server and make HTTP requests against it.
+
+Prerequisites:
+- `cargo build` (or `cargo build --release`)
+- `cd fixtures/basic && npm install`
+
+```sh
+cargo test -p rex_e2e -- --ignored --test-threads=1
+```
+
+The tests are marked `#[ignore]` so they don't run during `cargo test`. Use `--test-threads=1` because all tests share a single server process.
+
+To use a specific rex binary: `REX_BIN=/path/to/rex cargo test -p rex_e2e -- --ignored`
+
 ## Project structure
 
 ```
@@ -71,6 +87,7 @@ crates/
   rex_server/     Axum HTTP handlers + HTML document assembly
   rex_dev/        File watcher + HMR WebSocket
   rex_cli/        Binary entry point (dev/build/start/lint/init commands)
+  rex_e2e/        E2E tests (spawns real server, HTTP assertions)
 runtime/          JS evaluated at runtime (HMR client, entry templates)
 packages/rex/     npm package shipped to users (rex/document, rex/link, rex/router)
 fixtures/basic/   Minimal test project with pages

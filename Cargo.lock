@@ -2886,6 +2886,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rex_e2e"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "rex_router"
 version = "0.1.0"
 dependencies = [

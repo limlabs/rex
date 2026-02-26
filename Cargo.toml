@@ -8,6 +8,7 @@ members = [
     "crates/rex_v8",
     "crates/rex_server",
     "crates/rex_dev",
+    "crates/rex_e2e",
 ]
 
 [workspace.dependencies]
