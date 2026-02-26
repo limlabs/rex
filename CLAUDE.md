@@ -3,7 +3,7 @@
 ## Quick Reference
 
 - **Build**: `cargo build` (first build is slow due to V8 compilation)
-- **Test**: `cargo test` — 44 tests across rex_router, rex_build, rex_v8, and rex_server
+- **Test**: `cargo test` — 71 tests across rex_core, rex_router, rex_build, rex_v8, and rex_server
 - **Check**: `cargo check` — must be zero warnings
 - **Run dev server**: `cargo run -- dev --root fixtures/basic`
 - **Verbose logging**: `RUST_LOG=rex=debug cargo run -- dev --root fixtures/basic`
