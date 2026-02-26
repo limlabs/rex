@@ -2,7 +2,7 @@ use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
-use rex_core::{ServerSidePropsContext, ServerSidePropsResult};
+use rex_core::{ProjectConfig, ServerSidePropsContext, ServerSidePropsResult};
 use rex_router::RouteTrie;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -20,6 +20,7 @@ pub struct HotState {
     pub has_custom_404: bool,
     pub has_custom_error: bool,
     pub has_custom_document: bool,
+    pub project_config: ProjectConfig,
 }
 
 /// Shared application state
@@ -324,6 +325,55 @@ pub async fn api_handler(
     }
 }
 
+/// Check redirect rules and return early if matched.
+fn check_redirects(path: &str, config: &ProjectConfig) -> Option<Response> {
+    for rule in &config.redirects {
+        if let Some(params) = ProjectConfig::match_pattern(&rule.source, path) {
+            let dest = ProjectConfig::apply_params(&rule.destination, &params);
+            let status = if rule.permanent {
+                StatusCode::PERMANENT_REDIRECT // 308
+            } else {
+                StatusCode::from_u16(rule.status_code)
+                    .unwrap_or(StatusCode::TEMPORARY_REDIRECT)
+            };
+            debug!(from = path, to = %dest, status = %status.as_u16(), "Redirect rule matched");
+            return Some(
+                Response::builder()
+                    .status(status)
+                    .header("location", &dest)
+                    .body(Body::empty())
+                    .unwrap(),
+            );
+        }
+    }
+    None
+}
+
+/// Check rewrite rules and return the rewritten path if matched.
+fn check_rewrites(path: &str, config: &ProjectConfig) -> Option<String> {
+    for rule in &config.rewrites {
+        if let Some(params) = ProjectConfig::match_pattern(&rule.source, path) {
+            let dest = ProjectConfig::apply_params(&rule.destination, &params);
+            debug!(from = path, to = %dest, "Rewrite rule matched");
+            return Some(dest);
+        }
+    }
+    None
+}
+
+/// Collect custom headers that match the given path.
+fn collect_headers(path: &str, config: &ProjectConfig) -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    for rule in &config.headers {
+        if ProjectConfig::match_pattern(&rule.source, path).is_some() {
+            for entry in &rule.headers {
+                result.push((entry.key.clone(), entry.value.clone()));
+            }
+        }
+    }
+    result
+}
+
 /// Main page handler - catches all routes and performs SSR
 pub async fn page_handler(
     State(state): State<Arc<AppState>>,
@@ -334,6 +384,46 @@ pub async fn page_handler(
     info!(path, "Handling page request");
 
     let hot = snapshot(&state);
+
+    // Check redirect rules first
+    if let Some(redirect_response) = check_redirects(path, &hot.project_config) {
+        return redirect_response;
+    }
+
+    // Check rewrite rules (transparently serve a different path)
+    let effective_path;
+    let path = if let Some(rewritten) = check_rewrites(path, &hot.project_config) {
+        effective_path = rewritten;
+        &effective_path
+    } else {
+        path
+    };
+
+    // Collect custom headers to add to the response
+    let custom_headers = collect_headers(path, &hot.project_config);
+
+    let mut response = page_handler_inner(&state, &hot, path, &uri, &headers).await;
+
+    // Apply custom headers
+    for (key, value) in custom_headers {
+        if let (Ok(name), Ok(val)) = (
+            axum::http::header::HeaderName::from_bytes(key.as_bytes()),
+            axum::http::header::HeaderValue::from_str(&value),
+        ) {
+            response.headers_mut().insert(name, val);
+        }
+    }
+
+    response
+}
+
+async fn page_handler_inner(
+    state: &Arc<AppState>,
+    hot: &HotState,
+    path: &str,
+    uri: &Uri,
+    headers: &HeaderMap,
+) -> Response {
 
     // Try to match the route
     let route_match = match hot.route_trie.match_path(path) {
@@ -820,6 +910,7 @@ globalThis.__rex_resolve_gsp = function() {
                 has_custom_404: false,
                 has_custom_error: false,
                 has_custom_document: false,
+                project_config: rex_core::ProjectConfig::default(),
             }),
         });
 
@@ -1044,5 +1135,197 @@ globalThis.__rex_resolve_gsp = function() {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    fn build_test_app_with_config(
+        routes: Vec<Route>,
+        pages: &[(&str, &str, Option<&str>)],
+        project_config: rex_core::ProjectConfig,
+    ) -> Router {
+        rex_v8::init_v8();
+        let bundle = format!("{}\n{}", MOCK_REACT_RUNTIME, make_server_bundle(pages));
+        let pool = rex_v8::IsolatePool::new(1, Arc::new(bundle)).expect("failed to create pool");
+
+        let trie = RouteTrie::from_routes(&routes);
+        let manifest = rex_build::AssetManifest::new("test-build-id".to_string());
+
+        let state = Arc::new(AppState {
+            isolate_pool: pool,
+            is_dev: false,
+            hot: RwLock::new(HotState {
+                route_trie: trie,
+                api_route_trie: RouteTrie::from_routes(&[]),
+                manifest,
+                build_id: "test-build-id".to_string(),
+                has_custom_404: false,
+                has_custom_error: false,
+                has_custom_document: false,
+                project_config,
+            }),
+        });
+
+        Router::new()
+            .route("/_rex/data/{build_id}/{*path}", get(data_handler))
+            .fallback(page_handler)
+            .with_state(state)
+    }
+
+    #[tokio::test]
+    async fn test_config_redirect() {
+        let config = rex_core::ProjectConfig {
+            redirects: vec![rex_core::RedirectRule {
+                source: "/old-page".to_string(),
+                destination: "/new-page".to_string(),
+                status_code: 307,
+                permanent: false,
+            }],
+            ..Default::default()
+        };
+
+        let app = build_test_app_with_config(
+            vec![make_route("/new-page", "new.tsx", vec![])],
+            &[(
+                "new",
+                "function New() { return React.createElement('div', null, 'New'); }",
+                None,
+            )],
+            config,
+        );
+
+        let resp = app
+            .oneshot(Request::get("/old-page").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(resp.headers().get("location").unwrap(), "/new-page");
+    }
+
+    #[tokio::test]
+    async fn test_config_redirect_permanent() {
+        let config = rex_core::ProjectConfig {
+            redirects: vec![rex_core::RedirectRule {
+                source: "/legacy".to_string(),
+                destination: "/modern".to_string(),
+                status_code: 308,
+                permanent: true,
+            }],
+            ..Default::default()
+        };
+
+        let app = build_test_app_with_config(
+            vec![make_route("/", "index.tsx", vec![])],
+            &[(
+                "index",
+                "function Index() { return React.createElement('div'); }",
+                None,
+            )],
+            config,
+        );
+
+        let resp = app
+            .oneshot(Request::get("/legacy").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(resp.headers().get("location").unwrap(), "/modern");
+    }
+
+    #[tokio::test]
+    async fn test_config_redirect_with_params() {
+        let config = rex_core::ProjectConfig {
+            redirects: vec![rex_core::RedirectRule {
+                source: "/blog/:slug".to_string(),
+                destination: "/posts/:slug".to_string(),
+                status_code: 307,
+                permanent: false,
+            }],
+            ..Default::default()
+        };
+
+        let app = build_test_app_with_config(
+            vec![],
+            &[],
+            config,
+        );
+
+        let resp = app
+            .oneshot(Request::get("/blog/hello").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(resp.headers().get("location").unwrap(), "/posts/hello");
+    }
+
+    #[tokio::test]
+    async fn test_config_rewrite() {
+        let config = rex_core::ProjectConfig {
+            rewrites: vec![rex_core::RewriteRule {
+                source: "/docs".to_string(),
+                destination: "/".to_string(),
+            }],
+            ..Default::default()
+        };
+
+        let app = build_test_app_with_config(
+            vec![make_route("/", "index.tsx", vec![])],
+            &[(
+                "index",
+                "function Index() { return React.createElement('h1', null, 'Home'); }",
+                None,
+            )],
+            config,
+        );
+
+        // /docs should be rewritten to / and serve the index page
+        let resp = app
+            .oneshot(Request::get("/docs").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp.into_body()).await;
+        assert!(html.contains("Home"), "rewrite should serve index page: {html}");
+    }
+
+    #[tokio::test]
+    async fn test_config_custom_headers() {
+        let config = rex_core::ProjectConfig {
+            headers: vec![rex_core::HeaderRule {
+                source: "/".to_string(),
+                headers: vec![
+                    rex_core::HeaderEntry {
+                        key: "X-Custom".to_string(),
+                        value: "hello".to_string(),
+                    },
+                    rex_core::HeaderEntry {
+                        key: "X-Frame-Options".to_string(),
+                        value: "DENY".to_string(),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let app = build_test_app_with_config(
+            vec![make_route("/", "index.tsx", vec![])],
+            &[(
+                "index",
+                "function Index() { return React.createElement('div', null, 'Hi'); }",
+                None,
+            )],
+            config,
+        );
+
+        let resp = app
+            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get("x-custom").unwrap(), "hello");
+        assert_eq!(resp.headers().get("x-frame-options").unwrap(), "DENY");
     }
 }

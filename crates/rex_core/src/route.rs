@@ -131,3 +131,208 @@ pub struct RedirectConfig {
 fn default_redirect_status() -> u16 {
     307
 }
+
+// --- Middleware config types (rex.config.json) ---
+
+/// A redirect rule from rex.config.json
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedirectRule {
+    /// Source path pattern (supports :param for dynamic segments)
+    pub source: String,
+    /// Destination path (supports :param references)
+    pub destination: String,
+    /// HTTP status code (301 or 308 for permanent, 302 or 307 for temporary)
+    #[serde(default = "default_redirect_rule_status")]
+    pub status_code: u16,
+    /// Whether this redirect is permanent (overrides status_code)
+    #[serde(default)]
+    pub permanent: bool,
+}
+
+fn default_redirect_rule_status() -> u16 {
+    307
+}
+
+/// A rewrite rule from rex.config.json
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RewriteRule {
+    /// Source path pattern (supports :param for dynamic segments)
+    pub source: String,
+    /// Destination path (supports :param references)
+    pub destination: String,
+}
+
+/// A custom header rule from rex.config.json
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeaderRule {
+    /// Path pattern to match (supports :param for dynamic segments)
+    pub source: String,
+    /// Headers to add to matching responses
+    pub headers: Vec<HeaderEntry>,
+}
+
+/// A single header key-value pair
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeaderEntry {
+    pub key: String,
+    pub value: String,
+}
+
+/// Top-level project configuration from rex.config.json
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProjectConfig {
+    #[serde(default)]
+    pub redirects: Vec<RedirectRule>,
+    #[serde(default)]
+    pub rewrites: Vec<RewriteRule>,
+    #[serde(default)]
+    pub headers: Vec<HeaderRule>,
+}
+
+impl ProjectConfig {
+    /// Load from rex.config.json in the project root. Returns default if file doesn't exist.
+    pub fn load(project_root: &std::path::Path) -> Result<Self, crate::RexError> {
+        let config_path = project_root.join("rex.config.json");
+        if !config_path.exists() {
+            return Ok(Self::default());
+        }
+        let content = std::fs::read_to_string(&config_path).map_err(|e| {
+            crate::RexError::Config(format!("Failed to read rex.config.json: {e}"))
+        })?;
+        serde_json::from_str(&content).map_err(|e| {
+            crate::RexError::Config(format!("Invalid rex.config.json: {e}"))
+        })
+    }
+
+    /// Match a request path against a source pattern and return captured params.
+    /// Patterns support `:param` for single segments and `*` for catch-all.
+    pub fn match_pattern(pattern: &str, path: &str) -> Option<HashMap<String, String>> {
+        let pat_segs: Vec<&str> = pattern.trim_matches('/').split('/').collect();
+        let path_segs: Vec<&str> = path.trim_matches('/').split('/').collect();
+
+        if pat_segs.len() != path_segs.len() {
+            // Check for wildcard catch-all
+            if let Some(last) = pat_segs.last() {
+                if *last == "*" && path_segs.len() >= pat_segs.len() - 1 {
+                    let mut params = HashMap::new();
+                    for (p, s) in pat_segs.iter().zip(path_segs.iter()) {
+                        if p.starts_with(':') {
+                            params.insert(p[1..].to_string(), s.to_string());
+                        } else if *p != "*" && *p != *s {
+                            return None;
+                        }
+                    }
+                    return Some(params);
+                }
+            }
+            return None;
+        }
+
+        let mut params = HashMap::new();
+        for (p, s) in pat_segs.iter().zip(path_segs.iter()) {
+            if p.starts_with(':') {
+                params.insert(p[1..].to_string(), s.to_string());
+            } else if *p != *s {
+                return None;
+            }
+        }
+        Some(params)
+    }
+
+    /// Apply captured params to a destination string (replace :param with values).
+    pub fn apply_params(destination: &str, params: &HashMap<String, String>) -> String {
+        let mut result = destination.to_string();
+        for (key, value) in params {
+            result = result.replace(&format!(":{key}"), value);
+        }
+        result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_match_pattern_static() {
+        let result = ProjectConfig::match_pattern("/about", "/about");
+        assert!(result.is_some());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_match_pattern_no_match() {
+        assert!(ProjectConfig::match_pattern("/about", "/contact").is_none());
+        assert!(ProjectConfig::match_pattern("/a/b", "/a").is_none());
+    }
+
+    #[test]
+    fn test_match_pattern_dynamic() {
+        let result = ProjectConfig::match_pattern("/blog/:slug", "/blog/hello").unwrap();
+        assert_eq!(result.get("slug").unwrap(), "hello");
+    }
+
+    #[test]
+    fn test_match_pattern_multiple_params() {
+        let result = ProjectConfig::match_pattern("/blog/:year/:slug", "/blog/2025/intro").unwrap();
+        assert_eq!(result.get("year").unwrap(), "2025");
+        assert_eq!(result.get("slug").unwrap(), "intro");
+    }
+
+    #[test]
+    fn test_apply_params() {
+        let mut params = HashMap::new();
+        params.insert("slug".to_string(), "hello".to_string());
+        assert_eq!(
+            ProjectConfig::apply_params("/posts/:slug", &params),
+            "/posts/hello"
+        );
+    }
+
+    #[test]
+    fn test_config_load_missing_file() {
+        let tmp = std::env::temp_dir().join("rex_test_no_config");
+        let _ = std::fs::create_dir_all(&tmp);
+        let config = ProjectConfig::load(&tmp).unwrap();
+        assert!(config.redirects.is_empty());
+        assert!(config.rewrites.is_empty());
+        assert!(config.headers.is_empty());
+    }
+
+    #[test]
+    fn test_config_load_json() {
+        let tmp = std::env::temp_dir().join("rex_test_config_load");
+        let _ = std::fs::create_dir_all(&tmp);
+        std::fs::write(
+            tmp.join("rex.config.json"),
+            r#"{
+                "redirects": [
+                    { "source": "/old", "destination": "/new", "permanent": true }
+                ],
+                "rewrites": [
+                    { "source": "/api/:path", "destination": "/api/v2/:path" }
+                ],
+                "headers": [
+                    {
+                        "source": "/:path",
+                        "headers": [
+                            { "key": "X-Frame-Options", "value": "DENY" }
+                        ]
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let config = ProjectConfig::load(&tmp).unwrap();
+        assert_eq!(config.redirects.len(), 1);
+        assert_eq!(config.redirects[0].source, "/old");
+        assert_eq!(config.redirects[0].destination, "/new");
+        assert!(config.redirects[0].permanent);
+        assert_eq!(config.rewrites.len(), 1);
+        assert_eq!(config.headers.len(), 1);
+        assert_eq!(config.headers[0].headers[0].key, "X-Frame-Options");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}

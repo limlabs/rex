@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use rex_build::{build_bundles, AssetManifest};
-use rex_core::RexConfig;
+use rex_core::{ProjectConfig, RexConfig};
 use rex_router::{scan_pages, RouteTrie};
 use rex_server::RexServer;
 use rex_v8::{init_v8, IsolatePool};
@@ -158,6 +158,9 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
         .route("/_rex/hmr", hmr_route)
         .route("/_rex/hmr-client.js", axum::routing::get(hmr_client_handler));
 
+    // Load project config (redirects, rewrites, headers)
+    let project_config = ProjectConfig::load(&config.project_root)?;
+
     let server = RexServer::with_error_pages(
         trie,
         api_trie,
@@ -170,6 +173,7 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
         scan.not_found.is_some(),
         scan.error.is_some(),
         scan.document.is_some(),
+        project_config,
     );
 
     let router = server.build_router_with_extra(extra_routes);
@@ -475,6 +479,9 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
         Arc::new(server_bundle),
     )?;
 
+    // Load project config (redirects, rewrites, headers)
+    let project_config = ProjectConfig::load(&config.project_root)?;
+
     let server = RexServer::with_error_pages(
         trie,
         api_trie,
@@ -487,6 +494,7 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
         scan.not_found.is_some(),
         scan.error.is_some(),
         scan.document.is_some(),
+        project_config,
     );
 
     let elapsed = start.elapsed();

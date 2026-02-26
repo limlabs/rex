@@ -5,6 +5,7 @@ pub mod route;
 pub use config::RexConfig;
 pub use error::RexError;
 pub use route::{
-    DataStrategy, DynamicSegment, PageType, RedirectConfig, Route, RouteMatch,
-    ServerSidePropsContext, ServerSidePropsResult, StaticPropsContext, StaticPropsResult,
+    DataStrategy, DynamicSegment, HeaderEntry, HeaderRule, PageType, ProjectConfig, RedirectConfig,
+    RedirectRule, RewriteRule, Route, RouteMatch, ServerSidePropsContext, ServerSidePropsResult,
+    StaticPropsContext, StaticPropsResult,
 };
