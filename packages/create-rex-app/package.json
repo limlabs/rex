@@ -1,0 +1,19 @@
+{
+  "name": "create-rex",
+  "version": "0.0.1-test.1",
+  "description": "Create a new Rex project",
+  "bin": {
+    "create-rex": "./index.js"
+  },
+  "files": [
+    "index.js"
+  ],
+  "keywords": [
+    "rex",
+    "react",
+    "ssr",
+    "framework",
+    "create"
+  ],
+  "license": "MIT"
+}

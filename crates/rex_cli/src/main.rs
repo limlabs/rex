@@ -309,7 +309,7 @@ fn cmd_init(name: String) -> Result<()> {
     eprintln!();
 
     // Create directory structure
-    std::fs::create_dir_all(project_dir.join("pages"))?;
+    std::fs::create_dir_all(project_dir.join("pages/api"))?;
     std::fs::create_dir_all(project_dir.join("styles"))?;
     std::fs::create_dir_all(project_dir.join("public"))?;
 
@@ -324,6 +324,10 @@ fn cmd_init(name: String) -> Result<()> {
   "dependencies": {{
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
+  }},
+  "devDependencies": {{
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
   }}
 }}
 "#
@@ -335,8 +339,8 @@ fn cmd_init(name: String) -> Result<()> {
         project_dir.join("tsconfig.json"),
         r#"{
   "compilerOptions": {
-    "target": "es2017",
-    "module": "esnext",
+    "target": "ESNext",
+    "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "strict": true,
@@ -344,7 +348,8 @@ fn cmd_init(name: String) -> Result<()> {
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "noEmit": true
   },
   "include": ["pages/**/*"],
   "exclude": ["node_modules", ".rex"]
@@ -363,11 +368,39 @@ fn cmd_init(name: String) -> Result<()> {
         project_dir.join("pages/index.tsx"),
         r#"export default function Home() {
   return (
-    <div style={{ fontFamily: "system-ui, sans-serif", padding: "2rem" }}>
+    <div style={{ fontFamily: "system-ui, sans-serif", padding: "2rem", maxWidth: "640px" }}>
       <h1>Welcome to Rex</h1>
       <p>Edit <code>pages/index.tsx</code> to get started.</p>
     </div>
   );
+}
+
+export async function getServerSideProps() {
+  return {
+    props: {
+      createdAt: new Date().toISOString(),
+    },
+  };
+}
+"#,
+    )?;
+
+    // pages/_app.tsx
+    std::fs::write(
+        project_dir.join("pages/_app.tsx"),
+        r#"import '../styles/globals.css';
+
+export default function App({ Component, pageProps }: { Component: any; pageProps: any }) {
+  return <Component {...pageProps} />;
+}
+"#,
+    )?;
+
+    // pages/api/hello.ts
+    std::fs::write(
+        project_dir.join("pages/api/hello.ts"),
+        r#"export default function handler(req: any, res: any) {
+  res.status(200).json({ message: "Hello from Rex API!" });
 }
 "#,
     )?;
