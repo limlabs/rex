@@ -7,3 +7,6 @@ node_modules
 witness-reports/
 .venv/
 __pycache__/
+__marimo__/
+benchmarks/results*.json
+.tanstack

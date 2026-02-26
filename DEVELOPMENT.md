@@ -238,22 +238,26 @@ cargo llvm-cov --workspace --html   # HTML report in target/llvm-cov/html/
 
 ### Benchmarks
 
-Compare Rex vs Next.js on the same pages (SSR, SSG, dynamic routes, API):
+Compare Rex vs Next.js 15 vs TanStack Start on the same pages (SSR, SSG, dynamic routes, API).
+
+Three suites: **DX** (install time, deps, startup, rebuild), **Server** (production RPS, latency), **Client** (bundle size, Lighthouse Web Vitals).
 
 ```sh
 # Prerequisites
 cargo build --release
 cd benchmarks/next-basic && npm install && cd ../..
+cd benchmarks/tanstack-basic && npm install && cd ../..
 
-# Run full suite (dev + prod, both frameworks)
-./benchmarks/run.sh --json benchmarks/results.json
+# Run all suites, all frameworks
+cd benchmarks && uv run python bench.py --json results.json
 
-# Dev only / prod only / one framework
-./benchmarks/run.sh --dev-only --rex-only
-./benchmarks/run.sh --prod-only
+# Single suite or framework
+uv run python bench.py --suite dx --framework rex
+uv run python bench.py --suite server --framework rex,nextjs
+uv run python bench.py --suite client
 
-# Tune parameters
-BENCH_REQUESTS=10000 BENCH_CONCURRENCY=100 ./benchmarks/run.sh --json benchmarks/results.json
+# Tune load test parameters
+uv run python bench.py --suite server --requests 10000 --concurrency 100
 ```
 
 View results in the interactive dashboard (marimo notebook):
@@ -261,8 +265,6 @@ View results in the interactive dashboard (marimo notebook):
 ```sh
 cd benchmarks && uv run marimo edit dashboard.py
 ```
-
-Measures cold start, build time, throughput (RPS), latency, and memory (RSS).
 
 ## Code style
 
