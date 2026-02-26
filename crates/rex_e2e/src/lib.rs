@@ -338,4 +338,182 @@ mod tests {
             "Router script should define __REX_ROUTER"
         );
     }
+
+    // -------------------------------------------------------
+    // Dev server lifecycle tests (HMR, rebuild, shutdown)
+    // -------------------------------------------------------
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_hmr_websocket_sends_reload_on_file_change() {
+        use futures::StreamExt;
+
+        let server = ensure_server();
+        let ws_url = format!("ws://127.0.0.1:{}/_rex/hmr", server.port);
+
+        // Connect to HMR WebSocket
+        let (ws_stream, _) = tokio_tungstenite::connect_async(&ws_url)
+            .await
+            .expect("Failed to connect to HMR WebSocket");
+
+        let (_, mut read) = ws_stream.split();
+
+        // Consume the initial "connected" message
+        let first_msg = tokio::time::timeout(Duration::from_secs(5), read.next())
+            .await
+            .expect("Timed out waiting for connected message")
+            .expect("Stream ended")
+            .expect("WS error");
+        let first_text = first_msg.to_text().unwrap_or("");
+        assert!(
+            first_text.contains("connected"),
+            "First message should be 'connected', got: {first_text}"
+        );
+
+        // Read the about.tsx file and save original content
+        let about_path = fixture_root().join("pages/about.tsx");
+        let original = std::fs::read_to_string(&about_path).unwrap();
+
+        // Modify the file (append a harmless comment)
+        let modified = format!("{original}\n// e2e-test-marker\n");
+        std::fs::write(&about_path, &modified).unwrap();
+
+        // Wait for HMR update message (with timeout)
+        let msg = tokio::time::timeout(Duration::from_secs(15), read.next()).await;
+
+        // Restore the file immediately
+        std::fs::write(&about_path, &original).unwrap();
+
+        // Verify we got an update/reload message
+        let msg = msg.expect("Timed out waiting for HMR message");
+        let msg = msg.expect("WebSocket stream ended").expect("WebSocket error");
+        let text = msg.to_text().unwrap_or("");
+        assert!(
+            text.contains("update") || text.contains("reload"),
+            "Expected HMR update/reload message, got: {text}"
+        );
+
+        // Wait for the rebuild from restoring the original file
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_hmr_rebuild_reflects_in_response() {
+        // Modify a page, wait for rebuild, verify the change is visible in HTTP response
+        let about_path = fixture_root().join("pages/about.tsx");
+        let original = std::fs::read_to_string(&about_path).unwrap();
+
+        // Add a unique marker to a string literal (not the function name)
+        let marker = "E2E_TEST_MARKER_12345";
+        let modified = original.replace("<h1>About</h1>", &format!("<h1>About {marker}</h1>"));
+        std::fs::write(&about_path, &modified).unwrap();
+
+        // Poll until the page reflects the change (or timeout)
+        let url = format!("{}/about", base_url());
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut found = false;
+
+        while Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            if let Ok(resp) = reqwest::get(&url).await {
+                if let Ok(body) = resp.text().await {
+                    if body.contains(marker) {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Restore the file
+        std::fs::write(&about_path, &original).unwrap();
+
+        // Wait for restore rebuild
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        assert!(
+            found,
+            "Page should reflect the modified content after HMR rebuild"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_graceful_shutdown() {
+        // Spawn a separate server instance for this test (not the shared one)
+        let bin = rex_binary();
+        let root = fixture_root();
+        let port = find_free_port();
+
+        let mut child = Command::new(&bin)
+            .arg("dev")
+            .arg("--root")
+            .arg(&root)
+            .arg("--port")
+            .arg(port.to_string())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        // Wait for server to be ready
+        let addr = format!("127.0.0.1:{port}");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if Instant::now() > deadline {
+                child.kill().ok();
+                panic!("Shutdown test: server failed to start");
+            }
+            if TcpStream::connect_timeout(
+                &addr.parse().unwrap(),
+                Duration::from_millis(100),
+            )
+            .is_ok()
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        // Verify it responds
+        let url = format!("http://127.0.0.1:{port}/");
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        // Send SIGTERM (graceful shutdown)
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
+        }
+        #[cfg(not(unix))]
+        {
+            child.kill().ok();
+        }
+
+        // Wait for process to exit (with timeout)
+        let exit_deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                // Process exited — success
+                eprintln!("[e2e] Server exited with status: {status}");
+                break;
+            }
+            if Instant::now() > exit_deadline {
+                child.kill().ok();
+                panic!("Server did not shut down within 5s after SIGTERM");
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        // Verify the port is no longer accepting connections
+        assert!(
+            TcpStream::connect_timeout(
+                &addr.parse().unwrap(),
+                Duration::from_millis(500),
+            )
+            .is_err(),
+            "Port should be closed after shutdown"
+        );
+    }
 }
