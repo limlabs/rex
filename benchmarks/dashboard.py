@@ -7,7 +7,16 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
+    import json
+    import pandas as pd
+    import plotly.express as px
+    from pathlib import Path
 
+    return mo, json, pd, px, Path
+
+
+@app.cell
+def _(mo):
     mo.md(
         """
         # Rex vs Next.js Benchmark Results
@@ -19,14 +28,11 @@ def _():
         Benchmarked with `ab` (Apache Bench) on the same machine, same concurrency.
         """
     )
-    return (mo,)
+    return
 
 
 @app.cell
-def _(mo):
-    import json
-    from pathlib import Path
-
+def _(json, Path, mo):
     results_path = Path(__file__).parent / "results.json"
     if not results_path.exists():
         mo.md(
@@ -42,13 +48,11 @@ def _(mo):
         raw = json.loads(results_path.read_text())
 
     raw[:2]
-    return raw, results_path
+    return (raw,)
 
 
 @app.cell
-def _(raw):
-    import pandas as pd
-
+def _(raw, pd):
     df = pd.DataFrame(raw)
     if not df.empty:
         df["label"] = df["framework"].str.replace("nextjs", "Next.js").str.replace("rex", "Rex")
@@ -65,13 +69,10 @@ def _(raw):
 
 
 @app.cell
-def _(df, mo):
-    import plotly.express as px
-
+def _(df, mo, px):
     if df.empty:
         mo.md("> No data to plot.")
     else:
-        # ── Throughput (RPS) ──
         fig_rps = px.bar(
             df,
             x="endpoint_label",
@@ -91,17 +92,14 @@ def _(df, mo):
         )
         fig_rps.for_each_annotation(lambda a: a.update(text=a.text.replace("mode=", "").title()))
         mo.ui.plotly(fig_rps)
-    return (fig_rps,)
+    return
 
 
 @app.cell
-def _(df, mo):
-    import plotly.express as px
-
+def _(df, mo, px):
     if df.empty:
         mo.md("> No data to plot.")
     else:
-        # ── Latency (ms) ──
         fig_lat = px.bar(
             df,
             x="endpoint_label",
@@ -121,17 +119,14 @@ def _(df, mo):
         )
         fig_lat.for_each_annotation(lambda a: a.update(text=a.text.replace("mode=", "").title()))
         mo.ui.plotly(fig_lat)
-    return (fig_lat,)
+    return
 
 
 @app.cell
-def _(df, mo):
-    import plotly.express as px
-
+def _(df, mo, px):
     if df.empty:
         mo.md("> No data to plot.")
     else:
-        # ── Cold start comparison ──
         cold = df.drop_duplicates(subset=["framework", "mode"])[["label", "mode", "cold_start_ms", "memory_mb"]]
         fig_cold = px.bar(
             cold,
@@ -151,15 +146,14 @@ def _(df, mo):
             xaxis=dict(tickvals=["dev", "prod"], ticktext=["Dev", "Prod"]),
         )
         mo.ui.plotly(fig_cold)
-    return (cold, fig_cold)
+    return
 
 
 @app.cell
-def _(df, mo):
+def _(df, pd, mo):
     if df.empty:
         mo.md("> No data.")
     else:
-        # ── Summary table: Rex advantage multiplier ──
         rex_dev = df[(df["framework"] == "rex") & (df["mode"] == "dev")].set_index("endpoint")
         next_dev = df[(df["framework"] == "nextjs") & (df["mode"] == "dev")].set_index("endpoint")
         rex_prod = df[(df["framework"] == "rex") & (df["mode"] == "prod")].set_index("endpoint")
@@ -181,8 +175,6 @@ def _(df, mo):
                     "Prod Speedup": f"**{prod_x}x**",
                 }
             )
-
-        import pandas as pd
 
         summary = pd.DataFrame(rows)
         mo.md("## Speedup Summary")
