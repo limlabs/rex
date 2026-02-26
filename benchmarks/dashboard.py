@@ -22,7 +22,22 @@ def _():
     FW_MAP = {"rex": "Rex", "nextjs": "Next.js", "tanstack": "TanStack Start"}
     BENCH_DIR = Path(__file__).parent
     RESULTS_PATH = BENCH_DIR / "results.json"
-    return BENCH_DIR, COLORS, FW_MAP, FW_ORDER, Path, RESULTS_PATH, go, json, make_subplots, mo, pd, px, subprocess, sys, time
+    return (
+        BENCH_DIR,
+        COLORS,
+        FW_MAP,
+        FW_ORDER,
+        RESULTS_PATH,
+        go,
+        json,
+        make_subplots,
+        mo,
+        pd,
+        px,
+        subprocess,
+        sys,
+        time,
+    )
 
 
 @app.cell
@@ -36,11 +51,6 @@ def _(mo):
     return
 
 
-# ════════════════════════════════════════════════════════════════
-# CONTROLS + RUNNER
-# ════════════════════════════════════════════════════════════════
-
-
 @app.cell
 def _(mo):
     get_bench_ts, set_bench_ts = mo.state(0)
@@ -49,15 +59,24 @@ def _(mo):
 
 
 @app.cell
-def _(BENCH_DIR, RESULTS_PATH, mo, set_bench_log, set_bench_ts, subprocess, sys, time):
+def _(
+    BENCH_DIR,
+    RESULTS_PATH,
+    mo,
+    set_bench_log,
+    set_bench_ts,
+    subprocess,
+    sys,
+    time,
+):
     suite_select = mo.ui.multiselect(
         options={"DX": "dx", "Server": "server", "Client": "client"},
-        value=["dx", "server", "client"],
+        value=["DX", "Server", "Client"],
         label="Suites",
     )
     fw_select = mo.ui.multiselect(
         options={"Rex": "rex", "Next.js": "nextjs", "TanStack Start": "tanstack"},
-        value=["rex"],
+        value=["Rex"],
         label="Frameworks",
     )
     requests_input = mo.ui.number(value=5000, start=100, stop=50000, step=100, label="Requests (server)")
@@ -88,7 +107,7 @@ def _(BENCH_DIR, RESULTS_PATH, mo, set_bench_log, set_bench_ts, subprocess, sys,
         mo.hstack([requests_input, concurrency_input], justify="start", gap=1),
         run_btn,
     ])
-    return concurrency_input, fw_select, requests_input, run_btn, suite_select
+    return
 
 
 @app.cell
@@ -97,11 +116,6 @@ def _(get_bench_log, mo):
     if _log:
         mo.accordion({"Benchmark output": mo.md(f"```\n{_log}\n```")})
     return
-
-
-# ════════════════════════════════════════════════════════════════
-# DATA LOADING
-# ════════════════════════════════════════════════════════════════
 
 
 @app.cell
@@ -116,11 +130,6 @@ def _(FW_MAP, RESULTS_PATH, get_bench_ts, json, mo, pd):
         mo.md("> No results yet. Select options above and click **Run Benchmarks**.")
         df = pd.DataFrame()
     return (df,)
-
-
-# ════════════════════════════════════════════════════════════════
-# DX SUITE
-# ════════════════════════════════════════════════════════════════
 
 
 @app.cell
@@ -198,11 +207,6 @@ def _(FW_ORDER, df, mo, pd):
         mo.ui.table(pd.DataFrame(_rows), selection=None)
     _dx_summary_table()
     return
-
-
-# ════════════════════════════════════════════════════════════════
-# SERVER SUITE
-# ════════════════════════════════════════════════════════════════
 
 
 @app.cell
@@ -307,11 +311,6 @@ def _(FW_ORDER, df, mo, pd):
         mo.ui.table(pd.DataFrame(_rows), selection=None)
     _server_summary_table()
     return
-
-
-# ════════════════════════════════════════════════════════════════
-# CLIENT SUITE
-# ════════════════════════════════════════════════════════════════
 
 
 @app.cell
