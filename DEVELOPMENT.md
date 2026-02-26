@@ -188,6 +188,44 @@ Edit `crates/rex_server/src/handlers.rs`. Add the route in `crates/rex_server/sr
 
 Edit `crates/rex_cli/src/main.rs`. Add a variant to the `Commands` enum and a handler function.
 
+## Git hooks (lefthook)
+
+We use [lefthook](https://github.com/evilmartians/lefthook) for git hooks. Install it once:
+
+```sh
+# macOS
+brew install lefthook
+
+# or with Go
+go install github.com/evilmartians/lefthook@latest
+```
+
+Then activate the hooks:
+
+```sh
+lefthook install
+```
+
+This sets up:
+- **pre-commit**: `cargo fmt --check`, `cargo clippy`, `cargo test`
+- **pre-push**: `cargo test`
+
+### Code coverage
+
+Install `cargo-llvm-cov` for coverage reports:
+
+```sh
+cargo install cargo-llvm-cov
+```
+
+Run coverage:
+
+```sh
+./scripts/coverage.sh           # default 50% threshold
+COVERAGE_THRESHOLD=60 ./scripts/coverage.sh   # custom threshold
+cargo llvm-cov --workspace --html   # HTML report in target/llvm-cov/html/
+```
+
 ## Code style
 
 - No external formatter config — use `cargo fmt`

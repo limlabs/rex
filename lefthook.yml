@@ -1,0 +1,19 @@
+pre-commit:
+  parallel: false
+  commands:
+    fmt:
+      run: cargo fmt --check
+      fail_text: "Run `cargo fmt` to fix formatting"
+    clippy:
+      run: cargo clippy --all-targets -- -D warnings
+      fail_text: "Fix clippy warnings before committing"
+    test:
+      run: cargo test
+      fail_text: "Tests must pass before committing"
+
+pre-push:
+  parallel: false
+  commands:
+    test:
+      run: cargo test
+      fail_text: "Tests must pass before pushing"
