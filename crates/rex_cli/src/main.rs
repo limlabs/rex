@@ -62,6 +62,12 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+
+    /// Create a new Rex project
+    Init {
+        /// Project name (creates a new directory)
+        name: String,
+    },
 }
 
 #[tokio::main]
@@ -80,6 +86,7 @@ async fn main() -> Result<()> {
         Commands::Build { root } => cmd_build(root).await,
         Commands::Start { port, root } => cmd_start(root, port).await,
         Commands::Lint { root, fix, args } => cmd_lint(root, fix, args),
+        Commands::Init { name } => cmd_init(name),
     }
 }
 
@@ -287,6 +294,116 @@ async fn cmd_build(root: PathBuf) -> Result<()> {
     eprintln!();
     print_route_summary(&scan.routes, &scan.api_routes);
     eprintln!();
+    Ok(())
+}
+
+fn cmd_init(name: String) -> Result<()> {
+    let project_dir = PathBuf::from(&name);
+
+    if project_dir.exists() {
+        anyhow::bail!("Directory '{}' already exists", name);
+    }
+
+    eprintln!();
+    eprintln!("  {} {}", cyan_bold("▲ rex"), dim("creating project..."));
+    eprintln!();
+
+    // Create directory structure
+    std::fs::create_dir_all(project_dir.join("pages"))?;
+    std::fs::create_dir_all(project_dir.join("styles"))?;
+    std::fs::create_dir_all(project_dir.join("public"))?;
+
+    // package.json
+    std::fs::write(
+        project_dir.join("package.json"),
+        format!(
+            r#"{{
+  "name": "{name}",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {{
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }}
+}}
+"#
+        ),
+    )?;
+
+    // tsconfig.json
+    std::fs::write(
+        project_dir.join("tsconfig.json"),
+        r#"{
+  "compilerOptions": {
+    "target": "es2017",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true
+  },
+  "include": ["pages/**/*"],
+  "exclude": ["node_modules", ".rex"]
+}
+"#,
+    )?;
+
+    // .gitignore
+    std::fs::write(
+        project_dir.join(".gitignore"),
+        "node_modules\n.rex\n.DS_Store\n",
+    )?;
+
+    // pages/index.tsx
+    std::fs::write(
+        project_dir.join("pages/index.tsx"),
+        r#"export default function Home() {
+  return (
+    <div style={{ fontFamily: "system-ui, sans-serif", padding: "2rem" }}>
+      <h1>Welcome to Rex</h1>
+      <p>Edit <code>pages/index.tsx</code> to get started.</p>
+    </div>
+  );
+}
+"#,
+    )?;
+
+    // styles/globals.css
+    std::fs::write(
+        project_dir.join("styles/globals.css"),
+        r#"*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+"#,
+    )?;
+
+    eprintln!("  {} {}", green_bold("✓"), green_bold("Project created"));
+    eprintln!();
+    eprintln!("  {}", dim("Get started:"));
+    eprintln!();
+    eprintln!("    {} {}", bold("cd"), bold(&name));
+    eprintln!("    {} {}", bold("npm install"), dim(""));
+    eprintln!("    {} {}", bold("rex dev"), dim(""));
+    eprintln!();
+
     Ok(())
 }
 
