@@ -6,7 +6,7 @@ use rex_core::RexConfig;
 use rex_router::{scan_pages, RouteTrie};
 use rex_server::handlers::AppState;
 use std::sync::Arc;
-use tracing::info;
+use tracing::debug;
 
 /// Handle a file change event: rebuild, reload isolates, update state, notify HMR clients
 pub async fn handle_file_event(
@@ -15,7 +15,7 @@ pub async fn handle_file_event(
     state: &Arc<AppState>,
     hmr: &HmrBroadcast,
 ) -> Result<()> {
-    info!(path = %event.path.display(), kind = ?event.kind, "Processing file change");
+    debug!(path = %event.path.display(), kind = ?event.kind, "Processing file change");
 
     match event.kind {
         FileEventKind::PageModified => {
@@ -44,7 +44,7 @@ pub async fn handle_file_event(
                 .unwrap_or(&event.path);
             hmr.send_update(&rel_path.to_string_lossy());
 
-            info!("Hot reload complete");
+            debug!("Hot reload complete");
         }
         FileEventKind::PageAdded | FileEventKind::PageRemoved => {
             // Full rebuild: routes changed, need new trie + manifest
@@ -71,7 +71,7 @@ pub async fn handle_file_event(
             // Signal full reload to clients
             hmr.send_full_reload();
 
-            info!("Full rebuild complete (route added/removed)");
+            debug!("Full rebuild complete (route added/removed)");
         }
         FileEventKind::ConfigChanged => {
             hmr.send_full_reload();

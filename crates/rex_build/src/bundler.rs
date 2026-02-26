@@ -7,7 +7,7 @@ use rolldown_common::Output;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tracing::info;
+use tracing::debug;
 
 /// Build result containing paths to generated bundles
 #[derive(Debug, Clone)]
@@ -36,11 +36,11 @@ pub async fn build_bundles(config: &RexConfig, scan: &ScanResult) -> Result<Buil
     // Pre-process CSS modules (generates scoped CSS + JS proxy files)
     let css_modules = process_css_modules(scan, &client_dir, &build_id)?;
 
-    info!("Building server bundle...");
+    debug!("Building server bundle...");
     let server_bundle_path =
         build_server_bundle(config, scan, &server_dir, &css_modules.page_overrides).await?;
 
-    info!("Building client bundles...");
+    debug!("Building client bundles...");
     let manifest =
         build_client_bundles(config, scan, &client_dir, &build_id, &css_modules).await?;
 
@@ -441,7 +441,7 @@ async fn build_server_bundle(
     let _ = fs::remove_dir_all(&entries_dir);
 
     let bundle_path = output_dir.join("server-bundle.js");
-    info!(path = %bundle_path.display(), "Server bundle written");
+    debug!(path = %bundle_path.display(), "Server bundle written");
     Ok(bundle_path)
 }
 
@@ -684,7 +684,7 @@ if (!window.__REX_NAVIGATING__) {{
 
     let _ = fs::remove_dir_all(&entries_dir);
 
-    info!(
+    debug!(
         pages = scan.routes.len(),
         "Client bundles built with rolldown"
     );

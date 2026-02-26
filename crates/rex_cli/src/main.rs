@@ -97,7 +97,7 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
     config.validate()?;
 
     eprintln!();
-    eprintln!("  {} {}", cyan_bold("▲ rex"), dim(env!("CARGO_PKG_VERSION")));
+    eprintln!("  {} {}", magenta_bold("◆ rex"), dim(env!("CARGO_PKG_VERSION")));
     eprintln!();
 
     // Scan routes
@@ -233,7 +233,7 @@ async fn cmd_build(root: PathBuf) -> Result<()> {
     config.validate()?;
 
     eprintln!();
-    eprintln!("  {} {}", cyan_bold("▲ rex"), dim(env!("CARGO_PKG_VERSION")));
+    eprintln!("  {} {}", magenta_bold("◆ rex"), dim(env!("CARGO_PKG_VERSION")));
     eprintln!();
 
     let start = std::time::Instant::now();
@@ -305,7 +305,7 @@ fn cmd_init(name: String) -> Result<()> {
     }
 
     eprintln!();
-    eprintln!("  {} {}", cyan_bold("▲ rex"), dim("creating project..."));
+    eprintln!("  {} {}", magenta_bold("◆ rex"), dim("creating project..."));
     eprintln!();
 
     // Create directory structure
@@ -434,7 +434,7 @@ fn cmd_lint(root: PathBuf, fix: bool, extra_args: Vec<String>) -> Result<()> {
     };
 
     eprintln!();
-    eprintln!("  {} {}", cyan_bold("▲ rex lint"), dim("(oxlint)"));
+    eprintln!("  {} {}", magenta_bold("◆ rex lint"), dim("(oxlint)"));
     eprintln!();
 
     let mut cmd = Command::new(&oxlint);
@@ -513,8 +513,8 @@ fn dim(s: &str) -> String {
     format!("\x1b[2m{s}\x1b[0m")
 }
 
-fn cyan_bold(s: &str) -> String {
-    format!("\x1b[1;36m{s}\x1b[0m")
+fn magenta_bold(s: &str) -> String {
+    format!("\x1b[1;35m{s}\x1b[0m")
 }
 
 fn green_bold(s: &str) -> String {
@@ -571,7 +571,7 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
     let config = RexConfig::new(root).with_port(port);
 
     eprintln!();
-    eprintln!("  {} {} {}", cyan_bold("▲ rex"), dim(env!("CARGO_PKG_VERSION")), dim("(production)"));
+    eprintln!("  {} {} {}", magenta_bold("◆ rex"), dim(env!("CARGO_PKG_VERSION")), dim("(production)"));
     eprintln!();
 
     // Load manifest

@@ -2,7 +2,7 @@ use anyhow::Result;
 use crossbeam_channel::{bounded, Sender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 type WorkItem = Box<dyn FnOnce(&mut crate::SsrIsolate) + Send + 'static>;
 
@@ -59,7 +59,7 @@ impl IsolatePool {
             threads.push(Some(handle));
         }
 
-        info!(count = size, "V8 isolate pool created");
+        debug!(count = size, "V8 isolate pool created");
 
         Ok(Self {
             senders,
@@ -124,7 +124,7 @@ impl IsolatePool {
             handle.await??;
         }
 
-        info!("All V8 isolates reloaded");
+        debug!("All V8 isolates reloaded");
         Ok(())
     }
 

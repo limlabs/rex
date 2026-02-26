@@ -4,7 +4,7 @@ use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
-use tracing::{debug, info};
+use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub enum FileEventKind {
@@ -68,7 +68,7 @@ pub fn start_watcher(
         RecursiveMode::Recursive,
     )?;
 
-    info!(dir = %pages_dir.display(), "File watcher started");
+    debug!(dir = %pages_dir.display(), "File watcher started");
 
     // Keep the debouncer alive by leaking it (it runs in its own thread)
     std::mem::forget(debouncer);
