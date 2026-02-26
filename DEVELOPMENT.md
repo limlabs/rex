@@ -244,19 +244,25 @@ Compare Rex vs Next.js on the same pages (SSR, SSG, dynamic routes, API):
 # Prerequisites
 cargo build --release
 cd benchmarks/next-basic && npm install && cd ../..
-cargo install oha   # or use ab (comes with macOS)
 
-# Run full suite
-./benchmarks/run.sh
+# Run full suite (dev + prod, both frameworks)
+./benchmarks/run.sh --json benchmarks/results.json
 
-# Rex only
-./benchmarks/run.sh --rex-only
+# Dev only / prod only / one framework
+./benchmarks/run.sh --dev-only --rex-only
+./benchmarks/run.sh --prod-only
 
 # Tune parameters
-BENCH_REQUESTS=10000 BENCH_CONCURRENCY=100 ./benchmarks/run.sh
+BENCH_REQUESTS=10000 BENCH_CONCURRENCY=100 ./benchmarks/run.sh --json benchmarks/results.json
 ```
 
-Measures cold start, TTFB (p50/p95/p99), throughput (RPS), and memory (RSS).
+View results in the interactive dashboard (marimo notebook):
+
+```sh
+cd benchmarks && uv run marimo edit dashboard.py
+```
+
+Measures cold start, build time, throughput (RPS), latency, and memory (RSS).
 
 ## Code style
 

@@ -1,0 +1,18 @@
+[
+  {"framework":"rex","mode":"dev","endpoint":"/","rps":16297.00,"latency_ms":3.068,"cold_start_ms":159,"memory_mb":94},
+  {"framework":"rex","mode":"dev","endpoint":"/about","rps":19916.35,"latency_ms":2.510,"cold_start_ms":159,"memory_mb":94},
+  {"framework":"rex","mode":"dev","endpoint":"/blog/hello-world","rps":30708.76,"latency_ms":1.628,"cold_start_ms":159,"memory_mb":94},
+  {"framework":"rex","mode":"dev","endpoint":"/api/hello","rps":30901.39,"latency_ms":1.618,"cold_start_ms":159,"memory_mb":94},
+  {"framework":"nextjs","mode":"dev","endpoint":"/","rps":179.50,"latency_ms":278.554,"cold_start_ms":3749,"memory_mb":94},
+  {"framework":"nextjs","mode":"dev","endpoint":"/about","rps":178.14,"latency_ms":280.677,"cold_start_ms":3749,"memory_mb":94},
+  {"framework":"nextjs","mode":"dev","endpoint":"/blog/hello-world","rps":176.32,"latency_ms":283.568,"cold_start_ms":3749,"memory_mb":94},
+  {"framework":"nextjs","mode":"dev","endpoint":"/api/hello","rps":3465.05,"latency_ms":14.430,"cold_start_ms":3749,"memory_mb":94},
+  {"framework":"rex","mode":"prod","endpoint":"/","rps":20219.58,"latency_ms":2.473,"cold_start_ms":170,"memory_mb":103},
+  {"framework":"rex","mode":"prod","endpoint":"/about","rps":31097.43,"latency_ms":1.608,"cold_start_ms":170,"memory_mb":103},
+  {"framework":"rex","mode":"prod","endpoint":"/blog/hello-world","rps":30850.87,"latency_ms":1.621,"cold_start_ms":170,"memory_mb":103},
+  {"framework":"rex","mode":"prod","endpoint":"/api/hello","rps":29861.44,"latency_ms":1.674,"cold_start_ms":170,"memory_mb":103},
+  {"framework":"nextjs","mode":"prod","endpoint":"/","rps":3119.51,"latency_ms":16.028,"cold_start_ms":393,"memory_mb":94},
+  {"framework":"nextjs","mode":"prod","endpoint":"/about","rps":6205.48,"latency_ms":8.057,"cold_start_ms":393,"memory_mb":94},
+  {"framework":"nextjs","mode":"prod","endpoint":"/blog/hello-world","rps":3477.09,"latency_ms":14.380,"cold_start_ms":393,"memory_mb":94},
+  {"framework":"nextjs","mode":"prod","endpoint":"/api/hello","rps":8300.89,"latency_ms":6.023,"cold_start_ms":393,"memory_mb":94}
+]

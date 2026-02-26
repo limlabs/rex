@@ -8,9 +8,12 @@
 #   - oha (cargo install oha) or ab (comes with macOS)
 #
 # Usage:
-#   ./benchmarks/run.sh              # full suite
-#   ./benchmarks/run.sh --rex-only   # skip Next.js
-#   ./benchmarks/run.sh --next-only  # skip Rex
+#   ./benchmarks/run.sh                    # dev + prod, both frameworks
+#   ./benchmarks/run.sh --rex-only         # skip Next.js
+#   ./benchmarks/run.sh --next-only        # skip Rex
+#   ./benchmarks/run.sh --dev-only         # skip production mode
+#   ./benchmarks/run.sh --prod-only        # skip dev mode
+#   ./benchmarks/run.sh --json results.json  # write JSON results
 #
 set -euo pipefail
 
@@ -24,6 +27,7 @@ CONCURRENCY="${BENCH_CONCURRENCY:-50}"
 WARMUP="${BENCH_WARMUP:-100}"
 REX_PORT=4100
 NEXT_PORT=4200
+JSON_FILE=""
 
 # Colors
 bold() { printf "\033[1m%s\033[0m" "$1"; }
@@ -56,75 +60,256 @@ wait_for_port() {
     done
 }
 
-measure_startup() {
-    local label=$1
-    shift
-    local start_ns=$(date +%s%N 2>/dev/null || python3 -c 'import time; print(int(time.time()*1e9))')
-    "$@" &
-    local pid=$!
-    local port=${!#}  # last arg should be port
-    # Actually, we need the port from context
-    echo "$pid"
-}
-
 kill_tree() {
     local pid=$1
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
 }
 
-run_oha() {
+# Extract RPS from ab output
+ab_rps() {
     local url=$1
-    local label=$2
     # Warmup
-    oha -n "$WARMUP" -c 10 -q 0 --no-tui "$url" >/dev/null 2>&1 || true
-    # Actual benchmark
-    echo ""
-    echo "  $(bold "$label")"
-    oha -n "$REQUESTS" -c "$CONCURRENCY" -q 0 --no-tui "$url" 2>&1 | \
-        grep -E '(Requests/sec|Slowest|Fastest|Average|Total|Success rate|Status code)' | \
-        sed 's/^/    /'
+    ab -n "$WARMUP" -c 10 "$url" >/dev/null 2>&1 || true
+    # Bench
+    ab -n "$REQUESTS" -c "$CONCURRENCY" "$url" 2>&1 | \
+        grep "Requests per second" | awk '{print $4}'
 }
 
-run_ab() {
+# Extract mean time per request from ab output
+ab_latency() {
+    local url=$1
+    ab -n "$REQUESTS" -c "$CONCURRENCY" "$url" 2>&1 | \
+        grep "Time per request" | head -1 | awk '{print $4}'
+}
+
+# Run ab and capture both RPS and latency, print nicely
+run_ab_capture() {
     local url=$1
     local label=$2
     # Warmup
     ab -n "$WARMUP" -c 10 "$url" >/dev/null 2>&1 || true
-    # Actual benchmark
+    # Bench and capture full output
+    local output
+    output=$(ab -n "$REQUESTS" -c "$CONCURRENCY" "$url" 2>&1)
+    local rps=$(echo "$output" | grep "Requests per second" | awk '{print $4}')
+    local latency=$(echo "$output" | grep "Time per request" | head -1 | awk '{print $4}')
+    local failed=$(echo "$output" | grep "Failed requests" | awk '{print $3}')
+
     echo ""
     echo "  $(bold "$label")"
-    ab -n "$REQUESTS" -c "$CONCURRENCY" "$url" 2>&1 | \
-        grep -E '(Requests per second|Time per request|Transfer rate|Failed requests)' | \
-        sed 's/^/    /'
+    echo "$output" | grep -E '(Requests per second|Time per request|Transfer rate|Failed requests)' | sed 's/^/    /'
+
+    # Return values via global vars
+    _BENCH_RPS="$rps"
+    _BENCH_LATENCY="$latency"
+    _BENCH_FAILED="${failed:-0}"
 }
 
-run_bench() {
-    local url=$1
-    local label=$2
-    if [ "$LOAD_TESTER" = "oha" ]; then
-        run_oha "$url" "$label"
-    elif [ "$LOAD_TESTER" = "ab" ]; then
-        run_ab "$url" "$label"
+get_memory_mb() {
+    local pid=$1
+    local rss_kb
+    rss_kb=$(ps -o rss= -p "$pid" 2>/dev/null || echo "0")
+    echo $(( rss_kb / 1024 ))
+}
+
+now_ms() {
+    python3 -c 'import time; print(int(time.time()*1e9))'
+}
+
+# ── JSON result accumulator ──────────────────────────────
+
+declare -a JSON_RESULTS=()
+
+add_result() {
+    local framework=$1 mode=$2 endpoint=$3 rps=$4 latency_ms=$5 cold_start_ms=$6 memory_mb=$7
+    JSON_RESULTS+=("{\"framework\":\"$framework\",\"mode\":\"$mode\",\"endpoint\":\"$endpoint\",\"rps\":$rps,\"latency_ms\":$latency_ms,\"cold_start_ms\":$cold_start_ms,\"memory_mb\":$memory_mb}")
+}
+
+write_json() {
+    local file=$1
+    echo "[" > "$file"
+    local first=true
+    for entry in "${JSON_RESULTS[@]}"; do
+        if [ "$first" = true ]; then
+            first=false
+        else
+            echo "," >> "$file"
+        fi
+        printf "  %s" "$entry" >> "$file"
+    done
+    echo "" >> "$file"
+    echo "]" >> "$file"
+}
+
+# ── Benchmark a single framework + mode ──────────────────
+
+bench_rex() {
+    local mode=$1  # "dev" or "prod"
+    local port=$REX_PORT
+
+    if [ ! -f "$REX_BIN" ]; then
+        echo "ERROR: Rex binary not found at $REX_BIN"
+        echo "Run: cargo build --release"
+        exit 1
     fi
+
+    echo "$(cyan "━━━ Rex ($mode) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")"
+
+    if [ "$mode" = "prod" ]; then
+        # Build first
+        echo ""
+        echo "  $(dim "Building...")"
+        local build_start
+        build_start=$(now_ms)
+        "$REX_BIN" build --root "$REX_FIXTURE" &>/dev/null
+        local build_end
+        build_end=$(now_ms)
+        local build_ms=$(( (build_end - build_start) / 1000000 ))
+        echo "  $(bold "Build time:") $(green "${build_ms}ms")"
+    fi
+
+    # Start server
+    local start_ns
+    start_ns=$(now_ms)
+    if [ "$mode" = "dev" ]; then
+        "$REX_BIN" dev --root "$REX_FIXTURE" --port $port &>/dev/null &
+    else
+        "$REX_BIN" start --root "$REX_FIXTURE" --port $port &>/dev/null &
+    fi
+    local pid=$!
+    wait_for_port $port
+    # Hit once to ensure fully warmed
+    curl -s "http://127.0.0.1:$port/" >/dev/null 2>&1 || true
+    local end_ns
+    end_ns=$(now_ms)
+    local cold_ms=$(( (end_ns - start_ns) / 1000000 ))
+    echo ""
+    echo "  $(bold "Cold start:") $(green "${cold_ms}ms")"
+
+    # Benchmarks
+    local endpoints=("/" "/about" "/blog/hello-world" "/api/hello")
+    local labels=("SSR index (GSSP)" "SSG about (GSP)" "Dynamic /blog/:slug" "API /api/hello")
+
+    for i in "${!endpoints[@]}"; do
+        run_ab_capture "http://127.0.0.1:$port${endpoints[$i]}" "${labels[$i]}"
+        add_result "rex" "$mode" "${endpoints[$i]}" "${_BENCH_RPS:-0}" "${_BENCH_LATENCY:-0}" "$cold_ms" "0"
+    done
+
+    # Memory
+    local mem_mb
+    mem_mb=$(get_memory_mb "$pid")
+    echo ""
+    echo "  $(bold "Memory (RSS):") $(green "${mem_mb}MB")"
+
+    # Update memory in last 4 results
+    local len=${#JSON_RESULTS[@]}
+    for i in $(seq $((len-4)) $((len-1))); do
+        JSON_RESULTS[$i]=$(echo "${JSON_RESULTS[$i]}" | sed "s/\"memory_mb\":0/\"memory_mb\":$mem_mb/")
+    done
+
+    kill_tree $pid
+    echo ""
 }
 
-# ── Benchmark setup ──────────────────────────────────────
+bench_next() {
+    local mode=$1  # "dev" or "prod"
+    local port=$NEXT_PORT
+
+    if [ ! -d "$NEXT_DIR/node_modules" ]; then
+        echo "ERROR: Next.js not installed. Run:"
+        echo "  cd benchmarks/next-basic && npm install"
+        exit 1
+    fi
+
+    echo "$(cyan "━━━ Next.js ($mode) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")"
+
+    if [ "$mode" = "prod" ]; then
+        # Build first
+        echo ""
+        echo "  $(dim "Building...")"
+        local build_start
+        build_start=$(now_ms)
+        cd "$NEXT_DIR"
+        npx next build &>/dev/null
+        cd "$PROJECT_ROOT"
+        local build_end
+        build_end=$(now_ms)
+        local build_ms=$(( (build_end - build_start) / 1000000 ))
+        echo "  $(bold "Build time:") $(green "${build_ms}ms")"
+    fi
+
+    # Start server
+    local start_ns
+    start_ns=$(now_ms)
+    cd "$NEXT_DIR"
+    if [ "$mode" = "dev" ]; then
+        npx next dev --port $port &>/dev/null &
+    else
+        npx next start --port $port &>/dev/null &
+    fi
+    local pid=$!
+    cd "$PROJECT_ROOT"
+    wait_for_port $port 60
+    # Next.js compiles on first request in dev mode
+    curl -s "http://127.0.0.1:$port/" >/dev/null 2>&1 || true
+    if [ "$mode" = "dev" ]; then
+        sleep 2  # wait for dev compilation
+    fi
+    local end_ns
+    end_ns=$(now_ms)
+    local cold_ms=$(( (end_ns - start_ns) / 1000000 ))
+    echo ""
+    echo "  $(bold "Cold start:") $(green "${cold_ms}ms")"
+
+    # Benchmarks
+    local endpoints=("/" "/about" "/blog/hello-world" "/api/hello")
+    local labels=("SSR index (GSSP)" "SSG about (GSP)" "Dynamic /blog/:slug" "API /api/hello")
+
+    for i in "${!endpoints[@]}"; do
+        run_ab_capture "http://127.0.0.1:$port${endpoints[$i]}" "${labels[$i]}"
+        add_result "nextjs" "$mode" "${endpoints[$i]}" "${_BENCH_RPS:-0}" "${_BENCH_LATENCY:-0}" "$cold_ms" "0"
+    done
+
+    # Memory
+    local mem_mb
+    mem_mb=$(get_memory_mb "$pid")
+    echo ""
+    echo "  $(bold "Memory (RSS):") $(green "${mem_mb}MB")"
+
+    # Update memory in last 4 results
+    local len=${#JSON_RESULTS[@]}
+    for i in $(seq $((len-4)) $((len-1))); do
+        JSON_RESULTS[$i]=$(echo "${JSON_RESULTS[$i]}" | sed "s/\"memory_mb\":0/\"memory_mb\":$mem_mb/")
+    done
+
+    kill_tree $pid
+    echo ""
+}
+
+# ── Parse args ───────────────────────────────────────────
+
+RUN_REX=true
+RUN_NEXT=true
+RUN_DEV=true
+RUN_PROD=true
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --rex-only)  RUN_NEXT=false ;;
+        --next-only) RUN_REX=false ;;
+        --dev-only)  RUN_PROD=false ;;
+        --prod-only) RUN_DEV=false ;;
+        --json)      JSON_FILE="$2"; shift ;;
+    esac
+    shift
+done
 
 LOAD_TESTER=$(find_load_tester)
 if [ -z "$LOAD_TESTER" ]; then
     echo "ERROR: No load testing tool found. Install oha (cargo install oha) or ensure ab is available."
     exit 1
 fi
-
-RUN_REX=true
-RUN_NEXT=true
-for arg in "$@"; do
-    case "$arg" in
-        --rex-only) RUN_NEXT=false ;;
-        --next-only) RUN_REX=false ;;
-    esac
-done
 
 echo ""
 echo "  $(bold "Rex Benchmark Suite")"
@@ -135,99 +320,23 @@ echo "  $(dim "Concurrency:") $CONCURRENCY"
 echo "  $(dim "Warmup:")      $WARMUP requests"
 echo ""
 
-# ── Rex benchmarks ───────────────────────────────────────
+# ── Run benchmarks ───────────────────────────────────────
 
-if [ "$RUN_REX" = true ]; then
-    if [ ! -f "$REX_BIN" ]; then
-        echo "ERROR: Rex binary not found at $REX_BIN"
-        echo "Run: cargo build --release"
-        exit 1
-    fi
-
-    echo "$(cyan "━━━ Rex ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")"
-
-    # Cold start
-    START_NS=$(python3 -c 'import time; print(int(time.time()*1e9))')
-    "$REX_BIN" dev --root "$REX_FIXTURE" --port $REX_PORT &>/dev/null &
-    REX_PID=$!
-    wait_for_port $REX_PORT
-    END_NS=$(python3 -c 'import time; print(int(time.time()*1e9))')
-    COLD_MS=$(( (END_NS - START_NS) / 1000000 ))
-    echo ""
-    echo "  $(bold "Cold start:") $(green "${COLD_MS}ms")"
-
-    # SSR page (getServerSideProps)
-    run_bench "http://127.0.0.1:$REX_PORT/" "SSR index (getServerSideProps)"
-
-    # Static page (getStaticProps)
-    run_bench "http://127.0.0.1:$REX_PORT/about" "SSG about (getStaticProps)"
-
-    # Dynamic route
-    run_bench "http://127.0.0.1:$REX_PORT/blog/hello-world" "Dynamic /blog/:slug (GSSP)"
-
-    # API route
-    run_bench "http://127.0.0.1:$REX_PORT/api/hello" "API /api/hello"
-
-    # Memory
-    if command -v ps &>/dev/null; then
-        RSS_KB=$(ps -o rss= -p "$REX_PID" 2>/dev/null || echo "0")
-        RSS_MB=$(( RSS_KB / 1024 ))
-        echo ""
-        echo "  $(bold "Memory (RSS):") $(green "${RSS_MB}MB")"
-    fi
-
-    kill_tree $REX_PID
-    echo ""
+if [ "$RUN_DEV" = true ]; then
+    [ "$RUN_REX" = true ]  && bench_rex "dev"
+    [ "$RUN_NEXT" = true ] && bench_next "dev"
 fi
 
-# ── Next.js benchmarks ──────────────────────────────────
+if [ "$RUN_PROD" = true ]; then
+    [ "$RUN_REX" = true ]  && bench_rex "prod"
+    [ "$RUN_NEXT" = true ] && bench_next "prod"
+fi
 
-if [ "$RUN_NEXT" = true ]; then
-    if [ ! -d "$NEXT_DIR/node_modules" ]; then
-        echo "ERROR: Next.js not installed. Run:"
-        echo "  cd benchmarks/next-basic && npm install"
-        exit 1
-    fi
+# ── Write JSON ───────────────────────────────────────────
 
-    echo "$(cyan "━━━ Next.js ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")"
-
-    # Cold start
-    START_NS=$(python3 -c 'import time; print(int(time.time()*1e9))')
-    cd "$NEXT_DIR"
-    npx next dev --port $NEXT_PORT &>/dev/null &
-    NEXT_PID=$!
-    cd "$PROJECT_ROOT"
-    wait_for_port $NEXT_PORT 60  # Next.js is slower to start
-    # Next.js compiles on first request, so hit it once and wait
-    curl -s "http://127.0.0.1:$NEXT_PORT/" >/dev/null 2>&1 || true
-    sleep 2
-    END_NS=$(python3 -c 'import time; print(int(time.time()*1e9))')
-    COLD_MS=$(( (END_NS - START_NS) / 1000000 ))
-    echo ""
-    echo "  $(bold "Cold start:") $(green "${COLD_MS}ms")"
-
-    # SSR page
-    run_bench "http://127.0.0.1:$NEXT_PORT/" "SSR index (getServerSideProps)"
-
-    # Static page
-    run_bench "http://127.0.0.1:$NEXT_PORT/about" "SSG about (getStaticProps)"
-
-    # Dynamic route
-    run_bench "http://127.0.0.1:$NEXT_PORT/blog/hello-world" "Dynamic /blog/:slug (GSSP)"
-
-    # API route
-    run_bench "http://127.0.0.1:$NEXT_PORT/api/hello" "API /api/hello"
-
-    # Memory
-    if command -v ps &>/dev/null; then
-        RSS_KB=$(ps -o rss= -p "$NEXT_PID" 2>/dev/null || echo "0")
-        RSS_MB=$(( RSS_KB / 1024 ))
-        echo ""
-        echo "  $(bold "Memory (RSS):") $(green "${RSS_MB}MB")"
-    fi
-
-    kill_tree $NEXT_PID
-    echo ""
+if [ -n "$JSON_FILE" ]; then
+    write_json "$JSON_FILE"
+    echo "  $(dim "Results written to $JSON_FILE")"
 fi
 
 echo "$(dim "Done.")"
