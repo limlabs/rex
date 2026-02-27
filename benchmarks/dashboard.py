@@ -8,6 +8,7 @@ app = marimo.App(width="medium")
 def _():
     import marimo as mo
     import json
+    import re
     import subprocess
     import sys
     import time
@@ -17,9 +18,19 @@ def _():
     from plotly.subplots import make_subplots
     from pathlib import Path
 
-    COLORS = {"Rex": "#7c3aed", "Next.js": "#171717", "TanStack Start": "#e8590c"}
-    FW_ORDER = ["Rex", "Next.js", "TanStack Start"]
-    FW_MAP = {"rex": "Rex", "nextjs": "Next.js", "tanstack": "TanStack Start"}
+    COLORS = {
+        "Rex": "#7c3aed",
+        "Next.js (Pages)": "#171717",
+        "Next.js (App)": "#3b82f6",
+        "TanStack Start": "#e8590c",
+    }
+    FW_ORDER = ["Rex", "Next.js (Pages)", "Next.js (App)", "TanStack Start"]
+    FW_MAP = {
+        "rex": "Rex",
+        "nextjs": "Next.js (Pages)",
+        "nextjs_app": "Next.js (App)",
+        "tanstack": "TanStack Start",
+    }
     BENCH_DIR = Path(__file__).parent
     RESULTS_PATH = BENCH_DIR / "results.json"
     return (
@@ -34,6 +45,7 @@ def _():
         mo,
         pd,
         px,
+        re,
         subprocess,
         sys,
         time,
@@ -54,67 +66,107 @@ def _(mo):
 @app.cell
 def _(mo):
     get_bench_ts, set_bench_ts = mo.state(0)
-    get_bench_log, set_bench_log = mo.state("")
-    return get_bench_log, get_bench_ts, set_bench_log, set_bench_ts
+    return get_bench_ts, set_bench_ts
 
 
 @app.cell
-def _(
-    BENCH_DIR,
-    RESULTS_PATH,
-    mo,
-    set_bench_log,
-    set_bench_ts,
-    subprocess,
-    sys,
-    time,
-):
+def _(mo):
     suite_select = mo.ui.multiselect(
         options={"DX": "dx", "Server": "server", "Client": "client"},
         value=["DX", "Server", "Client"],
         label="Suites",
     )
     fw_select = mo.ui.multiselect(
-        options={"Rex": "rex", "Next.js": "nextjs", "TanStack Start": "tanstack"},
+        options={
+            "Rex": "rex",
+            "Next.js (Pages)": "nextjs",
+            "Next.js (App)": "nextjs_app",
+            "TanStack Start": "tanstack",
+        },
         value=["Rex"],
         label="Frameworks",
     )
-    requests_input = mo.ui.number(value=5000, start=100, stop=50000, step=100, label="Requests (server)")
+    requests_input = mo.ui.number(
+        value=5000, start=100, stop=50000, step=100, label="Requests (server)"
+    )
     concurrency_input = mo.ui.number(value=50, start=1, stop=500, step=10, label="Concurrency")
+    run_btn = mo.ui.run_button(label="Run Benchmarks")
 
-    def _run_bench(_):
-        _suites = ",".join(suite_select.value) if suite_select.value else "dx,server,client"
-        _fws = ",".join(fw_select.value) if fw_select.value else "rex"
-        _cmd = [
-            sys.executable, str(BENCH_DIR / "bench.py"),
-            "--suite", _suites,
-            "--framework", _fws,
-            "--requests", str(int(requests_input.value)),
-            "--concurrency", str(int(concurrency_input.value)),
-            "--json", str(RESULTS_PATH),
+    mo.vstack(
+        [
+            mo.hstack([suite_select, fw_select], justify="start", gap=1),
+            mo.hstack([requests_input, concurrency_input], justify="start", gap=1),
+            run_btn,
         ]
-        _proc = subprocess.run(_cmd, capture_output=True, text=True, cwd=str(BENCH_DIR), timeout=600)
-        # Strip ANSI escape codes for display
-        import re as _re
-        _clean = _re.sub(r'\x1b\[[0-9;]*m', '', _proc.stdout + _proc.stderr)
-        set_bench_log(_clean)
-        set_bench_ts(time.time())
-
-    run_btn = mo.ui.button(label="Run Benchmarks", on_click=_run_bench, kind="success")
-
-    mo.vstack([
-        mo.hstack([suite_select, fw_select], justify="start", gap=1),
-        mo.hstack([requests_input, concurrency_input], justify="start", gap=1),
-        run_btn,
-    ])
-    return
+    )
+    return concurrency_input, fw_select, requests_input, run_btn, suite_select
 
 
 @app.cell
-def _(get_bench_log, mo):
-    _log = get_bench_log()
-    if _log:
-        mo.accordion({"Benchmark output": mo.md(f"```\n{_log}\n```")})
+def _(
+    BENCH_DIR,
+    RESULTS_PATH,
+    concurrency_input,
+    fw_select,
+    mo,
+    re,
+    requests_input,
+    run_btn,
+    set_bench_ts,
+    subprocess,
+    suite_select,
+    sys,
+    time,
+):
+    mo.stop(not run_btn.value)
+
+    _suites = ",".join(suite_select.value) if suite_select.value else "dx,server,client"
+    _fws = ",".join(fw_select.value) if fw_select.value else "rex"
+    _cmd = [
+        sys.executable,
+        str(BENCH_DIR / "bench.py"),
+        "--suite",
+        _suites,
+        "--framework",
+        _fws,
+        "--requests",
+        str(int(requests_input.value)),
+        "--concurrency",
+        str(int(concurrency_input.value)),
+        "--json",
+        str(RESULTS_PATH),
+    ]
+
+    _t0 = time.time()
+    _output_lines = []
+    _progress_re = re.compile(r"\[PROGRESS (\d+/\d+)\] (.+)")
+
+    with mo.status.spinner(title="Starting benchmarks...", remove_on_exit=True) as _spinner:
+        _proc = subprocess.Popen(
+            _cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            cwd=str(BENCH_DIR),
+        )
+        for _line in _proc.stdout:
+            _output_lines.append(_line)
+            _m = _progress_re.search(_line)
+            if _m:
+                _spinner.update(title=f"Running benchmarks ({_m.group(1)}) — {_m.group(2)}")
+        _proc.wait(timeout=600)
+
+    _elapsed = time.time() - _t0
+    _raw = "".join(_output_lines)
+    _clean = re.sub(r"\x1b\[[0-9;]*m", "", _raw)
+    set_bench_ts(time.time())
+
+    mo.vstack(
+        [
+            mo.md(f"Benchmarks completed in **{_elapsed:.1f}s**"),
+            mo.accordion({"Benchmark output": mo.md(f"```\n{_clean}\n```")}),
+        ]
+    )
     return
 
 
@@ -150,13 +202,35 @@ def _(COLORS, FW_ORDER, df, go, make_subplots, mo):
             ("dependency_count", "Dependencies"),
             ("node_modules_mb", "node_modules (MB)"),
         ]
-        _fig = make_subplots(rows=1, cols=3, subplot_titles=[m[1] for m in _metrics], horizontal_spacing=0.08)
+        _fig = make_subplots(
+            rows=1, cols=3, subplot_titles=[m[1] for m in _metrics], horizontal_spacing=0.08
+        )
         for _ci, (_m, _t) in enumerate(_metrics, 1):
-            _s = _dx[_dx["metric"] == _m].sort_values("label", key=lambda s: s.map({v: i for i, v in enumerate(FW_ORDER)}))
+            _s = _dx[_dx["metric"] == _m].sort_values(
+                "label", key=lambda s: s.map({v: i for i, v in enumerate(FW_ORDER)})
+            )
             for _, _r in _s.iterrows():
-                _fig.add_trace(go.Bar(x=[_r["label"]], y=[_r["value"]], name=_r["label"], marker_color=COLORS.get(_r["label"], "#888"), showlegend=(_ci == 1), legendgroup=_r["label"]), row=1, col=_ci)
-        _fig.update_layout(height=350, font=dict(family="Inter, system-ui, sans-serif"), legend=dict(orientation="h", yanchor="bottom", y=1.08, xanchor="center", x=0.5), title_text="Dependency Footprint — lower is better", barmode="group")
+                _fig.add_trace(
+                    go.Bar(
+                        x=[_r["label"]],
+                        y=[_r["value"]],
+                        name=_r["label"],
+                        marker_color=COLORS.get(_r["label"], "#888"),
+                        showlegend=(_ci == 1),
+                        legendgroup=_r["label"],
+                    ),
+                    row=1,
+                    col=_ci,
+                )
+        _fig.update_layout(
+            height=350,
+            font=dict(family="Inter, system-ui, sans-serif"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.08, xanchor="center", x=0.5),
+            title_text="Dependency Footprint — lower is better",
+            barmode="group",
+        )
         mo.ui.plotly(_fig)
+
     _plot_dx_footprint()
     return
 
@@ -167,14 +241,40 @@ def _(COLORS, FW_ORDER, df, go, make_subplots, mo):
         if df.empty or "suite" not in df.columns or not (df["suite"] == "dx").any():
             return
         _dx = df[df["suite"] == "dx"].copy()
-        _metrics = [("cold_start_ms", "Cold Start (ms)"), ("rebuild_ms", "HMR Rebuild (ms)"), ("dev_memory_mb", "Dev Memory (MB)")]
-        _fig = make_subplots(rows=1, cols=3, subplot_titles=[m[1] for m in _metrics], horizontal_spacing=0.08)
+        _metrics = [
+            ("cold_start_ms", "Cold Start (ms)"),
+            ("rebuild_ms", "HMR Rebuild (ms)"),
+            ("dev_memory_mb", "Dev Memory (MB)"),
+        ]
+        _fig = make_subplots(
+            rows=1, cols=3, subplot_titles=[m[1] for m in _metrics], horizontal_spacing=0.08
+        )
         for _ci, (_m, _t) in enumerate(_metrics, 1):
-            _s = _dx[_dx["metric"] == _m].sort_values("label", key=lambda s: s.map({v: i for i, v in enumerate(FW_ORDER)}))
+            _s = _dx[_dx["metric"] == _m].sort_values(
+                "label", key=lambda s: s.map({v: i for i, v in enumerate(FW_ORDER)})
+            )
             for _, _r in _s.iterrows():
-                _fig.add_trace(go.Bar(x=[_r["label"]], y=[_r["value"]], name=_r["label"], marker_color=COLORS.get(_r["label"], "#888"), showlegend=(_ci == 1), legendgroup=_r["label"]), row=1, col=_ci)
-        _fig.update_layout(height=350, font=dict(family="Inter, system-ui, sans-serif"), legend=dict(orientation="h", yanchor="bottom", y=1.08, xanchor="center", x=0.5), title_text="Dev Server Performance — lower is better", barmode="group")
+                _fig.add_trace(
+                    go.Bar(
+                        x=[_r["label"]],
+                        y=[_r["value"]],
+                        name=_r["label"],
+                        marker_color=COLORS.get(_r["label"], "#888"),
+                        showlegend=(_ci == 1),
+                        legendgroup=_r["label"],
+                    ),
+                    row=1,
+                    col=_ci,
+                )
+        _fig.update_layout(
+            height=350,
+            font=dict(family="Inter, system-ui, sans-serif"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.08, xanchor="center", x=0.5),
+            title_text="Dev Server Performance — lower is better",
+            barmode="group",
+        )
         mo.ui.plotly(_fig)
+
     _plot_dx_perf()
     return
 
@@ -205,6 +305,7 @@ def _(FW_ORDER, df, mo, pd):
             _rows.append(_r)
         mo.md("### DX Summary")
         mo.ui.table(pd.DataFrame(_rows), selection=None)
+
     _dx_summary_table()
     return
 
@@ -225,10 +326,32 @@ def _(COLORS, FW_ORDER, df, mo, px):
         _rps = _server[(_server["metric"] == "rps") & (_server["endpoint"].notna())].copy()
         if _rps.empty:
             return
-        _rps["endpoint_label"] = _rps["endpoint"].map({"/": "SSR index", "/about": "SSG about", "/blog/hello-world": "Dynamic route", "/api/hello": "API route"})
-        _fig = px.bar(_rps, x="endpoint_label", y="value", color="label", barmode="group", title="Throughput (Requests/sec) — higher is better", labels={"value": "Requests/sec", "endpoint_label": "", "label": "Framework"}, color_discrete_map=COLORS, category_orders={"label": FW_ORDER})
-        _fig.update_layout(height=450, font=dict(family="Inter, system-ui, sans-serif"), legend=dict(orientation="h", yanchor="bottom", y=1.04, xanchor="center", x=0.5))
+        _rps["endpoint_label"] = _rps["endpoint"].map(
+            {
+                "/": "SSR index",
+                "/about": "SSG about",
+                "/blog/hello-world": "Dynamic route",
+                "/api/hello": "API route",
+            }
+        )
+        _fig = px.bar(
+            _rps,
+            x="endpoint_label",
+            y="value",
+            color="label",
+            barmode="group",
+            title="Throughput (Requests/sec) — higher is better",
+            labels={"value": "Requests/sec", "endpoint_label": "", "label": "Framework"},
+            color_discrete_map=COLORS,
+            category_orders={"label": FW_ORDER},
+        )
+        _fig.update_layout(
+            height=450,
+            font=dict(family="Inter, system-ui, sans-serif"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.04, xanchor="center", x=0.5),
+        )
         mo.ui.plotly(_fig)
+
     _plot_rps()
     return
 
@@ -240,12 +363,24 @@ def _(COLORS, FW_ORDER, df, go, make_subplots, mo):
             return
         _server = df[df["suite"] == "server"].copy()
         _ep = _server[_server["endpoint"].notna()].copy()
-        _ep["endpoint_label"] = _ep["endpoint"].map({"/": "SSR index", "/about": "SSG about", "/blog/hello-world": "Dynamic route", "/api/hello": "API route"})
+        _ep["endpoint_label"] = _ep["endpoint"].map(
+            {
+                "/": "SSR index",
+                "/about": "SSG about",
+                "/blog/hello-world": "Dynamic route",
+                "/api/hello": "API route",
+            }
+        )
         _lat_mean = _ep[_ep["metric"] == "latency_mean_ms"]
         _lat_p99 = _ep[_ep["metric"] == "latency_p99_ms"]
         if _lat_mean.empty and _lat_p99.empty:
             return
-        _fig = make_subplots(rows=1, cols=2, subplot_titles=["Mean Latency (ms)", "p99 Latency (ms)"], horizontal_spacing=0.1)
+        _fig = make_subplots(
+            rows=1,
+            cols=2,
+            subplot_titles=["Mean Latency (ms)", "p99 Latency (ms)"],
+            horizontal_spacing=0.1,
+        )
         for _ci, (_sub, _title) in enumerate([(_lat_mean, "Mean"), (_lat_p99, "p99")], 1):
             if _sub.empty:
                 continue
@@ -253,9 +388,27 @@ def _(COLORS, FW_ORDER, df, go, make_subplots, mo):
                 _fd = _sub[_sub["label"] == _fw]
                 if _fd.empty:
                     continue
-                _fig.add_trace(go.Bar(x=_fd["endpoint_label"], y=_fd["value"], name=_fw, marker_color=COLORS.get(_fw, "#888"), showlegend=(_ci == 1), legendgroup=_fw), row=1, col=_ci)
-        _fig.update_layout(height=400, font=dict(family="Inter, system-ui, sans-serif"), legend=dict(orientation="h", yanchor="bottom", y=1.08, xanchor="center", x=0.5), title_text="Latency — lower is better", barmode="group")
+                _fig.add_trace(
+                    go.Bar(
+                        x=_fd["endpoint_label"],
+                        y=_fd["value"],
+                        name=_fw,
+                        marker_color=COLORS.get(_fw, "#888"),
+                        showlegend=(_ci == 1),
+                        legendgroup=_fw,
+                    ),
+                    row=1,
+                    col=_ci,
+                )
+        _fig.update_layout(
+            height=400,
+            font=dict(family="Inter, system-ui, sans-serif"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.08, xanchor="center", x=0.5),
+            title_text="Latency — lower is better",
+            barmode="group",
+        )
         mo.ui.plotly(_fig)
+
     _plot_latency()
     return
 
@@ -267,14 +420,40 @@ def _(COLORS, FW_ORDER, df, go, make_subplots, mo):
             return
         _server = df[df["suite"] == "server"].copy()
         _fw_m = _server[~_server["endpoint"].notna() | (_server["endpoint"] == "")].copy()
-        _metrics = [("build_time_ms", "Build Time (ms)"), ("cold_start_ms", "Cold Start (ms)"), ("memory_mb", "Memory (MB)")]
-        _fig = make_subplots(rows=1, cols=3, subplot_titles=[m[1] for m in _metrics], horizontal_spacing=0.08)
+        _metrics = [
+            ("build_time_ms", "Build Time (ms)"),
+            ("cold_start_ms", "Cold Start (ms)"),
+            ("memory_mb", "Memory (MB)"),
+        ]
+        _fig = make_subplots(
+            rows=1, cols=3, subplot_titles=[m[1] for m in _metrics], horizontal_spacing=0.08
+        )
         for _ci, (_m, _t) in enumerate(_metrics, 1):
-            _s = _fw_m[_fw_m["metric"] == _m].sort_values("label", key=lambda s: s.map({v: i for i, v in enumerate(FW_ORDER)}))
+            _s = _fw_m[_fw_m["metric"] == _m].sort_values(
+                "label", key=lambda s: s.map({v: i for i, v in enumerate(FW_ORDER)})
+            )
             for _, _r in _s.iterrows():
-                _fig.add_trace(go.Bar(x=[_r["label"]], y=[_r["value"]], name=_r["label"], marker_color=COLORS.get(_r["label"], "#888"), showlegend=(_ci == 1), legendgroup=_r["label"]), row=1, col=_ci)
-        _fig.update_layout(height=350, font=dict(family="Inter, system-ui, sans-serif"), legend=dict(orientation="h", yanchor="bottom", y=1.08, xanchor="center", x=0.5), title_text="Build & Startup — lower is better", barmode="group")
+                _fig.add_trace(
+                    go.Bar(
+                        x=[_r["label"]],
+                        y=[_r["value"]],
+                        name=_r["label"],
+                        marker_color=COLORS.get(_r["label"], "#888"),
+                        showlegend=(_ci == 1),
+                        legendgroup=_r["label"],
+                    ),
+                    row=1,
+                    col=_ci,
+                )
+        _fig.update_layout(
+            height=350,
+            font=dict(family="Inter, system-ui, sans-serif"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.08, xanchor="center", x=0.5),
+            title_text="Build & Startup — lower is better",
+            barmode="group",
+        )
         mo.ui.plotly(_fig)
+
     _plot_build_startup()
     return
 
@@ -288,9 +467,16 @@ def _(FW_ORDER, df, mo, pd):
         _rps = _server[(_server["metric"] == "rps") & (_server["endpoint"].notna())]
         if _rps.empty:
             return
-        _pivot = _rps.pivot_table(index="endpoint", columns="label", values="value", aggfunc="first")
+        _pivot = _rps.pivot_table(
+            index="endpoint", columns="label", values="value", aggfunc="first"
+        )
         _fws = [fw for fw in FW_ORDER if fw in _pivot.columns]
-        _ep_labels = {"/": "SSR index", "/about": "SSG about", "/blog/hello-world": "Dynamic route", "/api/hello": "API route"}
+        _ep_labels = {
+            "/": "SSR index",
+            "/about": "SSG about",
+            "/blog/hello-world": "Dynamic route",
+            "/api/hello": "API route",
+        }
         _rows = []
         for _ep in ["/", "/about", "/blog/hello-world", "/api/hello"]:
             if _ep not in _pivot.index:
@@ -309,6 +495,7 @@ def _(FW_ORDER, df, mo, pd):
             _rows.append(_r)
         mo.md("### Throughput Summary")
         mo.ui.table(pd.DataFrame(_rows), selection=None)
+
     _server_summary_table()
     return
 
@@ -330,15 +517,37 @@ def _(COLORS, FW_ORDER, df, go, make_subplots, mo):
         _css = _client[_client["metric"] == "total_css_kb"]
         if _js.empty and _css.empty:
             return
-        _fig = make_subplots(rows=1, cols=2, subplot_titles=["JavaScript (KB)", "CSS (KB)"], horizontal_spacing=0.12)
+        _fig = make_subplots(
+            rows=1, cols=2, subplot_titles=["JavaScript (KB)", "CSS (KB)"], horizontal_spacing=0.12
+        )
         for _ci, _sub in enumerate([_js, _css], 1):
             if _sub.empty:
                 continue
-            _sub = _sub.sort_values("label", key=lambda s: s.map({v: i for i, v in enumerate(FW_ORDER)}))
+            _sub = _sub.sort_values(
+                "label", key=lambda s: s.map({v: i for i, v in enumerate(FW_ORDER)})
+            )
             for _, _r in _sub.iterrows():
-                _fig.add_trace(go.Bar(x=[_r["label"]], y=[_r["value"]], name=_r["label"], marker_color=COLORS.get(_r["label"], "#888"), showlegend=(_ci == 1), legendgroup=_r["label"]), row=1, col=_ci)
-        _fig.update_layout(height=350, font=dict(family="Inter, system-ui, sans-serif"), legend=dict(orientation="h", yanchor="bottom", y=1.08, xanchor="center", x=0.5), title_text="Client Bundle Size — lower is better", barmode="group")
+                _fig.add_trace(
+                    go.Bar(
+                        x=[_r["label"]],
+                        y=[_r["value"]],
+                        name=_r["label"],
+                        marker_color=COLORS.get(_r["label"], "#888"),
+                        showlegend=(_ci == 1),
+                        legendgroup=_r["label"],
+                    ),
+                    row=1,
+                    col=_ci,
+                )
+        _fig.update_layout(
+            height=350,
+            font=dict(family="Inter, system-ui, sans-serif"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.08, xanchor="center", x=0.5),
+            title_text="Client Bundle Size — lower is better",
+            barmode="group",
+        )
         mo.ui.plotly(_fig)
+
     _plot_bundle_size()
     return
 
@@ -353,12 +562,34 @@ def _(COLORS, FW_ORDER, df, mo, px):
         if _lh.empty:
             return mo.md("> **No Lighthouse data.** Install `lighthouse` globally for Web Vitals.")
         _lh = _lh.copy()
-        _lh["metric_label"] = _lh["metric"].map({"lcp_ms": "LCP", "fcp_ms": "FCP", "ttfb_ms": "TTFB", "tbt_ms": "TBT"})
-        _lh["page"] = _lh["endpoint"].map({"/": "index", "/about": "about", "/blog/hello-world": "blog"}).fillna("")
-        _fig = px.bar(_lh, x="metric_label", y="value", color="label", facet_col="page", barmode="group", title="Lighthouse Web Vitals (ms) — lower is better", labels={"value": "ms", "metric_label": "", "label": "Framework"}, color_discrete_map=COLORS, category_orders={"label": FW_ORDER})
-        _fig.update_layout(height=400, font=dict(family="Inter, system-ui, sans-serif"), legend=dict(orientation="h", yanchor="bottom", y=1.04, xanchor="center", x=0.5))
+        _lh["metric_label"] = _lh["metric"].map(
+            {"lcp_ms": "LCP", "fcp_ms": "FCP", "ttfb_ms": "TTFB", "tbt_ms": "TBT"}
+        )
+        _lh["page"] = (
+            _lh["endpoint"]
+            .map({"/": "index", "/about": "about", "/blog/hello-world": "blog"})
+            .fillna("")
+        )
+        _fig = px.bar(
+            _lh,
+            x="metric_label",
+            y="value",
+            color="label",
+            facet_col="page",
+            barmode="group",
+            title="Lighthouse Web Vitals (ms) — lower is better",
+            labels={"value": "ms", "metric_label": "", "label": "Framework"},
+            color_discrete_map=COLORS,
+            category_orders={"label": FW_ORDER},
+        )
+        _fig.update_layout(
+            height=400,
+            font=dict(family="Inter, system-ui, sans-serif"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.04, xanchor="center", x=0.5),
+        )
         _fig.for_each_annotation(lambda a: a.update(text=a.text.replace("page=", "").title()))
         mo.ui.plotly(_fig)
+
     _plot_lighthouse()
     return
 

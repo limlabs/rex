@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Rex Benchmark Suite — Rex vs Next.js 15 vs TanStack Start
+Rex Benchmark Suite — Rex vs Next.js 15 (Pages & App Router) vs TanStack Start
 
 Compares three frameworks on identical page fixtures across three suites:
   dx      Developer experience: install time, deps, startup, rebuild
@@ -23,16 +23,13 @@ import json
 import os
 import re
 import shutil
-import signal
 import socket
 import subprocess
-import sys
 import tempfile
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-
 
 # ── Paths ───────────────────────────────────────────────────────
 
@@ -41,6 +38,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 REX_BIN = Path(os.environ.get("REX_BIN", PROJECT_ROOT / "target/release/rex"))
 REX_FIXTURE = Path(os.environ.get("REX_FIXTURE", PROJECT_ROOT / "fixtures/basic"))
 NEXT_DIR = SCRIPT_DIR / "next-basic"
+NEXT_APP_DIR = SCRIPT_DIR / "next-app-basic"
 TANSTACK_DIR = SCRIPT_DIR / "tanstack-basic"
 
 ENDPOINTS = ["/", "/about", "/blog/hello-world", "/api/hello"]
@@ -53,28 +51,52 @@ ENDPOINT_LABELS = {
 
 # ── Colors ──────────────────────────────────────────────────────
 
-def bold(s: str) -> str: return f"\033[1m{s}\033[0m"
-def dim(s: str) -> str: return f"\033[2m{s}\033[0m"
-def green(s: str) -> str: return f"\033[32m{s}\033[0m"
-def magenta(s: str) -> str: return f"\033[35m{s}\033[0m"
-def cyan(s: str) -> str: return f"\033[36m{s}\033[0m"
-def yellow(s: str) -> str: return f"\033[33m{s}\033[0m"
 
-FW_COLOR = {"rex": magenta, "nextjs": cyan, "tanstack": yellow}
-FW_LABEL = {"rex": "Rex", "nextjs": "Next.js", "tanstack": "TanStack Start"}
+def bold(s: str) -> str:
+    return f"\033[1m{s}\033[0m"
+
+
+def dim(s: str) -> str:
+    return f"\033[2m{s}\033[0m"
+
+
+def green(s: str) -> str:
+    return f"\033[32m{s}\033[0m"
+
+
+def magenta(s: str) -> str:
+    return f"\033[35m{s}\033[0m"
+
+
+def cyan(s: str) -> str:
+    return f"\033[36m{s}\033[0m"
+
+
+def yellow(s: str) -> str:
+    return f"\033[33m{s}\033[0m"
+
+
+FW_COLOR = {"rex": magenta, "nextjs": cyan, "nextjs_app": cyan, "tanstack": yellow}
+FW_LABEL = {
+    "rex": "Rex",
+    "nextjs": "Next.js (Pages)",
+    "nextjs_app": "Next.js (App)",
+    "tanstack": "TanStack Start",
+}
 
 
 def section(fw: str, suite: str):
     color = FW_COLOR.get(fw, dim)
     label = FW_LABEL.get(fw, fw)
-    print(f"\n{color(f'━━━ {label} ({suite}) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}")
+    print(f"\n{color(f'━━━ {label} ({suite}) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')}", flush=True)
 
 
 # ── Helpers ─────────────────────────────────────────────────────
 
+
 def find_free_port() -> int:
     with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
+        s.bind(("", 0))
         return s.getsockname()[1]
 
 
@@ -110,7 +132,9 @@ def count_deps(project_dir: Path) -> int:
     try:
         out = subprocess.check_output(
             ["npm", "ls", "--all", "--parseable"],
-            cwd=project_dir, text=True, stderr=subprocess.DEVNULL,
+            cwd=project_dir,
+            text=True,
+            stderr=subprocess.DEVNULL,
         )
         return len(out.strip().splitlines())
     except subprocess.CalledProcessError:
@@ -120,11 +144,7 @@ def count_deps(project_dir: Path) -> int:
 def js_total_kb(directory: Path) -> float:
     if not directory.exists():
         return 0.0
-    total = sum(
-        f.stat().st_size
-        for f in directory.rglob("*")
-        if f.suffix in (".js", ".mjs")
-    )
+    total = sum(f.stat().st_size for f in directory.rglob("*") if f.suffix in (".js", ".mjs"))
     return round(total / 1024, 1)
 
 
@@ -139,7 +159,8 @@ def curl_body(port: int, path: str) -> str:
     try:
         out = subprocess.check_output(
             ["curl", "-s", f"http://127.0.0.1:{port}{path}"],
-            timeout=10, text=True,
+            timeout=10,
+            text=True,
         )
         return out
     except Exception:
@@ -147,6 +168,7 @@ def curl_body(port: int, path: str) -> str:
 
 
 # ── Process management ──────────────────────────────────────────
+
 
 @dataclass
 class ServerProcess:
@@ -186,7 +208,9 @@ def start_rex(mode: str, port: int) -> Optional[ServerProcess]:
 
 def start_next(mode: str, port: int) -> Optional[ServerProcess]:
     if not (NEXT_DIR / "node_modules").exists():
-        print(f"  {yellow('SKIP')}: Next.js not installed. Run: cd benchmarks/next-basic && npm install")
+        print(
+            f"  {yellow('SKIP')}: Next.js not installed. Run: cd benchmarks/next-basic && npm install"
+        )
         return None
     cmd = ["npx", "next", mode, "--port", str(port)]
     proc = subprocess.Popen(cmd, cwd=NEXT_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -198,21 +222,38 @@ def start_next(mode: str, port: int) -> Optional[ServerProcess]:
     return ServerProcess(proc, port)
 
 
+def start_next_app(mode: str, port: int) -> Optional[ServerProcess]:
+    if not (NEXT_APP_DIR / "node_modules").exists():
+        print(
+            f"  {yellow('SKIP')}: Next.js (App) not installed. Run: cd benchmarks/next-app-basic && npm install"
+        )
+        return None
+    cmd = ["npx", "next", mode, "--port", str(port)]
+    proc = subprocess.Popen(
+        cmd, cwd=NEXT_APP_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    timeout = 60 if mode == "dev" else 30
+    if not wait_for_port(port, timeout=timeout):
+        proc.kill()
+        print(f"  {yellow('SKIP')}: Next.js (App) failed to start on port {port}")
+        return None
+    return ServerProcess(proc, port)
+
+
 def start_tanstack(mode: str, port: int) -> Optional[ServerProcess]:
     if not (TANSTACK_DIR / "node_modules").exists():
-        print(f"  {yellow('SKIP')}: TanStack Start not installed. Run: cd benchmarks/tanstack-basic && npm install")
+        print(
+            f"  {yellow('SKIP')}: TanStack Start not installed. Run: cd benchmarks/tanstack-basic && npm install"
+        )
         return None
     if mode == "dev":
-        cmd = ["npx", "vite", "dev", "--port", str(port)]
-        proc = subprocess.Popen(cmd, cwd=TANSTACK_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        cmd = ["npx", "vite", "dev", "--port", str(port), "--host", "127.0.0.1"]
     else:
-        # Production: node .output/server/index.mjs
-        env = {**os.environ, "PORT": str(port)}
-        proc = subprocess.Popen(
-            ["node", ".output/server/index.mjs"],
-            cwd=TANSTACK_DIR, env=env,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+        # Production: vite preview serves the built dist/
+        cmd = ["npx", "vite", "preview", "--port", str(port), "--host", "127.0.0.1"]
+    proc = subprocess.Popen(
+        cmd, cwd=TANSTACK_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
     timeout = 60 if mode == "dev" else 30
     if not wait_for_port(port, timeout=timeout):
         proc.kill()
@@ -222,6 +263,7 @@ def start_tanstack(mode: str, port: int) -> Optional[ServerProcess]:
 
 
 # ── Apache Bench wrapper ───────────────────────────────────────
+
 
 @dataclass
 class AbResult:
@@ -241,16 +283,19 @@ def run_ab(url: str, requests: int, concurrency: int, warmup: int) -> AbResult:
     # Warmup
     subprocess.run(
         ["ab", "-n", str(warmup), "-c", "10", url],
-        capture_output=True, timeout=30,
+        capture_output=True,
+        timeout=30,
     )
 
     # Benchmark
     try:
         out = subprocess.check_output(
             ["ab", "-n", str(requests), "-c", str(concurrency), url],
-            stderr=subprocess.STDOUT, text=True, timeout=120,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=120,
         )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         print(f"  {yellow('WARN')}: ab failed for {url}")
         return AbResult()
 
@@ -282,7 +327,7 @@ def run_ab(url: str, requests: int, concurrency: int, warmup: int) -> AbResult:
     # Print summary
     for line in out.splitlines():
         if any(k in line for k in ("Requests per second", "Time per request", "Failed requests")):
-            print(f"    {line.strip()}")
+            print(f"    {line.strip()}", flush=True)
 
     return result
 
@@ -290,6 +335,17 @@ def run_ab(url: str, requests: int, concurrency: int, warmup: int) -> AbResult:
 # ── Results accumulator ─────────────────────────────────────────
 
 results: list[dict] = []
+_step = 0
+_total_steps = 0
+
+
+def progress(fw: str, suite: str):
+    """Emit a machine-parseable progress line for the dashboard."""
+    global _step
+    _step += 1
+    label = FW_LABEL.get(fw, fw)
+    suite_label = {"dx": "DX", "server": "Server", "client": "Client"}.get(suite, suite)
+    print(f"[PROGRESS {_step}/{_total_steps}] {label} — {suite_label}", flush=True)
 
 
 def add(suite: str, framework: str, metric: str, value: float, **extra):
@@ -302,12 +358,14 @@ def add(suite: str, framework: str, metric: str, value: float, **extra):
 # DX SUITE
 # ════════════════════════════════════════════════════════════════
 
+
 def dx_framework(
     fw: str,
     project_dir: Path,
     start_fn,
     about_page: Path,
 ):
+    progress(fw, "dx")
     section(fw, "DX")
 
     # ── Dependencies & node_modules size ──
@@ -330,7 +388,9 @@ def dx_framework(
     t0 = time.monotonic()
     subprocess.run(
         ["npm", "install", "--prefer-offline", "--no-audit", "--no-fund"],
-        cwd=project_dir, capture_output=True, timeout=120,
+        cwd=project_dir,
+        capture_output=True,
+        timeout=120,
     )
     install_ms = round((time.monotonic() - t0) * 1000)
     print(f"  {bold('Install time:')}   {green(f'{install_ms}ms')}")
@@ -398,13 +458,20 @@ def run_dx(frameworks: list[str]):
         dx_framework("rex", REX_FIXTURE, start_rex, REX_FIXTURE / "pages/about.tsx")
     if "nextjs" in frameworks:
         dx_framework("nextjs", NEXT_DIR, start_next, NEXT_DIR / "pages/about.tsx")
+    if "nextjs_app" in frameworks:
+        dx_framework(
+            "nextjs_app", NEXT_APP_DIR, start_next_app, NEXT_APP_DIR / "app/about/page.tsx"
+        )
     if "tanstack" in frameworks:
-        dx_framework("tanstack", TANSTACK_DIR, start_tanstack, TANSTACK_DIR / "src/routes/about.tsx")
+        dx_framework(
+            "tanstack", TANSTACK_DIR, start_tanstack, TANSTACK_DIR / "src/routes/about.tsx"
+        )
 
 
 # ════════════════════════════════════════════════════════════════
 # SERVER SUITE
 # ════════════════════════════════════════════════════════════════
+
 
 def server_framework(
     fw: str,
@@ -415,6 +482,7 @@ def server_framework(
     concurrency: int,
     warmup: int,
 ):
+    progress(fw, "server")
     section(fw, "Server")
 
     # ── Build ──
@@ -467,57 +535,103 @@ def run_server(frameworks: list[str], requests: int, concurrency: int, warmup: i
         return
 
     print(f"\n  {bold('▸ Server Suite')} — production throughput & latency")
-    print(f"  {dim('Requests:')} {requests}  {dim('Concurrency:')} {concurrency}  {dim('Warmup:')} {warmup}\n")
+    print(
+        f"  {dim('Requests:')} {requests}  {dim('Concurrency:')} {concurrency}  {dim('Warmup:')} {warmup}\n"
+    )
 
     if "rex" in frameworks:
+
         def build_rex():
             if not REX_BIN.exists():
                 print(f"  {yellow('SKIP')}: Rex binary not found")
                 return False
             subprocess.run(
                 [str(REX_BIN), "build", "--root", str(REX_FIXTURE)],
-                capture_output=True, timeout=60,
+                capture_output=True,
+                timeout=60,
             )
             return True
 
         server_framework(
-            "rex", build_rex, start_rex,
+            "rex",
+            build_rex,
+            start_rex,
             REX_FIXTURE / ".rex/build",
-            requests, concurrency, warmup,
+            requests,
+            concurrency,
+            warmup,
         )
 
     if "nextjs" in frameworks:
+
         def build_next():
             if not (NEXT_DIR / "node_modules").exists():
                 print(f"  {yellow('SKIP')}: Next.js not installed")
                 return False
             subprocess.run(
                 ["npx", "next", "build"],
-                cwd=NEXT_DIR, capture_output=True, timeout=120,
+                cwd=NEXT_DIR,
+                capture_output=True,
+                timeout=120,
             )
             return True
 
         server_framework(
-            "nextjs", build_next, start_next,
+            "nextjs",
+            build_next,
+            start_next,
             NEXT_DIR / ".next",
-            requests, concurrency, warmup,
+            requests,
+            concurrency,
+            warmup,
+        )
+
+    if "nextjs_app" in frameworks:
+
+        def build_next_app():
+            if not (NEXT_APP_DIR / "node_modules").exists():
+                print(f"  {yellow('SKIP')}: Next.js (App) not installed")
+                return False
+            subprocess.run(
+                ["npx", "next", "build"],
+                cwd=NEXT_APP_DIR,
+                capture_output=True,
+                timeout=120,
+            )
+            return True
+
+        server_framework(
+            "nextjs_app",
+            build_next_app,
+            start_next_app,
+            NEXT_APP_DIR / ".next",
+            requests,
+            concurrency,
+            warmup,
         )
 
     if "tanstack" in frameworks:
+
         def build_tanstack():
             if not (TANSTACK_DIR / "node_modules").exists():
                 print(f"  {yellow('SKIP')}: TanStack Start not installed")
                 return False
             subprocess.run(
                 ["npx", "vite", "build"],
-                cwd=TANSTACK_DIR, capture_output=True, timeout=120,
+                cwd=TANSTACK_DIR,
+                capture_output=True,
+                timeout=120,
             )
             return True
 
         server_framework(
-            "tanstack", build_tanstack, start_tanstack,
-            TANSTACK_DIR / ".output",
-            requests, concurrency, warmup,
+            "tanstack",
+            build_tanstack,
+            start_tanstack,
+            TANSTACK_DIR / "dist",
+            requests,
+            concurrency,
+            warmup,
         )
 
 
@@ -525,7 +639,9 @@ def run_server(frameworks: list[str], requests: int, concurrency: int, warmup: i
 # CLIENT SUITE
 # ════════════════════════════════════════════════════════════════
 
+
 def client_bundle_sizes(fw: str, build_dir: Path):
+    progress(fw, "client")
     section(fw, "Client")
 
     if not build_dir.exists():
@@ -546,6 +662,10 @@ def lighthouse_audit(fw: str, port: int):
     if not shutil.which("lighthouse") and not shutil.which("npx"):
         return
 
+    fw_label = FW_LABEL.get(fw, fw)
+    color = FW_COLOR.get(fw, dim)
+    print(f"\n  {color(f'Lighthouse — {fw_label}')}", flush=True)
+
     pages = [("/", "index"), ("/about", "about"), ("/blog/hello-world", "blog")]
 
     for ep, label in pages:
@@ -554,10 +674,13 @@ def lighthouse_audit(fw: str, port: int):
         try:
             out = subprocess.check_output(
                 [
-                    "npx", "lighthouse", url,
+                    "npx",
+                    "lighthouse",
+                    url,
                     "--output=json",
                     "--chrome-flags=--headless --no-sandbox",
                     "--only-categories=performance",
+                    "--throttling-method=devtools",
                     "--quiet",
                 ],
                 stderr=subprocess.DEVNULL,
@@ -599,7 +722,8 @@ def run_client(frameworks: list[str]):
     try:
         subprocess.run(
             ["npx", "lighthouse", "--version"],
-            capture_output=True, timeout=15,
+            capture_output=True,
+            timeout=15,
         )
         has_lighthouse = True
         print(f"  {dim('Lighthouse detected — will run Web Vitals audits')}\n")
@@ -619,10 +743,15 @@ def run_client(frameworks: list[str]):
             subprocess.run(["npx", "next", "build"], cwd=NEXT_DIR, capture_output=True)
         client_bundle_sizes("nextjs", NEXT_DIR / ".next/static")
 
+    if "nextjs_app" in frameworks:
+        if not (NEXT_APP_DIR / ".next").exists():
+            subprocess.run(["npx", "next", "build"], cwd=NEXT_APP_DIR, capture_output=True)
+        client_bundle_sizes("nextjs_app", NEXT_APP_DIR / ".next/static")
+
     if "tanstack" in frameworks:
-        if not (TANSTACK_DIR / ".output").exists():
+        if not (TANSTACK_DIR / "dist").exists():
             subprocess.run(["npx", "vite", "build"], cwd=TANSTACK_DIR, capture_output=True)
-        client_bundle_sizes("tanstack", TANSTACK_DIR / ".output/public")
+        client_bundle_sizes("tanstack", TANSTACK_DIR / "dist/client")
 
     # Lighthouse
     if has_lighthouse:
@@ -642,7 +771,14 @@ def run_client(frameworks: list[str]):
                 with server:
                     lighthouse_audit("nextjs", port)
 
-        if "tanstack" in frameworks and (TANSTACK_DIR / ".output").exists():
+        if "nextjs_app" in frameworks and (NEXT_APP_DIR / "node_modules").exists():
+            port = find_free_port()
+            server = start_next_app("start", port)
+            if server:
+                with server:
+                    lighthouse_audit("nextjs_app", port)
+
+        if "tanstack" in frameworks and (TANSTACK_DIR / "dist").exists():
             port = find_free_port()
             server = start_tanstack("start", port)
             if server:
@@ -652,20 +788,35 @@ def run_client(frameworks: list[str]):
 
 # ── Main ────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(description="Rex Benchmark Suite")
-    parser.add_argument("--suite", default="dx,server,client",
-                        help="Comma-separated suites: dx, server, client (default: all)")
-    parser.add_argument("--framework", default="rex,nextjs,tanstack",
-                        help="Comma-separated: rex, nextjs, tanstack (default: all)")
+    parser.add_argument(
+        "--suite",
+        default="dx,server,client",
+        help="Comma-separated suites: dx, server, client (default: all)",
+    )
+    parser.add_argument(
+        "--framework",
+        default="rex,nextjs,nextjs_app,tanstack",
+        help="Comma-separated: rex, nextjs, nextjs_app, tanstack (default: all)",
+    )
     parser.add_argument("--json", dest="json_file", help="Write results to JSON file")
-    parser.add_argument("--requests", type=int, default=5000, help="Requests per benchmark (default: 5000)")
-    parser.add_argument("--concurrency", type=int, default=50, help="Concurrent connections (default: 50)")
+    parser.add_argument(
+        "--requests", type=int, default=5000, help="Requests per benchmark (default: 5000)"
+    )
+    parser.add_argument(
+        "--concurrency", type=int, default=50, help="Concurrent connections (default: 50)"
+    )
     parser.add_argument("--warmup", type=int, default=100, help="Warmup requests (default: 100)")
     args = parser.parse_args()
 
     suites = [s.strip() for s in args.suite.split(",")]
     frameworks = [f.strip() for f in args.framework.split(",")]
+
+    # Compute total steps for progress reporting
+    global _total_steps
+    _total_steps = len(suites) * len(frameworks)
 
     # Banner
     print(f"\n  {bold('Rex Benchmark Suite')}\n")

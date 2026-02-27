@@ -9,3 +9,16 @@ dependencies = [
     "pandas",
 ]
 
+[dependency-groups]
+dev = [
+    "ruff",
+    "ty",
+    "black",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.black]
+line-length = 100
+
