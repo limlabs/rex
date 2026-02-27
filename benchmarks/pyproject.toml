@@ -5,12 +5,16 @@ description = "Rex vs Next.js vs TanStack Start benchmark suite"
 requires-python = ">=3.13"
 dependencies = [
     "marimo",
+    "nbconvert>=7.17.0",
+    "nbformat>=5.10.4",
+    "playwright>=1.58.0",
     "plotly",
-    "pandas",
+    "polars>=1.38.1",
 ]
 
 [dependency-groups]
 dev = [
+    "pytest",
     "ruff",
     "ty",
     "black",

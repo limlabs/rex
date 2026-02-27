@@ -359,6 +359,12 @@ def add(suite: str, framework: str, metric: str, value: float, **extra):
 # ════════════════════════════════════════════════════════════════
 
 
+def file_size_mb(path: Path) -> float:
+    if not path.exists():
+        return 0.0
+    return round(path.stat().st_size / (1024 * 1024), 1)
+
+
 def dx_framework(
     fw: str,
     project_dir: Path,
@@ -367,6 +373,12 @@ def dx_framework(
 ):
     progress(fw, "dx")
     section(fw, "DX")
+
+    # ── Rex binary size (users must download this too) ──
+    if fw == "rex" and REX_BIN.exists():
+        bin_mb = file_size_mb(REX_BIN)
+        print(f"  {bold('Binary size:')}    {green(f'{bin_mb}MB')}")
+        add("dx", fw, "binary_mb", bin_mb)
 
     # ── Dependencies & node_modules size ──
     nm = project_dir / "node_modules"
