@@ -2,12 +2,12 @@
 
 ## Quick Reference
 
-- **Build**: `cargo build` (first build is slow due to V8 compilation)
-- **Test**: `cargo test` — 71 tests across rex_core, rex_router, rex_build, rex_v8, and rex_server
+- **Build**: `cargo build`
+- **Test**: `cargo test`
 - **Check**: `cargo check` — must be zero warnings
 - **Run dev server**: `cargo run -- dev --root fixtures/basic`
 - **Verbose logging**: `RUST_LOG=rex=debug cargo run -- dev --root fixtures/basic`
-- **Fixture setup**: `cd fixtures/basic && npm install` (only needed once)
+- **Fixture setup**: `cd fixtures/basic && npm install`
 
 ## Crate Map
 
@@ -21,7 +21,7 @@
 | `rex_dev` | File watcher + HMR WS | `watcher.rs`, `hmr.rs` |
 | `rex_cli` | CLI entry | `main.rs` |
 
-## V8 Crate (v146) Patterns
+## V8 Patterns
 
 V8 isolates are `!Send`. Each lives on a dedicated OS thread. Work dispatched via crossbeam channels.
 
@@ -39,59 +39,18 @@ self.isolate.perform_microtask_checkpoint();
 
 ## Rolldown (Bundler)
 
-All bundles built by rolldown (Rust-native, OXC-based). Git dependency from `main` branch. OXC handles TSX/JSX parsing, TypeScript stripping, and module resolution — no SWC dependency.
-
-### Client Bundles
-- **ESM output** with code splitting — React becomes a shared chunk
-- No vendor scripts or externals — rolldown resolves all deps from `node_modules`
-- CSS imports mapped to `ModuleType::Empty` (CSS collected separately)
-- `rolldown_common::Output` enum for matching `Chunk`/`Asset` in build output
-- Virtual entry files generated per page, written to temp `_entries/` dir
-- `<script type="module">` in HTML document
-- Resolve aliases: `rex/link` and `rex/head` → `runtime/client/` stubs
-
-### Server Bundle
-- **IIFE output** — self-contained, runs in bare V8 with no module loader
-- Single virtual entry imports React, all pages, and SSR runtime
-- V8 polyfills injected as rolldown banner (runs before IIFE)
-- React bundled directly (not loaded separately as V8 global)
-- Resolve aliases: `rex/head`, `rex/link`, `rex/document` → `runtime/server/` stubs
-- `SsrIsolate::new(bundle_js)` takes single self-contained bundle
-- `IsolatePool::new(size, bundle_js)` — no separate React runtime parameter
-
-### Common
+- Server bundle: **IIFE** — self-contained, runs in bare V8 with no module loader
+- Client bundles: **ESM** with code splitting
 - `build_bundles()` is async (rolldown requires it)
 - CSS handled separately (scanned from source, copied to output)
-- `Platform::Browser` for both (server needs browser-compat react-dom/server)
 
 ## Client-Side Router
 
-Handles client navigation without full page reloads. File: `runtime/client/router.js`
+File: `runtime/client/router.js`. Global API at `window.__REX_ROUTER` (`push`, `replace`, `prefetch`).
 
-### Architecture
-- `window.__REX_MANIFEST__` — embedded in HTML by `document.rs`, contains `build_id` and `pages` (route→chunk map)
-- `window.__REX_ROUTER` — public API: `push(url)`, `replace(url)`, `prefetch(url)`
-- `window.__REX_RENDER__(Component, props)` — set by page entries, re-renders via `createRoot().render()`
-- `window.__REX_PAGES[pattern]` — registry of loaded page components
-- `window.__REX_NAVIGATING__` — flag to prevent hydration during client-side navigation
-
-### Navigation Flow
-1. `rex/link` onClick → `__REX_ROUTER.push(url)`
-2. Router matches URL to route pattern via manifest
-3. Parallel: fetch page data (`/_rex/data/{buildId}/{path}.json`) + load page chunk (`import()`)
-4. Update history, `__REX_DATA__`, CSS, and call `__REX_RENDER__`
-
-### Endpoints
+Endpoints:
 - `/_rex/router.js` — served from `server.rs` via `include_str!`
 - `/_rex/data/{buildId}/{path}.json` — GSSP data for client transitions
-
-## Server Bundle Format
-
-Pages registered at `globalThis.__rex_pages[routeKey]`. Global runtime functions:
-- `__rex_render_page(routeKey, propsJson)` → JSON `{ body, head }`
-- `__rex_get_server_side_props(routeKey, contextJson)` → JSON (returns `"__REX_ASYNC__"` for promises)
-- `__rex_call_api_handler(routeKey, reqJson)` → JSON (returns `"__REX_API_ASYNC__"` for promises)
-- `__rex_render_document()` → JSON `{ htmlAttrs, bodyAttrs, headContent }`
 
 ## Plane Project Tracker
 

@@ -32,23 +32,18 @@ pub struct RouteTrie {
 }
 
 impl RouteTrie {
-    pub fn new() -> Self {
-        Self {
-            root: TrieNode::new(),
-        }
-    }
-
     /// Build a trie from a list of routes
     pub fn from_routes(routes: &[Route]) -> Self {
-        let mut trie = Self::new();
+        let mut trie = Self {
+            root: TrieNode::new(),
+        };
         for route in routes {
             trie.insert(route.clone());
         }
         trie
     }
 
-    /// Insert a route into the trie
-    pub fn insert(&mut self, route: Route) {
+    fn insert(&mut self, route: Route) {
         let pattern = route.pattern.clone();
         let segments = parse_segments(&pattern);
         let mut node = &mut self.root;
@@ -140,28 +135,6 @@ impl RouteTrie {
 
         None
     }
-
-    /// Get all routes in the trie
-    pub fn routes(&self) -> Vec<&Route> {
-        let mut result = Vec::new();
-        self.collect_routes(&self.root, &mut result);
-        result
-    }
-
-    fn collect_routes<'a>(&'a self, node: &'a TrieNode, result: &mut Vec<&'a Route>) {
-        if let Some(route) = &node.route {
-            result.push(route);
-        }
-        if let Some((_, route)) = &node.catch_all {
-            result.push(route);
-        }
-        for child in node.children.values() {
-            self.collect_routes(child, result);
-        }
-        if let Some((_, child)) = &node.param_child {
-            self.collect_routes(child.as_ref(), result);
-        }
-    }
 }
 
 fn parse_segments(pattern: &str) -> Vec<&str> {
@@ -220,10 +193,8 @@ mod tests {
 
     #[test]
     fn test_static_over_dynamic() {
-        let trie = RouteTrie::from_routes(&[
-            make_route("/blog/featured"),
-            make_route("/blog/:slug"),
-        ]);
+        let trie =
+            RouteTrie::from_routes(&[make_route("/blog/featured"), make_route("/blog/:slug")]);
 
         let m = trie.match_path("/blog/featured").unwrap();
         assert_eq!(m.route.pattern, "/blog/featured");

@@ -1,6 +1,4 @@
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
-use axum::response::IntoResponse;
+use axum::extract::ws::{Message, WebSocket};
 use serde::Serialize;
 use tokio::sync::broadcast;
 use tracing::{debug, info};
@@ -36,10 +34,6 @@ impl HmrBroadcast {
         Self { tx }
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<HmrMessage> {
-        self.tx.subscribe()
-    }
-
     pub fn send_update(&self, path: &str) {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -64,14 +58,6 @@ impl HmrBroadcast {
     }
 }
 
-/// WebSocket handler for HMR
-pub async fn hmr_websocket_handler(
-    ws: WebSocketUpgrade,
-    State(hmr): State<HmrBroadcast>,
-) -> impl IntoResponse {
-    ws.on_upgrade(|socket| handle_hmr_socket(socket, hmr))
-}
-
 pub async fn handle_hmr_socket(mut socket: WebSocket, hmr: HmrBroadcast) {
     info!("HMR client connected");
 
@@ -81,7 +67,7 @@ pub async fn handle_hmr_socket(mut socket: WebSocket, hmr: HmrBroadcast) {
         return;
     }
 
-    let mut rx = hmr.subscribe();
+    let mut rx = hmr.tx.subscribe();
 
     loop {
         tokio::select! {

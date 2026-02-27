@@ -6,5 +6,4 @@ edition = "2021"
 [dependencies]
 rex_core = { path = "../rex_core" }
 tracing = { workspace = true }
-thiserror = { workspace = true }
 anyhow = { workspace = true }

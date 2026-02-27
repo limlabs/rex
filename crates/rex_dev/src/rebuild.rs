@@ -46,7 +46,7 @@ pub async fn handle_file_event(
 
             debug!("Hot reload complete");
         }
-        FileEventKind::PageAdded | FileEventKind::PageRemoved => {
+        FileEventKind::PageRemoved => {
             // Full rebuild: routes changed, need new trie + manifest
             let scan = scan_pages(&config.pages_dir)?;
             let build_result = build_bundles(config, &scan).await?;
@@ -72,9 +72,6 @@ pub async fn handle_file_event(
             hmr.send_full_reload();
 
             debug!("Full rebuild complete (route added/removed)");
-        }
-        FileEventKind::ConfigChanged => {
-            hmr.send_full_reload();
         }
     }
 

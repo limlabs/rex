@@ -1,4 +1,3 @@
-use crate::entries::generate_build_id;
 use crate::manifest::AssetManifest;
 use anyhow::Result;
 use rex_core::RexConfig;
@@ -461,7 +460,7 @@ async fn build_client_bundles(
     let hash = &build_id[..8];
 
     // Collect and copy CSS files referenced by source (rolldown doesn't bundle CSS)
-    collect_css_files(config, scan, output_dir, build_id, &mut manifest)?;
+    collect_css_files(scan, output_dir, build_id, &mut manifest)?;
 
     // Add CSS module files to manifest
     for css_file in &css_modules.global_css {
@@ -656,10 +655,12 @@ if (!window.__REX_NAVIGATING__) {{
         .await
         .map_err(|e| anyhow::anyhow!("Rolldown bundle failed: {e:?}"))?;
 
-    // Process rolldown output: register entry chunks in the manifest
+    // Process rolldown output: register entry chunks and shared chunks in the manifest
     for item in &output.assets {
         if let Output::Chunk(chunk) = item {
             if !chunk.is_entry {
+                // Shared chunk (e.g. chunk-client, chunk-react) — track for modulepreload
+                manifest.shared_chunks.push(chunk.filename.to_string());
                 continue;
             }
             let name = chunk.name.to_string();
@@ -716,7 +717,6 @@ fn find_route_for_chunk<'a>(
 /// Scan source files for CSS imports and copy them to the output directory.
 /// Registers global CSS (from _app) and per-page CSS in the manifest.
 fn collect_css_files(
-    _config: &RexConfig,
     scan: &ScanResult,
     output_dir: &Path,
     build_id: &str,
@@ -731,7 +731,9 @@ fn collect_css_files(
             if css_path.exists() {
                 let stem = css_path.file_stem().unwrap_or_default().to_string_lossy();
                 let filename = format!("{stem}-{hash}.css");
+                let content = fs::read_to_string(&css_path)?;
                 fs::copy(&css_path, output_dir.join(&filename))?;
+                manifest.css_contents.insert(filename.clone(), content);
                 manifest.global_css.push(filename);
             }
         }
@@ -748,7 +750,9 @@ fn collect_css_files(
             if css_path.exists() {
                 let stem = css_path.file_stem().unwrap_or_default().to_string_lossy();
                 let filename = format!("{stem}-{hash}.css");
+                let content = fs::read_to_string(&css_path)?;
                 fs::copy(&css_path, output_dir.join(&filename))?;
+                manifest.css_contents.insert(filename.clone(), content);
                 page_css.push(filename);
             }
         }
@@ -2105,5 +2109,16 @@ export default function Home() {
             "should have scoped class name for heading: {}", render.body
         );
     }
+}
+
+/// Generate a build ID based on current timestamp
+fn generate_build_id() -> String {
+    use sha2::{Digest, Sha256};
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let hash = Sha256::digest(timestamp.to_string().as_bytes());
+    hex::encode(&hash[..8])
 }
 

@@ -9,6 +9,7 @@ use rex_v8::IsolatePool;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use tower_http::compression::CompressionLayer;
 use tower_http::services::ServeDir;
 use tracing::info;
 
@@ -19,18 +20,6 @@ pub struct RexServer {
 }
 
 impl RexServer {
-    pub fn new(
-        route_trie: RouteTrie,
-        isolate_pool: IsolatePool,
-        manifest: AssetManifest,
-        build_id: String,
-        static_dir: PathBuf,
-        port: u16,
-        is_dev: bool,
-    ) -> Self {
-        Self::with_error_pages(route_trie, RouteTrie::from_routes(&[]), isolate_pool, manifest, build_id, static_dir, port, is_dev, false, false, false, ProjectConfig::default())
-    }
-
     pub fn with_error_pages(
         route_trie: RouteTrie,
         api_route_trie: RouteTrie,
@@ -71,7 +60,7 @@ impl RexServer {
         self.state.clone()
     }
 
-    pub fn build_router(&self) -> Router {
+    fn build_router(&self) -> Router {
         self.build_router_with_extra(Router::new())
     }
 
@@ -95,6 +84,7 @@ impl RexServer {
             // Fallback: all other routes go through SSR
             .fallback(handlers::page_handler)
             .with_state(self.state.clone())
+            .layer(CompressionLayer::new().gzip(true))
     }
 
     pub async fn serve(self) -> Result<()> {

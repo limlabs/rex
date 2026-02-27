@@ -8,15 +8,19 @@ pub struct AssetManifest {
     pub build_id: String,
     /// route pattern -> client chunk filename
     pub pages: HashMap<String, PageAssets>,
-    /// Vendor scripts (e.g. React runtime) to load before page scripts
-    #[serde(default)]
-    pub vendor_scripts: Vec<String>,
     /// Client _app chunk filename (loaded before page scripts for hydration wrapping)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_script: Option<String>,
     /// Global CSS files (from _app imports), included on every page
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub global_css: Vec<String>,
+    /// CSS file contents for inlining (filename -> content)
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub css_contents: HashMap<String, String>,
+    /// Shared chunks (e.g. React, common code) split out by rolldown code splitting.
+    /// These are modulepreloaded in the HTML head to avoid import waterfalls.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shared_chunks: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,9 +36,10 @@ impl AssetManifest {
         Self {
             build_id,
             pages: HashMap::new(),
-            vendor_scripts: Vec::new(),
             app_script: None,
             global_css: Vec::new(),
+            css_contents: HashMap::new(),
+            shared_chunks: Vec::new(),
         }
     }
 

@@ -9,9 +9,7 @@ use tracing::debug;
 #[derive(Debug, Clone)]
 pub enum FileEventKind {
     PageModified,
-    PageAdded,
     PageRemoved,
-    ConfigChanged,
 }
 
 #[derive(Debug, Clone)]
@@ -21,9 +19,7 @@ pub struct FileEvent {
 }
 
 /// Start watching the pages directory. Returns a receiver for file events.
-pub fn start_watcher(
-    pages_dir: &Path,
-) -> Result<mpsc::Receiver<FileEvent>> {
+pub fn start_watcher(pages_dir: &Path) -> Result<mpsc::Receiver<FileEvent>> {
     let (tx, rx) = mpsc::channel();
     let pages_dir_owned = pages_dir.to_path_buf();
 
@@ -63,10 +59,9 @@ pub fn start_watcher(
         },
     )?;
 
-    debouncer.watcher().watch(
-        &pages_dir_owned,
-        RecursiveMode::Recursive,
-    )?;
+    debouncer
+        .watcher()
+        .watch(&pages_dir_owned, RecursiveMode::Recursive)?;
 
     debug!(dir = %pages_dir.display(), "File watcher started");
 

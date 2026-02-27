@@ -2,13 +2,14 @@ use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
+use futures::stream::{self, StreamExt};
 use rex_core::{ProjectConfig, ServerSidePropsContext, ServerSidePropsResult};
 use rex_router::RouteTrie;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tracing::{debug, error, info};
 
-use crate::document::{assemble_document, DocumentDescriptor};
+use crate::document::{assemble_body_tail, assemble_document, assemble_head_shell, DocumentDescriptor};
 
 /// State that can change during dev-mode rebuilds.
 #[derive(Clone)]
@@ -195,11 +196,10 @@ async fn render_error_page(
         &render.body,
         &render.head,
         props,
-        &hot.manifest.vendor_scripts,
         &[],
         &hot.manifest.global_css,
+        &hot.manifest.css_contents,
         hot.manifest.app_script.as_deref(),
-        &hot.build_id,
         state.is_dev,
         doc_desc.as_ref(),
         Some(&manifest_json),
@@ -553,39 +553,6 @@ async fn page_handler_inner(
         Err(_) => "{}".to_string(),
     };
 
-    // Render the page
-    let route_key_clone = route_key.clone();
-    let render_props_clone = render_props.clone();
-    let ssr_result = state
-        .isolate_pool
-        .execute(move |iso| iso.render_page(&route_key_clone, &render_props_clone))
-        .await;
-
-    let render = match ssr_result {
-        Ok(Ok(r)) => r,
-        Ok(Err(e)) => {
-            error!("SSR render error: {e}");
-            if state.is_dev {
-                return Html(dev_error_overlay("SSR Error", &e.to_string(), None)).into_response();
-            } else if hot.has_custom_error {
-                let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
-                return render_error_page(&state, &hot, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
-            } else {
-                return (StatusCode::INTERNAL_SERVER_ERROR, Html("Internal server error".to_string())).into_response();
-            }
-        }
-        Err(e) => {
-            error!("Isolate pool error: {e}");
-            if state.is_dev {
-                return Html(dev_error_overlay("Runtime Error", &e.to_string(), None)).into_response();
-            } else if hot.has_custom_error {
-                let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
-                return render_error_page(&state, &hot, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
-            }
-            return (StatusCode::INTERNAL_SERVER_ERROR, Html("Internal server error".to_string())).into_response();
-        }
-    };
-
     // Look up client assets for this route
     let page_assets = hot.manifest.pages.get(&route_match.route.pattern);
     let client_scripts: Vec<String> = page_assets
@@ -606,21 +573,71 @@ async fn page_handler_inner(
         "pages": hot.manifest.pages,
     })).unwrap();
 
-    let document = assemble_document(
-        &render.body,
-        &render.head,
-        &render_props,
-        &hot.manifest.vendor_scripts,
-        &client_scripts,
+    let shared_chunks = hot.manifest.shared_chunks.clone();
+    let app_script = hot.manifest.app_script.clone();
+    let is_dev = state.is_dev;
+
+    // Build the HTML head shell: doctype, <head> with CSS + JS modulepreload hints, opening <body>.
+    // This is flushed to the browser immediately so it can start fetching resources
+    // while V8 renders the page body.
+    let shell = assemble_head_shell(
         &css_files,
-        hot.manifest.app_script.as_deref(),
-        &hot.build_id,
-        state.is_dev,
+        &hot.manifest.css_contents,
+        &shared_chunks,
+        app_script.as_deref(),
+        &client_scripts,
         doc_desc.as_ref(),
-        Some(&manifest_json),
     );
 
-    Html(document).into_response()
+    // Stream response in two chunks: shell (immediate) → render + tail (after V8)
+    let state_clone = state.clone();
+    let route_key_clone = route_key.clone();
+    let render_props_clone = render_props.clone();
+
+    let shell_chunk = stream::once(async { Ok::<_, std::convert::Infallible>(shell) });
+
+    let tail_chunk = stream::once(async move {
+        let ssr_result = state_clone
+            .isolate_pool
+            .execute(move |iso| iso.render_page(&route_key_clone, &render_props_clone))
+            .await;
+
+        let (body_html, head_html) = match ssr_result {
+            Ok(Ok(r)) => (r.body, r.head),
+            Ok(Err(e)) => {
+                error!("SSR render error: {e}");
+                let msg = e.to_string().replace('<', "&lt;").replace('>', "&gt;");
+                if is_dev {
+                    (format!("<pre style=\"padding:20px;color:#e63946;font-family:monospace\">SSR Error: {msg}</pre>"), String::new())
+                } else {
+                    ("<h1>Internal Server Error</h1>".to_string(), String::new())
+                }
+            }
+            Err(e) => {
+                error!("Isolate pool error: {e}");
+                ("<h1>Internal Server Error</h1>".to_string(), String::new())
+            }
+        };
+
+        let tail = assemble_body_tail(
+            &body_html,
+            &head_html,
+            &render_props,
+            &client_scripts,
+            app_script.as_deref(),
+            is_dev,
+            Some(&manifest_json),
+        );
+
+        Ok::<_, std::convert::Infallible>(tail)
+    });
+
+    let body = Body::from_stream(shell_chunk.chain(tail_chunk));
+
+    Response::builder()
+        .header("content-type", "text/html; charset=utf-8")
+        .body(body)
+        .unwrap()
 }
 
 /// Data endpoint: GET /_rex/data/{buildId}/{path}.json

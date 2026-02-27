@@ -128,9 +128,6 @@ impl IsolatePool {
         Ok(())
     }
 
-    pub fn size(&self) -> usize {
-        self.size
-    }
 }
 
 impl Drop for IsolatePool {

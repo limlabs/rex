@@ -49,15 +49,6 @@ impl RexConfig {
         self.output_dir.join("build").join("manifest.json")
     }
 
-    pub fn node_modules_dir(&self) -> PathBuf {
-        self.project_root.join("node_modules")
-    }
-
-    /// Resolve a path relative to the project root
-    pub fn resolve(&self, path: &str) -> PathBuf {
-        self.project_root.join(path)
-    }
-
     /// Check if the pages directory exists
     pub fn validate(&self) -> Result<(), crate::RexError> {
         if !self.pages_dir.exists() {
