@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum DataStrategy {
@@ -151,6 +151,31 @@ pub struct HeaderEntry {
     pub value: String,
 }
 
+/// Build-time configuration from rex.config.json
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BuildConfig {
+    /// Additional module aliases (e.g. `"@components": "./src/components"`)
+    #[serde(default)]
+    pub alias: HashMap<String, String>,
+}
+
+impl BuildConfig {
+    /// Resolve alias values that are relative paths against the project root.
+    pub fn resolved_aliases(&self, project_root: &Path) -> Vec<(String, Vec<Option<String>>)> {
+        self.alias
+            .iter()
+            .map(|(key, value)| {
+                let resolved = if value.starts_with("./") || value.starts_with("../") {
+                    project_root.join(value).to_string_lossy().to_string()
+                } else {
+                    value.clone()
+                };
+                (key.clone(), vec![Some(resolved)])
+            })
+            .collect()
+    }
+}
+
 /// Top-level project configuration from rex.config.json
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectConfig {
@@ -160,6 +185,8 @@ pub struct ProjectConfig {
     pub rewrites: Vec<RewriteRule>,
     #[serde(default)]
     pub headers: Vec<HeaderRule>,
+    #[serde(default)]
+    pub build: BuildConfig,
 }
 
 impl ProjectConfig {
