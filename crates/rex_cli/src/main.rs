@@ -63,6 +63,17 @@ enum Commands {
         args: Vec<String>,
     },
 
+    /// Type-check pages with tsc
+    Typecheck {
+        /// Project root directory
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+
+        /// Additional arguments passed to tsc
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+
     /// Create a new Rex project
     Init {
         /// Project name (creates a new directory)
@@ -86,6 +97,7 @@ async fn main() -> Result<()> {
         Commands::Build { root } => cmd_build(root).await,
         Commands::Start { port, root } => cmd_start(root, port).await,
         Commands::Lint { root, fix, args } => cmd_lint(root, fix, args),
+        Commands::Typecheck { root, args } => cmd_typecheck(root, args),
         Commands::Init { name } => cmd_init(name),
     }
 }
@@ -96,9 +108,7 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
     let config = RexConfig::new(root).with_dev(true).with_port(port);
     config.validate()?;
 
-    eprintln!();
-    eprintln!("  {} {}", magenta_bold("◆ rex"), dim(env!("CARGO_PKG_VERSION")));
-    eprintln!();
+    print_mascot_header(env!("CARGO_PKG_VERSION"), "");
 
     // Scan routes
     debug!("Scanning routes...");
@@ -150,6 +160,12 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
 
     // Create HMR broadcast
     let hmr = rex_dev::HmrBroadcast::new();
+
+    // Start tsc watch process (if TypeScript is detected)
+    let _tsc = rex_dev::typecheck::spawn_tsc_watcher(&config.project_root, hmr.clone());
+    if _tsc.is_some() {
+        eprintln!("  {} {}", dim("◇"), dim("TypeScript (watching)"));
+    }
 
     // Start file watcher (watches project root for CSS changes too)
     let event_rx = rex_dev::start_watcher(&config.project_root, &config.pages_dir)?;
@@ -240,9 +256,7 @@ async fn cmd_build(root: PathBuf) -> Result<()> {
     let config = RexConfig::new(root);
     config.validate()?;
 
-    eprintln!();
-    eprintln!("  {} {}", magenta_bold("◆ rex"), dim(env!("CARGO_PKG_VERSION")));
-    eprintln!();
+    print_mascot_header(env!("CARGO_PKG_VERSION"), "");
 
     let start = std::time::Instant::now();
     debug!("Building for production...");
@@ -503,6 +517,40 @@ fn cmd_lint(root: PathBuf, fix: bool, extra_args: Vec<String>) -> Result<()> {
     std::process::exit(status.code().unwrap_or(1));
 }
 
+fn cmd_typecheck(root: PathBuf, extra_args: Vec<String>) -> Result<()> {
+    let root = std::fs::canonicalize(&root)?;
+
+    let tsc = rex_dev::typecheck::find_tsc(&root).ok_or_else(|| {
+        anyhow::anyhow!(
+            "tsc not found. Install TypeScript:\n\n  \
+             npm install -D typescript\n  \
+             # or globally: npm install -g typescript"
+        )
+    })?;
+
+    eprintln!();
+    eprintln!("  {} {}", magenta_bold("◆ rex typecheck"), dim("(tsc)"));
+    eprintln!();
+
+    let mut cmd = Command::new(&tsc);
+    cmd.current_dir(&root);
+    cmd.arg("--noEmit");
+
+    for arg in &extra_args {
+        cmd.arg(arg);
+    }
+
+    let status = cmd.status()?;
+
+    if status.success() {
+        eprintln!();
+        eprintln!("  {} {}", green_bold("✓"), green_bold("No type errors"));
+        eprintln!();
+    }
+
+    std::process::exit(status.code().unwrap_or(1));
+}
+
 fn find_oxlint(root: &std::path::Path) -> Option<PathBuf> {
     // 1. Local node_modules/.bin/oxlint
     let local = root.join("node_modules/.bin/oxlint");
@@ -563,6 +611,33 @@ fn green_bold(s: &str) -> String {
     format!("\x1b[1;32m{s}\x1b[0m")
 }
 
+fn emerald(s: &str) -> String {
+    format!("\x1b[38;2;46;204;113m{s}\x1b[0m")
+}
+
+fn print_mascot_header(version: &str, suffix: &str) {
+    // Rex mascot - each line padded to 20 display chars
+    let m: [&str; 5] = [
+        "        ▄████▄       ",
+        "        █ ◦ █▀█▄    ",
+        "  ▄▄▄▄▄▄█████▀▀     ",
+        "    ▀▀▀▀██████       ",
+        "        █▀ █▀        ",
+    ];
+    let version_line = if suffix.is_empty() {
+        format!("{} {}", emerald("rex"), dim(version))
+    } else {
+        format!("{} {} {}", emerald("rex"), dim(version), dim(suffix))
+    };
+    eprintln!();
+    eprintln!("  {}", emerald(m[0]));
+    eprintln!("  {}  {}", emerald(m[1]), version_line);
+    eprintln!("  {}", emerald(m[2]));
+    eprintln!("  {}", emerald(m[3]));
+    eprintln!("  {}", emerald(m[4]));
+    eprintln!();
+}
+
 fn format_duration(d: std::time::Duration) -> String {
     let ms = d.as_millis();
     if ms >= 1000 {
@@ -612,9 +687,7 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
     let root = std::fs::canonicalize(&root)?;
     let config = RexConfig::new(root).with_port(port);
 
-    eprintln!();
-    eprintln!("  {} {} {}", magenta_bold("◆ rex"), dim(env!("CARGO_PKG_VERSION")), dim("(production)"));
-    eprintln!();
+    print_mascot_header(env!("CARGO_PKG_VERSION"), "(production)");
 
     // Load manifest
     let manifest = AssetManifest::load(&config.manifest_path())?;
