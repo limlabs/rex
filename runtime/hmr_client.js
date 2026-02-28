@@ -31,9 +31,7 @@
         case 'update':
           console.log('[Rex HMR] Update:', msg.path);
           removeOverlay();
-          // For the prototype, do a full reload on any update
-          // A full implementation would use React Fast Refresh here
-          window.location.reload();
+          hotUpdate(msg);
           break;
 
         case 'full-reload':
@@ -103,6 +101,76 @@
       overlay.parentNode.removeChild(overlay);
     }
     overlay = null;
+  }
+
+  // --- Hot update: re-import changed page module and re-render in place ---
+
+  function hotUpdate(msg) {
+    var manifest = window.__REX_MANIFEST__;
+    var newManifest = msg.manifest;
+
+    if (!manifest || !newManifest || !newManifest.pages) {
+      console.log('[Rex HMR] No manifest, falling back to full reload');
+      window.location.reload();
+      return;
+    }
+
+    // Figure out which route pattern we're currently on
+    var router = window.__REX_ROUTER;
+    var currentPattern = router && router.state ? router.state.route : null;
+
+    if (!currentPattern || !newManifest.pages[currentPattern]) {
+      // Current page isn't in the new manifest (removed?), full reload
+      console.log('[Rex HMR] Current route not in manifest, falling back to full reload');
+      window.location.reload();
+      return;
+    }
+
+    // Update manifest in place so the router's closure references stay valid
+    manifest.build_id = newManifest.build_id;
+    for (var pattern in newManifest.pages) {
+      manifest.pages[pattern] = newManifest.pages[pattern];
+    }
+
+    // Clear old page module so ensureChunk will re-import
+    if (window.__REX_PAGES) {
+      delete window.__REX_PAGES[currentPattern];
+    }
+
+    var newChunk = newManifest.pages[currentPattern].js;
+    var chunkUrl = '/_rex/static/' + newChunk;
+
+    // Dynamic import with cache-bust (chunk filename already has new hash)
+    window.__REX_NAVIGATING__ = true;
+    import(chunkUrl).then(function() {
+      window.__REX_NAVIGATING__ = false;
+
+      // Fetch fresh GSSP data
+      var dataUrl = '/_rex/data/' + newManifest.build_id + window.location.pathname + '.json';
+      return fetch(dataUrl).then(function(res) {
+        if (!res.ok) throw new Error('Data fetch failed: ' + res.status);
+        return res.json();
+      });
+    }).then(function(data) {
+      var props = data.props || {};
+
+      // Update the data element
+      var dataEl = document.getElementById('__REX_DATA__');
+      if (dataEl) dataEl.textContent = JSON.stringify(props);
+
+      // Re-render with the new page component
+      var page = window.__REX_PAGES && window.__REX_PAGES[currentPattern];
+      if (page && window.__REX_RENDER__) {
+        window.__REX_RENDER__(page.default, props);
+        console.log('[Rex HMR] Hot update applied');
+      } else {
+        console.log('[Rex HMR] Could not re-render, falling back to full reload');
+        window.location.reload();
+      }
+    }).catch(function(err) {
+      console.error('[Rex HMR] Hot update failed, falling back to full reload:', err);
+      window.location.reload();
+    });
   }
 
   connect();

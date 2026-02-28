@@ -246,6 +246,7 @@ Three suites: **DX** (install time, deps, startup, rebuild), **Server** (product
 # Prerequisites
 cargo build --release
 cd benchmarks/next-basic && npm install && cd ../..
+cd benchmarks/next-app-basic && npm install && cd ../..
 cd benchmarks/tanstack-basic && npm install && cd ../..
 
 # Run all suites, all frameworks
@@ -258,12 +259,34 @@ uv run python bench.py --suite client
 
 # Tune load test parameters
 uv run python bench.py --suite server --requests 10000 --concurrency 100
+
+# Multiple iterations for noisy metrics (reports median + stddev)
+uv run python bench.py --iterations 5
 ```
 
 View results in the interactive dashboard (marimo notebook):
 
 ```sh
 cd benchmarks && uv run marimo edit dashboard.py
+```
+
+#### Docker (reproducible environment)
+
+Run benchmarks in a self-contained Docker image with all dependencies pre-installed (Rust, Node 24, uv, Apache Bench, Lighthouse):
+
+```sh
+# Build the image (first time takes a while — compiles V8)
+docker build -t rex-bench -f benchmarks/Dockerfile .
+
+# Run all benchmarks
+docker run --rm rex-bench
+
+# Run specific suites/frameworks
+docker run --rm rex-bench uv run python bench.py --suite server --framework rex,nextjs
+
+# Extract results
+docker run --rm -v $(pwd)/benchmarks:/out rex-bench sh -c \
+  'uv run python bench.py --json /out/results.json'
 ```
 
 ## Code style

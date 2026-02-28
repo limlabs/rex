@@ -14,6 +14,7 @@ Usage:
   uv run python bench.py --framework rex              # one framework only
   uv run python bench.py --json results.json          # write JSON output
   uv run python bench.py --requests 10000 --concurrency 100
+  uv run python bench.py --iterations 5                     # median of 5 runs for noisy metrics
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ import os
 import re
 import shutil
 import socket
+import statistics
 import subprocess
 import tempfile
 import time
@@ -152,6 +154,27 @@ def css_total_kb(directory: Path) -> float:
     if not directory.exists():
         return 0.0
     total = sum(f.stat().st_size for f in directory.rglob("*.css") if f.is_file())
+    return round(total / 1024, 1)
+
+
+def _gzip_size(path: Path) -> int:
+    import gzip
+
+    data = path.read_bytes()
+    return len(gzip.compress(data, compresslevel=9))
+
+
+def js_total_gz_kb(directory: Path) -> float:
+    if not directory.exists():
+        return 0.0
+    total = sum(_gzip_size(f) for f in directory.rglob("*") if f.suffix in (".js", ".mjs"))
+    return round(total / 1024, 1)
+
+
+def css_total_gz_kb(directory: Path) -> float:
+    if not directory.exists():
+        return 0.0
+    total = sum(_gzip_size(f) for f in directory.rglob("*.css") if f.is_file())
     return round(total / 1024, 1)
 
 
@@ -354,6 +377,36 @@ def add(suite: str, framework: str, metric: str, value: float, **extra):
     results.append(entry)
 
 
+def summarize(samples: list[float]) -> tuple[float, float]:
+    """Return (median, stddev) for a list of samples."""
+    med = statistics.median(samples)
+    sd = statistics.stdev(samples) if len(samples) > 1 else 0.0
+    return round(med, 2), round(sd, 2)
+
+
+def add_sampled(suite: str, framework: str, metric: str, samples: list[float], **extra):
+    """Record a metric measured over multiple iterations."""
+    med, sd = summarize(samples)
+    entry = {
+        "suite": suite,
+        "framework": framework,
+        "metric": metric,
+        "value": med,
+        "iterations": len(samples),
+        "stddev": sd,
+    }
+    entry.update(extra)
+    results.append(entry)
+    return med, sd
+
+
+def fmt_sampled(label: str, med: float, sd: float, unit: str, iterations: int) -> str:
+    """Format a sampled metric for display."""
+    if iterations > 1:
+        return f"  {bold(label)}   {green(f'{med}{unit}')} {dim(f'(median of {iterations}, stddev={sd}{unit})')}"
+    return f"  {bold(label)}   {green(f'{med}{unit}')}"
+
+
 # ════════════════════════════════════════════════════════════════
 # DX SUITE
 # ════════════════════════════════════════════════════════════════
@@ -370,6 +423,7 @@ def dx_framework(
     project_dir: Path,
     start_fn,
     about_page: Path,
+    iterations: int = 1,
 ):
     progress(fw, "dx")
     section(fw, "DX")
@@ -391,92 +445,142 @@ def dx_framework(
         add("dx", fw, "node_modules_mb", nm_mb)
 
     # ── npm install time (clean) ──
-    print(f"  {dim('Measuring npm install (clean)...')}")
-    backup = None
-    if nm.exists():
-        backup = Path(tempfile.mkdtemp())
-        nm.rename(backup / "node_modules")
+    install_samples: list[float] = []
+    for i in range(iterations):
+        if iterations > 1:
+            print(f"  {dim(f'npm install iteration {i + 1}/{iterations}...')}")
+        else:
+            print(f"  {dim('Measuring npm install (clean)...')}")
+        backup = None
+        if nm.exists():
+            backup = Path(tempfile.mkdtemp())
+            nm.rename(backup / "node_modules")
 
-    t0 = time.monotonic()
-    subprocess.run(
-        ["npm", "install", "--prefer-offline", "--no-audit", "--no-fund"],
-        cwd=project_dir,
-        capture_output=True,
-        timeout=120,
-    )
-    install_ms = round((time.monotonic() - t0) * 1000)
-    print(f"  {bold('Install time:')}   {green(f'{install_ms}ms')}")
-    add("dx", fw, "install_time_ms", install_ms)
+        t0 = time.monotonic()
+        subprocess.run(
+            ["npm", "install", "--prefer-offline", "--no-audit", "--no-fund"],
+            cwd=project_dir,
+            capture_output=True,
+            timeout=120,
+        )
+        install_samples.append(round((time.monotonic() - t0) * 1000))
 
-    if backup:
-        shutil.rmtree(backup, ignore_errors=True)
+        if backup:
+            shutil.rmtree(backup, ignore_errors=True)
+
+    med, sd = add_sampled("dx", fw, "install_time_ms", install_samples)
+    print(fmt_sampled("Install time:", med, sd, "ms", iterations))
 
     # ── Cold start (dev) ──
-    port = find_free_port()
-    t0 = time.monotonic()
-    server = start_fn("dev", port)
-    if server is None:
-        print(f"  {yellow('Could not start dev server')}")
-        return
+    cold_samples: list[float] = []
+    mem = 0.0
+    for i in range(iterations):
+        if iterations > 1:
+            print(f"  {dim(f'Cold start iteration {i + 1}/{iterations}...')}")
+        port = find_free_port()
+        t0 = time.monotonic()
+        server = start_fn("dev", port)
+        if server is None:
+            print(f"  {yellow('Could not start dev server')}")
+            if not cold_samples:
+                return
+            break
 
-    with server:
-        # Hit once to fully warm up
-        curl_body(port, "/")
-        # JS frameworks compile on first request
-        if fw != "rex":
-            time.sleep(2)
-        cold_ms = round((time.monotonic() - t0) * 1000)
-        print(f"  {bold('Cold start:')}     {green(f'{cold_ms}ms')}")
-        add("dx", fw, "cold_start_ms", cold_ms)
+        with server:
+            curl_body(port, "/")
+            if fw != "rex":
+                time.sleep(2)
+            cold_samples.append(round((time.monotonic() - t0) * 1000))
+            # Capture memory on last iteration
+            if i == iterations - 1:
+                mem = server.rss_mb()
 
-        # ── Dev memory ──
-        mem = server.rss_mb()
-        print(f"  {bold('Dev memory:')}     {green(f'{mem}MB')}")
-        add("dx", fw, "dev_memory_mb", mem)
+    med, sd = add_sampled("dx", fw, "cold_start_ms", cold_samples)
+    print(fmt_sampled("Cold start:  ", med, sd, "ms", iterations))
 
-        # ── HMR rebuild time ──
-        if about_page.exists():
+    # ── Dev memory (from last cold start iteration) ──
+    print(f"  {bold('Dev memory:')}     {green(f'{mem}MB')}")
+    add("dx", fw, "dev_memory_mb", mem)
+
+    # ── HMR rebuild time ──
+    if about_page.exists():
+        # Start a fresh dev server for HMR measurement
+        port = find_free_port()
+        server = start_fn("dev", port)
+        if server is None:
+            print(f"  {yellow('Could not start dev server for HMR')}")
+            print()
+            return
+
+        with server:
+            # Warm up
+            curl_body(port, "/about")
+            time.sleep(0.5)
+
             original = about_page.read_text()
-            marker = f"__BENCH_MARKER_{int(time.time())}__"
-            modified = original.replace("<h1>About</h1>", f"<h1>{marker}</h1>")
-            about_page.write_text(modified)
+            rebuild_samples: list[float] = []
 
-            t0 = time.monotonic()
-            deadline = t0 + 20
-            found = False
-            while time.monotonic() < deadline:
-                body = curl_body(port, "/about")
-                if marker in body:
-                    found = True
-                    break
-                time.sleep(0.1)
+            for i in range(iterations):
+                if iterations > 1:
+                    print(f"  {dim(f'HMR iteration {i + 1}/{iterations}...')}")
+                marker = f"__BENCH_MARKER_{int(time.time())}_{i}__"
+                modified = original.replace("<h1>About</h1>", f"<h1>{marker}</h1>")
+                about_page.write_text(modified)
 
-            rebuild_ms = round((time.monotonic() - t0) * 1000)
-            about_page.write_text(original)
+                t0 = time.monotonic()
+                deadline = t0 + 20
+                found = False
+                while time.monotonic() < deadline:
+                    body = curl_body(port, "/about")
+                    if marker in body:
+                        found = True
+                        break
+                    time.sleep(0.1)
 
-            if found:
-                print(f"  {bold('Rebuild time:')}   {green(f'{rebuild_ms}ms')}")
-                add("dx", fw, "rebuild_ms", rebuild_ms)
+                if found:
+                    rebuild_samples.append(round((time.monotonic() - t0) * 1000))
+                else:
+                    print(f"  {yellow(f'HMR iteration {i + 1}: timed out (20s)')}")
+
+                # Restore for next iteration
+                about_page.write_text(original)
+                if i < iterations - 1:
+                    time.sleep(0.5)
+
+            if rebuild_samples:
+                med, sd = add_sampled("dx", fw, "rebuild_ms", rebuild_samples)
+                print(fmt_sampled("Rebuild time:", med, sd, "ms", len(rebuild_samples)))
             else:
-                print(f"  {yellow('Rebuild: timed out (20s)')}")
+                print(f"  {yellow('Rebuild: all iterations timed out')}")
 
     print()
 
 
-def run_dx(frameworks: list[str]):
-    print(f"\n  {bold('▸ DX Suite')} — developer experience metrics\n")
+def run_dx(frameworks: list[str], iterations: int = 1):
+    print(f"\n  {bold('▸ DX Suite')} — developer experience metrics")
+    if iterations > 1:
+        print(f"  {dim(f'Iterations: {iterations} (reporting median)')}")
+    print()
 
     if "rex" in frameworks:
-        dx_framework("rex", REX_FIXTURE, start_rex, REX_FIXTURE / "pages/about.tsx")
+        dx_framework("rex", REX_FIXTURE, start_rex, REX_FIXTURE / "pages/about.tsx", iterations)
     if "nextjs" in frameworks:
-        dx_framework("nextjs", NEXT_DIR, start_next, NEXT_DIR / "pages/about.tsx")
+        dx_framework("nextjs", NEXT_DIR, start_next, NEXT_DIR / "pages/about.tsx", iterations)
     if "nextjs_app" in frameworks:
         dx_framework(
-            "nextjs_app", NEXT_APP_DIR, start_next_app, NEXT_APP_DIR / "app/about/page.tsx"
+            "nextjs_app",
+            NEXT_APP_DIR,
+            start_next_app,
+            NEXT_APP_DIR / "app/about/page.tsx",
+            iterations,
         )
     if "tanstack" in frameworks:
         dx_framework(
-            "tanstack", TANSTACK_DIR, start_tanstack, TANSTACK_DIR / "src/routes/about.tsx"
+            "tanstack",
+            TANSTACK_DIR,
+            start_tanstack,
+            TANSTACK_DIR / "src/routes/about.tsx",
+            iterations,
         )
 
 
@@ -493,63 +597,93 @@ def server_framework(
     requests: int,
     concurrency: int,
     warmup: int,
+    iterations: int = 1,
 ):
     progress(fw, "server")
     section(fw, "Server")
 
-    # ── Build ──
-    t0 = time.monotonic()
-    if not build_fn():
-        return
-    build_ms = round((time.monotonic() - t0) * 1000)
-    print(f"  {bold('Build time:')}    {green(f'{build_ms}ms')}")
-    add("server", fw, "build_time_ms", build_ms)
+    # ── Build (iterated) ──
+    build_samples: list[float] = []
+    for i in range(iterations):
+        if iterations > 1:
+            print(f"  {dim(f'Build iteration {i + 1}/{iterations}...')}")
+        t0 = time.monotonic()
+        if not build_fn():
+            if not build_samples:
+                return
+            break
+        build_samples.append(round((time.monotonic() - t0) * 1000))
+
+    med, sd = add_sampled("server", fw, "build_time_ms", build_samples)
+    print(fmt_sampled("Build time: ", med, sd, "ms", len(build_samples)))
 
     if build_output_dir and build_output_dir.exists():
         build_mb = dir_size_mb(build_output_dir)
         print(f"  {bold('Build output:')}  {green(f'{build_mb}MB')}")
         add("server", fw, "build_output_mb", build_mb)
 
-    # ── Start production server ──
-    port = find_free_port()
-    t0 = time.monotonic()
-    server = start_fn("start", port)
-    if server is None:
+    # ── Cold start (iterated) ──
+    cold_samples: list[float] = []
+    last_server = None
+    last_port = 0
+    for i in range(iterations):
+        if iterations > 1:
+            print(f"  {dim(f'Cold start iteration {i + 1}/{iterations}...')}")
+        port = find_free_port()
+        t0 = time.monotonic()
+        server = start_fn("start", port)
+        if server is None:
+            if not cold_samples:
+                return
+            break
+        curl_body(port, "/")
+        cold_samples.append(round((time.monotonic() - t0) * 1000))
+        # Keep last server alive for ab + memory measurement
+        if last_server:
+            last_server.kill()
+        if i == iterations - 1:
+            last_server = server
+            last_port = port
+        else:
+            server.kill()
+
+    med, sd = add_sampled("server", fw, "cold_start_ms", cold_samples)
+    print(fmt_sampled("Cold start: ", med, sd, "ms", len(cold_samples)))
+
+    # ── Benchmark endpoints (on last server) ──
+    if last_server is None:
         return
 
-    with server:
-        curl_body(port, "/")
-        cold_ms = round((time.monotonic() - t0) * 1000)
-        print(f"  {bold('Cold start:')}    {green(f'{cold_ms}ms')}")
-        add("server", fw, "cold_start_ms", cold_ms)
-
-        # ── Benchmark endpoints ──
+    with last_server:
         for ep in ENDPOINTS:
             label = ENDPOINT_LABELS.get(ep, ep)
             print(f"\n  {bold(label)}")
-            ab = run_ab(f"http://127.0.0.1:{port}{ep}", requests, concurrency, warmup)
+            ab = run_ab(f"http://127.0.0.1:{last_port}{ep}", requests, concurrency, warmup)
             add("server", fw, "rps", ab.rps, endpoint=ep)
             add("server", fw, "latency_mean_ms", ab.latency_mean_ms, endpoint=ep)
             add("server", fw, "latency_p50_ms", ab.latency_p50_ms, endpoint=ep)
             add("server", fw, "latency_p99_ms", ab.latency_p99_ms, endpoint=ep)
 
         # ── Memory ──
-        mem = server.rss_mb()
+        mem = last_server.rss_mb()
         print(f"\n  {bold('Memory (RSS):')}  {green(f'{mem}MB')}")
         add("server", fw, "memory_mb", mem)
 
     print()
 
 
-def run_server(frameworks: list[str], requests: int, concurrency: int, warmup: int):
+def run_server(
+    frameworks: list[str], requests: int, concurrency: int, warmup: int, iterations: int = 1
+):
     if not shutil.which("ab"):
         print(f"  {yellow('SKIP server suite: ab (Apache Bench) not found')}")
         return
 
     print(f"\n  {bold('▸ Server Suite')} — production throughput & latency")
-    print(
-        f"  {dim('Requests:')} {requests}  {dim('Concurrency:')} {concurrency}  {dim('Warmup:')} {warmup}\n"
-    )
+    parts = f"  {dim('Requests:')} {requests}  {dim('Concurrency:')} {concurrency}  {dim('Warmup:')} {warmup}"
+    if iterations > 1:
+        parts += f"  {dim(f'Iterations: {iterations}')}"
+    print(parts + "\n")
 
     if "rex" in frameworks:
 
@@ -572,6 +706,7 @@ def run_server(frameworks: list[str], requests: int, concurrency: int, warmup: i
             requests,
             concurrency,
             warmup,
+            iterations,
         )
 
     if "nextjs" in frameworks:
@@ -596,6 +731,7 @@ def run_server(frameworks: list[str], requests: int, concurrency: int, warmup: i
             requests,
             concurrency,
             warmup,
+            iterations,
         )
 
     if "nextjs_app" in frameworks:
@@ -620,6 +756,7 @@ def run_server(frameworks: list[str], requests: int, concurrency: int, warmup: i
             requests,
             concurrency,
             warmup,
+            iterations,
         )
 
     if "tanstack" in frameworks:
@@ -644,6 +781,7 @@ def run_server(frameworks: list[str], requests: int, concurrency: int, warmup: i
             requests,
             concurrency,
             warmup,
+            iterations,
         )
 
 
@@ -662,10 +800,14 @@ def client_bundle_sizes(fw: str, build_dir: Path):
 
     js_kb = js_total_kb(build_dir)
     css_kb = css_total_kb(build_dir)
-    print(f"  {bold('Total JS:')}    {green(f'{js_kb}KB')}")
-    print(f"  {bold('Total CSS:')}   {green(f'{css_kb}KB')}")
+    js_gz_kb = js_total_gz_kb(build_dir)
+    css_gz_kb = css_total_gz_kb(build_dir)
+    print(f"  {bold('Total JS:')}    {green(f'{js_kb}KB')}  {dim(f'({js_gz_kb}KB gzip)')}")
+    print(f"  {bold('Total CSS:')}   {green(f'{css_kb}KB')}  {dim(f'({css_gz_kb}KB gzip)')}")
     add("client", fw, "total_js_kb", js_kb)
     add("client", fw, "total_css_kb", css_kb)
+    add("client", fw, "total_js_gz_kb", js_gz_kb)
+    add("client", fw, "total_css_gz_kb", css_gz_kb)
     print()
 
 
@@ -821,6 +963,12 @@ def main():
         "--concurrency", type=int, default=50, help="Concurrent connections (default: 50)"
     )
     parser.add_argument("--warmup", type=int, default=100, help="Warmup requests (default: 100)")
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=1,
+        help="Iterations for noisy metrics like cold start, HMR, build time (default: 1). Reports median and stddev when >1.",
+    )
     args = parser.parse_args()
 
     suites = [s.strip() for s in args.suite.split(",")]
@@ -835,13 +983,15 @@ def main():
     print(f"  {dim('Suites:')}      {', '.join(suites)}")
     fw_strs = [FW_COLOR.get(fw, dim)(FW_LABEL.get(fw, fw)) for fw in frameworks]
     print(f"  {dim('Frameworks:')}  {' '.join(fw_strs)}")
+    if args.iterations > 1:
+        print(f"  {dim('Iterations:')}  {args.iterations} (noisy metrics report median ± stddev)")
     print()
 
     # Run
     if "dx" in suites:
-        run_dx(frameworks)
+        run_dx(frameworks, args.iterations)
     if "server" in suites:
-        run_server(frameworks, args.requests, args.concurrency, args.warmup)
+        run_server(frameworks, args.requests, args.concurrency, args.warmup, args.iterations)
     if "client" in suites:
         run_client(frameworks)
 

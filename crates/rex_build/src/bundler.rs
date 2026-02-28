@@ -6,7 +6,7 @@ use rolldown_common::Output;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tracing::debug;
+use tracing::{debug, info_span, Instrument};
 
 /// Build result containing paths to generated bundles
 #[derive(Debug, Clone)]
@@ -35,13 +35,23 @@ pub async fn build_bundles(config: &RexConfig, scan: &ScanResult) -> Result<Buil
     // Pre-process CSS modules (generates scoped CSS + JS proxy files)
     let css_modules = process_css_modules(scan, &client_dir, &build_id)?;
 
-    debug!("Building server bundle...");
-    let server_bundle_path =
-        build_server_bundle(config, scan, &server_dir, &css_modules.page_overrides).await?;
+    // Replace process.env.NODE_ENV so React/scheduler resolve to production builds
+    let node_env = if config.dev {
+        "\"development\""
+    } else {
+        "\"production\""
+    };
+    let define = vec![("process.env.NODE_ENV".to_string(), node_env.to_string())];
 
-    debug!("Building client bundles...");
-    let manifest =
-        build_client_bundles(config, scan, &client_dir, &build_id, &css_modules).await?;
+    // Build server and client bundles in parallel
+    let server_fut =
+        build_server_bundle(config, scan, &server_dir, &css_modules.page_overrides, &define)
+            .instrument(info_span!("build_server_bundle"));
+    let client_fut =
+        build_client_bundles(config, scan, &client_dir, &build_id, &css_modules, &define)
+            .instrument(info_span!("build_client_bundles"));
+
+    let (server_bundle_path, manifest) = tokio::try_join!(server_fut, client_fut)?;
 
     // Save manifest
     manifest.save(&config.manifest_path())?;
@@ -243,6 +253,7 @@ async fn build_server_bundle(
     scan: &ScanResult,
     output_dir: &Path,
     page_overrides: &HashMap<PathBuf, PathBuf>,
+    define: &[(String, String)],
 ) -> Result<PathBuf> {
     let runtime_dir = runtime_server_dir()?;
 
@@ -347,6 +358,7 @@ async fn build_server_bundle(
         platform: Some(rolldown::Platform::Browser),
         module_types: Some(module_types),
         minify: minify.clone(),
+        define: Some(define.iter().cloned().collect()),
         banner: Some(rolldown::AddonOutputOption::String(Some(
             V8_POLYFILLS.to_string(),
         ))),
@@ -455,6 +467,7 @@ async fn build_client_bundles(
     output_dir: &Path,
     build_id: &str,
     css_modules: &CssModuleProcessing,
+    define: &[(String, String)],
 ) -> Result<AssetManifest> {
     let mut manifest = AssetManifest::new(build_id.to_string());
     let hash = &build_id[..8];
@@ -580,6 +593,7 @@ if (!window.__REX_NAVIGATING__) {{
         platform: Some(rolldown::Platform::Browser),
         module_types: Some(module_types),
         minify,
+        define: Some(define.iter().cloned().collect()),
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(vec![
                 (

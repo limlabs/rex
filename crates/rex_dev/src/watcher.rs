@@ -24,7 +24,7 @@ pub fn start_watcher(pages_dir: &Path) -> Result<mpsc::Receiver<FileEvent>> {
     let pages_dir_owned = pages_dir.to_path_buf();
 
     let mut debouncer = new_debouncer(
-        Duration::from_millis(200),
+        Duration::from_millis(50),
         move |result: Result<Vec<notify_debouncer_mini::DebouncedEvent>, notify::Error>| {
             match result {
                 Ok(events) => {

@@ -12,6 +12,8 @@ pub enum HmrMessage {
     Update {
         path: String,
         timestamp: u64,
+        /// Serialized manifest ({ build_id, pages }) for the client to hot-swap chunks
+        manifest: serde_json::Value,
     },
     #[serde(rename = "full-reload")]
     FullReload,
@@ -34,7 +36,7 @@ impl HmrBroadcast {
         Self { tx }
     }
 
-    pub fn send_update(&self, path: &str) {
+    pub fn send_update(&self, path: &str, manifest: serde_json::Value) {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -43,6 +45,7 @@ impl HmrBroadcast {
         let _ = self.tx.send(HmrMessage::Update {
             path: path.to_string(),
             timestamp,
+            manifest,
         });
     }
 
