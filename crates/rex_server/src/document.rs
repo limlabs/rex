@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 /// Descriptor from _document rendering (custom html/body attributes, extra head content)
-#[derive(Debug, Default, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Deserialize)]
 pub struct DocumentDescriptor {
     #[serde(default, rename = "htmlAttrs")]
     pub html_attrs: HashMap<String, String>,

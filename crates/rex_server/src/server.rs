@@ -20,7 +20,7 @@ pub struct RexServer {
 }
 
 impl RexServer {
-    pub fn with_error_pages(
+    pub async fn with_error_pages(
         route_trie: RouteTrie,
         api_route_trie: RouteTrie,
         isolate_pool: IsolatePool,
@@ -34,10 +34,19 @@ impl RexServer {
         has_custom_document: bool,
         project_config: ProjectConfig,
     ) -> Self {
+        let manifest_json = HotState::compute_manifest_json(&build_id, &manifest);
+
+        // Compute document descriptor from V8 if _document exists
+        let document_descriptor = if has_custom_document {
+            handlers::compute_document_descriptor(&isolate_pool).await
+        } else {
+            None
+        };
+
         let state = Arc::new(AppState {
             isolate_pool,
             is_dev,
-            hot: RwLock::new(HotState {
+            hot: RwLock::new(Arc::new(HotState {
                 route_trie,
                 api_route_trie,
                 manifest,
@@ -46,7 +55,9 @@ impl RexServer {
                 has_custom_error,
                 has_custom_document,
                 project_config,
-            }),
+                manifest_json,
+                document_descriptor,
+            })),
         });
 
         Self {

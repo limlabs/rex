@@ -3,7 +3,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
 use futures::stream::{self, StreamExt};
-use rex_core::{DataStrategy, ProjectConfig, ServerSidePropsContext, ServerSidePropsResult};
+use rex_core::{DataStrategy, ProjectConfig, ServerSidePropsContext};
 use rex_router::RouteTrie;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -22,18 +22,32 @@ pub struct HotState {
     pub has_custom_error: bool,
     pub has_custom_document: bool,
     pub project_config: ProjectConfig,
+    /// Pre-serialized manifest JSON (build_id + pages), computed once on construction.
+    pub manifest_json: String,
+    /// Cached document descriptor from _document rendering. None if no custom _document.
+    pub document_descriptor: Option<DocumentDescriptor>,
+}
+
+impl HotState {
+    /// Compute the manifest_json field from current state.
+    pub fn compute_manifest_json(build_id: &str, manifest: &rex_build::AssetManifest) -> String {
+        serde_json::to_string(&serde_json::json!({
+            "build_id": build_id,
+            "pages": manifest.pages,
+        })).unwrap()
+    }
 }
 
 /// Shared application state
 pub struct AppState {
     pub isolate_pool: rex_v8::IsolatePool,
     pub is_dev: bool,
-    pub hot: RwLock<HotState>,
+    pub hot: RwLock<Arc<HotState>>,
 }
 
-/// Snapshot the hot state (cheap clone, no lock held across await).
-fn snapshot(state: &Arc<AppState>) -> HotState {
-    state.hot.read().unwrap().clone()
+/// Snapshot the hot state (Arc ref-count bump, no deep clone).
+fn snapshot(state: &Arc<AppState>) -> Arc<HotState> {
+    Arc::clone(&state.hot.read().unwrap())
 }
 
 /// Generate a full-page error overlay for dev mode.
@@ -184,14 +198,6 @@ async fn render_error_page(
         _ => return (status, Html(format!("{} Error", status.as_u16()))).into_response(),
     };
 
-    // Render _document if present
-    let doc_desc = get_document_descriptor(state, hot).await;
-
-    let manifest_json = serde_json::to_string(&serde_json::json!({
-        "build_id": hot.build_id,
-        "pages": hot.manifest.pages,
-    })).unwrap();
-
     let document = assemble_document(
         &render.body,
         &render.head,
@@ -201,20 +207,17 @@ async fn render_error_page(
         &hot.manifest.css_contents,
         hot.manifest.app_script.as_deref(),
         state.is_dev,
-        doc_desc.as_ref(),
-        Some(&manifest_json),
+        hot.document_descriptor.as_ref(),
+        Some(&hot.manifest_json),
     );
 
     (status, Html(document)).into_response()
 }
 
-/// Get document descriptor from _document rendering, if present.
-async fn get_document_descriptor(state: &Arc<AppState>, hot: &HotState) -> Option<DocumentDescriptor> {
-    if !hot.has_custom_document {
-        return None;
-    }
-    let result = state
-        .isolate_pool
+/// Compute document descriptor from V8 _document rendering.
+/// Used to populate `HotState.document_descriptor` at build time and on rebuilds.
+pub async fn compute_document_descriptor(pool: &rex_v8::IsolatePool) -> Option<DocumentDescriptor> {
+    let result = pool
         .execute(move |iso| iso.render_document())
         .await;
     match result {
@@ -440,34 +443,6 @@ async fn page_handler_inner(
     let route_key = route_match.route.module_name();
     let params = route_match.params.clone();
 
-    // Parse query string
-    let query: HashMap<String, String> = uri
-        .query()
-        .map(|q| {
-            url::form_urlencoded::parse(q.as_bytes())
-                .map(|(k, v): (std::borrow::Cow<str>, std::borrow::Cow<str>)| {
-                    (k.to_string(), v.to_string())
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    // Extract headers
-    let header_map: HashMap<String, String> = headers
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-        .collect();
-
-    // Build GSSP context
-    let context = ServerSidePropsContext {
-        params,
-        query,
-        resolved_url: path.to_string(),
-        headers: header_map,
-        cookies: HashMap::new(),
-    };
-    let context_json = serde_json::to_string(&context).unwrap();
-
     // Look up data strategy from build manifest (detected at build time)
     let strategy = hot
         .manifest
@@ -477,18 +452,47 @@ async fn page_handler_inner(
         .cloned()
         .unwrap_or_default();
 
+    // Fetch data props based on strategy
     let route_key_clone = route_key.clone();
     let gssp_result = match strategy {
+        DataStrategy::None => {
+            // No data function — skip V8 entirely
+            Ok(Ok(r#"{"props":{}}"#.to_string()))
+        }
         DataStrategy::GetStaticProps => {
-            // In dev mode, re-execute GSP on each request (like Next.js)
-            let ctx_json = serde_json::json!({ "params": context.params }).to_string();
+            let ctx_json = serde_json::json!({ "params": params }).to_string();
             state
                 .isolate_pool
                 .execute(move |iso| iso.get_static_props(&route_key_clone, &ctx_json))
                 .await
         }
-        _ => {
-            // getServerSideProps or none
+        DataStrategy::GetServerSideProps => {
+            // Parse query string
+            let query: HashMap<String, String> = uri
+                .query()
+                .map(|q| {
+                    url::form_urlencoded::parse(q.as_bytes())
+                        .map(|(k, v): (std::borrow::Cow<str>, std::borrow::Cow<str>)| {
+                            (k.to_string(), v.to_string())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let header_map: HashMap<String, String> = headers
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+                .collect();
+
+            let context = ServerSidePropsContext {
+                params,
+                query,
+                resolved_url: path.to_string(),
+                headers: header_map,
+                cookies: HashMap::new(),
+            };
+            let context_json = serde_json::to_string(&context).unwrap();
+
             state
                 .isolate_pool
                 .execute(move |iso| iso.get_server_side_props(&route_key_clone, &context_json))
@@ -520,36 +524,38 @@ async fn page_handler_inner(
         }
     };
 
-    // Parse GSSP result to check for redirect/notFound
-    match serde_json::from_str::<ServerSidePropsResult>(&props_json) {
-        Ok(ServerSidePropsResult::Redirect { redirect }) => {
-            let status = if redirect.permanent { 301 } else { redirect.status_code };
-            debug!(destination = %redirect.destination, status, "Redirecting");
-            return Response::builder()
-                .status(status)
-                .header("Location", &redirect.destination)
-                .body(Body::empty())
-                .unwrap();
-        }
-        Ok(ServerSidePropsResult::NotFound { not_found: true }) => {
-            if hot.has_custom_404 {
-                return render_error_page(&state, &hot, "404", StatusCode::NOT_FOUND, "{}").await;
-            }
-            return (StatusCode::NOT_FOUND, Html("404 - Not Found".to_string())).into_response();
-        }
-        _ => {}
+    // Single-parse: parse once into Value, check redirect/notFound, extract props
+    let parsed = match serde_json::from_str::<serde_json::Value>(&props_json) {
+        Ok(val) => val,
+        Err(_) => serde_json::json!({"props": {}}),
+    };
+
+    // Check for redirect
+    if let Some(redirect) = parsed.get("redirect") {
+        let destination = redirect.get("destination").and_then(|d| d.as_str()).unwrap_or("/");
+        let permanent = redirect.get("permanent").and_then(|p| p.as_bool()).unwrap_or(false);
+        let status_code = redirect.get("statusCode").and_then(|s| s.as_u64()).unwrap_or(307) as u16;
+        let status = if permanent { 301 } else { status_code };
+        debug!(destination, status, "Redirecting");
+        return Response::builder()
+            .status(status)
+            .header("Location", destination)
+            .body(Body::empty())
+            .unwrap();
     }
 
-    // Extract just the props value for rendering
-    let render_props = match serde_json::from_str::<serde_json::Value>(&props_json) {
-        Ok(val) => {
-            if let Some(props) = val.get("props") {
-                serde_json::to_string(props).unwrap()
-            } else {
-                "{}".to_string()
-            }
+    // Check for notFound
+    if parsed.get("notFound").and_then(|n| n.as_bool()).unwrap_or(false) {
+        if hot.has_custom_404 {
+            return render_error_page(&state, &hot, "404", StatusCode::NOT_FOUND, "{}").await;
         }
-        Err(_) => "{}".to_string(),
+        return (StatusCode::NOT_FOUND, Html("404 - Not Found".to_string())).into_response();
+    }
+
+    // Extract props for rendering (already parsed, no re-parse needed)
+    let render_props = match parsed.get("props") {
+        Some(props) => serde_json::to_string(props).unwrap(),
+        None => "{}".to_string(),
     };
 
     // Look up client assets for this route
@@ -564,14 +570,7 @@ async fn page_handler_inner(
         css_files.extend(assets.css.iter().cloned());
     }
 
-    // Render _document if present
-    let doc_desc = get_document_descriptor(&state, &hot).await;
-
-    let manifest_json = serde_json::to_string(&serde_json::json!({
-        "build_id": hot.build_id,
-        "pages": hot.manifest.pages,
-    })).unwrap();
-
+    let manifest_json = hot.manifest_json.clone();
     let shared_chunks = hot.manifest.shared_chunks.clone();
     let app_script = hot.manifest.app_script.clone();
     let is_dev = state.is_dev;
@@ -585,7 +584,7 @@ async fn page_handler_inner(
         &shared_chunks,
         app_script.as_deref(),
         &client_scripts,
-        doc_desc.as_ref(),
+        hot.document_descriptor.as_ref(),
     );
 
     // Stream response in two chunks: shell (immediate) → render + tail (after V8)
@@ -673,6 +672,9 @@ pub async fn data_handler(
         .unwrap_or_default();
 
     let result = match strategy {
+        DataStrategy::None => {
+            Ok(Ok(r#"{"props":{}}"#.to_string()))
+        }
         DataStrategy::GetStaticProps => {
             let ctx_json = serde_json::json!({ "params": params }).to_string();
             state
@@ -680,7 +682,7 @@ pub async fn data_handler(
                 .execute(move |iso| iso.get_static_props(&route_key, &ctx_json))
                 .await
         }
-        _ => {
+        DataStrategy::GetServerSideProps => {
             let context = ServerSidePropsContext {
                 params,
                 query: HashMap::new(),
@@ -845,17 +847,6 @@ globalThis.__rex_resolve_gssp = function() {
     throw new Error('GSSP promise did not resolve');
 };
 
-globalThis.__rex_detect_data_strategy = function(routeKey) {
-    var page = globalThis.__rex_pages[routeKey];
-    if (!page) return 'none';
-    if (page.getStaticProps && page.getServerSideProps) {
-        throw new Error('Page exports both getStaticProps and getServerSideProps.');
-    }
-    if (page.getStaticProps) return 'getStaticProps';
-    if (page.getServerSideProps) return 'getServerSideProps';
-    return 'none';
-};
-
 globalThis.__rex_gsp_resolved = null;
 globalThis.__rex_gsp_rejected = null;
 
@@ -912,21 +903,36 @@ globalThis.__rex_resolve_gsp = function() {
         .expect("failed to create pool");
 
         let trie = RouteTrie::from_routes(&routes);
-        let manifest = rex_build::AssetManifest::new("test-build-id".to_string());
+        let mut manifest = rex_build::AssetManifest::new("test-build-id".to_string());
+
+        // Register pages in manifest with correct data strategy
+        for (route, (_, _, gssp)) in routes.iter().zip(pages.iter()) {
+            let strategy = if gssp.is_some() {
+                DataStrategy::GetServerSideProps
+            } else {
+                DataStrategy::None
+            };
+            manifest.add_page(&route.pattern, "test.js", strategy);
+        }
+
+        let build_id = "test-build-id".to_string();
+        let manifest_json = HotState::compute_manifest_json(&build_id, &manifest);
 
         let state = Arc::new(AppState {
             isolate_pool: pool,
             is_dev: false,
-            hot: RwLock::new(HotState {
+            hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
                 api_route_trie: RouteTrie::from_routes(&[]),
                 manifest,
-                build_id: "test-build-id".to_string(),
+                build_id,
                 has_custom_404: false,
                 has_custom_error: false,
                 has_custom_document: false,
                 project_config: rex_core::ProjectConfig::default(),
-            }),
+                manifest_json,
+                document_descriptor: None,
+            })),
         });
 
         Router::new()
@@ -1162,21 +1168,36 @@ globalThis.__rex_resolve_gsp = function() {
         let pool = rex_v8::IsolatePool::new(1, Arc::new(bundle)).expect("failed to create pool");
 
         let trie = RouteTrie::from_routes(&routes);
-        let manifest = rex_build::AssetManifest::new("test-build-id".to_string());
+        let mut manifest = rex_build::AssetManifest::new("test-build-id".to_string());
+
+        // Register pages in manifest with correct data strategy
+        for (route, (_, _, gssp)) in routes.iter().zip(pages.iter()) {
+            let strategy = if gssp.is_some() {
+                DataStrategy::GetServerSideProps
+            } else {
+                DataStrategy::None
+            };
+            manifest.add_page(&route.pattern, "test.js", strategy);
+        }
+
+        let build_id = "test-build-id".to_string();
+        let manifest_json = HotState::compute_manifest_json(&build_id, &manifest);
 
         let state = Arc::new(AppState {
             isolate_pool: pool,
             is_dev: false,
-            hot: RwLock::new(HotState {
+            hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
                 api_route_trie: RouteTrie::from_routes(&[]),
                 manifest,
-                build_id: "test-build-id".to_string(),
+                build_id,
                 has_custom_404: false,
                 has_custom_error: false,
                 has_custom_document: false,
                 project_config,
-            }),
+                manifest_json,
+                document_descriptor: None,
+            })),
         });
 
         Router::new()

@@ -18,7 +18,6 @@ pub struct SsrIsolate {
     render_fn: v8::Global<v8::Function>,
     gssp_fn: v8::Global<v8::Function>,
     gsp_fn: v8::Global<v8::Function>,
-    detect_strategy_fn: v8::Global<v8::Function>,
     api_handler_fn: Option<v8::Global<v8::Function>>,
     document_fn: Option<v8::Global<v8::Function>>,
 }
@@ -34,24 +33,40 @@ macro_rules! v8_eval {
             .ok_or_else(|| anyhow::anyhow!("Failed to create V8 string"))?;
         let name = v8::String::new(tc, $filename).unwrap();
         let origin = v8::ScriptOrigin::new(
-            tc, name.into(), 0, 0, false, 0, None, false, false, false, None,
+            tc,
+            name.into(),
+            0,
+            0,
+            false,
+            0,
+            None,
+            false,
+            false,
+            false,
+            None,
         );
 
         match v8::Script::compile(tc, source, Some(&origin)) {
             Some(script) => match script.run(tc) {
                 Some(val) => Ok::<v8::Local<v8::Value>, anyhow::Error>(val),
                 None => {
-                    let msg = tc.exception()
+                    let msg = tc
+                        .exception()
                         .map(|e| e.to_rust_string_lossy(tc))
                         .unwrap_or_else(|| "Unknown error".into());
                     Err(anyhow::anyhow!("V8 error in {}: {}", $filename, msg))
                 }
             },
             None => {
-                let msg = tc.exception()
+                let msg = tc
+                    .exception()
                     .map(|e| e.to_rust_string_lossy(tc))
                     .unwrap_or_else(|| "Unknown compile error".into());
-                Err(anyhow::anyhow!("V8 compile error in {}: {}", $filename, msg))
+                Err(anyhow::anyhow!(
+                    "V8 compile error in {}: {}",
+                    $filename,
+                    msg
+                ))
             }
         }
     }};
@@ -65,7 +80,8 @@ macro_rules! v8_call {
         match $func.call(tc, $recv, $args) {
             Some(val) => Ok::<v8::Local<v8::Value>, anyhow::Error>(val),
             None => {
-                let msg = tc.exception()
+                let msg = tc
+                    .exception()
                     .map(|e| e.to_rust_string_lossy(tc))
                     .unwrap_or_else(|| "Unknown call error".into());
                 Err(anyhow::anyhow!("{}", msg))
@@ -82,7 +98,7 @@ impl SsrIsolate {
     pub fn new(server_bundle_js: &str) -> Result<Self> {
         let mut isolate = v8::Isolate::new(v8::CreateParams::default());
 
-        let (context, render_fn, gssp_fn, gsp_fn, detect_strategy_fn, api_handler_fn, document_fn) = {
+        let (context, render_fn, gssp_fn, gsp_fn, api_handler_fn, document_fn) = {
             v8::scope!(scope, &mut isolate);
 
             let context = v8::Context::new(scope, Default::default());
@@ -130,43 +146,42 @@ impl SsrIsolate {
             let global = ctx.global(scope);
 
             let k = v8::String::new(scope, "__rex_render_page").unwrap();
-            let v = global.get(scope, k.into())
+            let v = global
+                .get(scope, k.into())
                 .ok_or_else(|| anyhow::anyhow!("__rex_render_page not found"))?;
             let render_fn = v8::Local::<v8::Function>::try_from(v)
                 .map_err(|_| anyhow::anyhow!("__rex_render_page is not a function"))?;
 
             let k = v8::String::new(scope, "__rex_get_server_side_props").unwrap();
-            let v = global.get(scope, k.into())
+            let v = global
+                .get(scope, k.into())
                 .ok_or_else(|| anyhow::anyhow!("__rex_get_server_side_props not found"))?;
             let gssp_fn = v8::Local::<v8::Function>::try_from(v)
                 .map_err(|_| anyhow::anyhow!("__rex_get_server_side_props is not a function"))?;
 
             let k = v8::String::new(scope, "__rex_get_static_props").unwrap();
-            let v = global.get(scope, k.into())
+            let v = global
+                .get(scope, k.into())
                 .ok_or_else(|| anyhow::anyhow!("__rex_get_static_props not found"))?;
             let gsp_fn = v8::Local::<v8::Function>::try_from(v)
                 .map_err(|_| anyhow::anyhow!("__rex_get_static_props is not a function"))?;
 
-            let k = v8::String::new(scope, "__rex_detect_data_strategy").unwrap();
-            let v = global.get(scope, k.into())
-                .ok_or_else(|| anyhow::anyhow!("__rex_detect_data_strategy not found"))?;
-            let detect_strategy_fn = v8::Local::<v8::Function>::try_from(v)
-                .map_err(|_| anyhow::anyhow!("__rex_detect_data_strategy is not a function"))?;
-
             // API handler is optional — only present when api/ routes exist
             let api_handler_fn = {
                 let k = v8::String::new(scope, "__rex_call_api_handler").unwrap();
-                global.get(scope, k.into()).and_then(|v| {
-                    v8::Local::<v8::Function>::try_from(v).ok()
-                }).map(|f| v8::Global::new(scope, f))
+                global
+                    .get(scope, k.into())
+                    .and_then(|v| v8::Local::<v8::Function>::try_from(v).ok())
+                    .map(|f| v8::Global::new(scope, f))
             };
 
             // Document renderer is optional — only present when _document exists
             let document_fn = {
                 let k = v8::String::new(scope, "__rex_render_document").unwrap();
-                global.get(scope, k.into()).and_then(|v| {
-                    v8::Local::<v8::Function>::try_from(v).ok()
-                }).map(|f| v8::Global::new(scope, f))
+                global
+                    .get(scope, k.into())
+                    .and_then(|v| v8::Local::<v8::Function>::try_from(v).ok())
+                    .map(|f| v8::Global::new(scope, f))
             };
 
             (
@@ -174,7 +189,6 @@ impl SsrIsolate {
                 v8::Global::new(scope, render_fn),
                 v8::Global::new(scope, gssp_fn),
                 v8::Global::new(scope, gsp_fn),
-                v8::Global::new(scope, detect_strategy_fn),
                 api_handler_fn,
                 document_fn,
             )
@@ -186,7 +200,6 @@ impl SsrIsolate {
             render_fn,
             gssp_fn,
             gsp_fn,
-            detect_strategy_fn,
             api_handler_fn,
             document_fn,
         })
@@ -207,8 +220,7 @@ impl SsrIsolate {
             .map_err(|e| anyhow::anyhow!("SSR render error: {e}"))?;
 
         let json_str = result.to_rust_string_lossy(scope);
-        serde_json::from_str(&json_str)
-            .context("Failed to parse render result JSON")
+        serde_json::from_str(&json_str).context("Failed to parse render result JSON")
     }
 
     /// Call __rex_get_server_side_props(routeKey, contextJson) and return JSON.
@@ -235,8 +247,9 @@ impl SsrIsolate {
             self.isolate.perform_microtask_checkpoint();
 
             v8::scope_with_context!(scope, &mut self.isolate, &self.context);
-            let resolve_result = v8_eval!(scope, "globalThis.__rex_resolve_gssp()", "<gssp-resolve>")
-                .map_err(|e| anyhow::anyhow!("GSSP error: {e}"))?;
+            let resolve_result =
+                v8_eval!(scope, "globalThis.__rex_resolve_gssp()", "<gssp-resolve>")
+                    .map_err(|e| anyhow::anyhow!("GSSP error: {e}"))?;
             Ok(resolve_result.to_rust_string_lossy(scope))
         } else {
             Ok(result_str)
@@ -274,26 +287,12 @@ impl SsrIsolate {
         }
     }
 
-    /// Detect the data fetching strategy for a page.
-    /// Returns "none", "getStaticProps", or "getServerSideProps".
-    pub fn detect_data_strategy(&mut self, route_key: &str) -> Result<String> {
-        v8::scope_with_context!(scope, &mut self.isolate, &self.context);
-
-        let func = v8::Local::new(scope, &self.detect_strategy_fn);
-        let undef = v8::undefined(scope);
-        let arg0 = v8::String::new(scope, route_key)
-            .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
-
-        let result = v8_call!(scope, func, undef.into(), &[arg0.into()])
-            .map_err(|e| anyhow::anyhow!("detect_data_strategy error: {e}"))?;
-
-        Ok(result.to_rust_string_lossy(scope))
-    }
-
     /// Call __rex_call_api_handler(routeKey, reqJson) and return JSON response.
     /// Handles async handlers by pumping V8's microtask queue.
     pub fn call_api_handler(&mut self, route_key: &str, req_json: &str) -> Result<String> {
-        let api_fn = self.api_handler_fn.as_ref()
+        let api_fn = self
+            .api_handler_fn
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("API handlers not loaded"))?;
 
         let result_str = {
@@ -366,29 +365,26 @@ impl SsrIsolate {
         let v = global.get(scope, k.into()).unwrap();
         let gsp_fn = v8::Local::<v8::Function>::try_from(v).unwrap();
 
-        let k = v8::String::new(scope, "__rex_detect_data_strategy").unwrap();
-        let v = global.get(scope, k.into()).unwrap();
-        let detect_strategy_fn = v8::Local::<v8::Function>::try_from(v).unwrap();
-
         self.render_fn = v8::Global::new(scope, render_fn);
         self.gssp_fn = v8::Global::new(scope, gssp_fn);
         self.gsp_fn = v8::Global::new(scope, gsp_fn);
-        self.detect_strategy_fn = v8::Global::new(scope, detect_strategy_fn);
 
         // Re-lookup API handler (may be added/removed on reload)
         self.api_handler_fn = {
             let k = v8::String::new(scope, "__rex_call_api_handler").unwrap();
-            global.get(scope, k.into()).and_then(|v| {
-                v8::Local::<v8::Function>::try_from(v).ok()
-            }).map(|f| v8::Global::new(scope, f))
+            global
+                .get(scope, k.into())
+                .and_then(|v| v8::Local::<v8::Function>::try_from(v).ok())
+                .map(|f| v8::Global::new(scope, f))
         };
 
         // Re-lookup document renderer (may be added/removed on reload)
         self.document_fn = {
             let k = v8::String::new(scope, "__rex_render_document").unwrap();
-            global.get(scope, k.into()).and_then(|v| {
-                v8::Local::<v8::Function>::try_from(v).ok()
-            }).map(|f| v8::Global::new(scope, f))
+            global
+                .get(scope, k.into())
+                .and_then(|v| v8::Local::<v8::Function>::try_from(v).ok())
+                .map(|f| v8::Global::new(scope, f))
         };
 
         debug!("SSR isolate reloaded");
@@ -413,7 +409,11 @@ fn console_warn(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _
     tracing::warn!(target: "v8::console", "{}", format_args(scope, &args));
 }
 
-fn console_error(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _: v8::ReturnValue) {
+fn console_error(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _: v8::ReturnValue,
+) {
     tracing::error!(target: "v8::console", "{}", format_args(scope, &args));
 }
 
@@ -572,17 +572,6 @@ globalThis.__rex_resolve_gssp = function() {
     throw new Error('GSSP promise did not resolve');
 };
 
-globalThis.__rex_detect_data_strategy = function(routeKey) {
-    var page = globalThis.__rex_pages[routeKey];
-    if (!page) return 'none';
-    if (page.getStaticProps && page.getServerSideProps) {
-        throw new Error('Page "' + routeKey + '" exports both getStaticProps and getServerSideProps.');
-    }
-    if (page.getStaticProps) return 'getStaticProps';
-    if (page.getServerSideProps) return 'getServerSideProps';
-    return 'none';
-};
-
 globalThis.__rex_gsp_resolved = null;
 globalThis.__rex_gsp_rejected = null;
 
@@ -655,7 +644,10 @@ globalThis.__rex_resolve_gsp = function() {
             None,
         )]);
         let result = iso.render_page("nested", "{}").unwrap();
-        assert_eq!(result.body, r#"<div class="wrapper"><h1>Title</h1><p>Body</p></div>"#);
+        assert_eq!(
+            result.body,
+            r#"<div class="wrapper"><h1>Title</h1><p>Body</p></div>"#
+        );
     }
 
     #[test]
@@ -803,7 +795,10 @@ globalThis.__rex_resolve_gsp = function() {
             ),
         ]);
         iso.reload(&new_bundle).unwrap();
-        assert_eq!(iso.render_page("about", "{}").unwrap().body, "<h1>About</h1>");
+        assert_eq!(
+            iso.render_page("about", "{}").unwrap().body,
+            "<h1>About</h1>"
+        );
     }
 
     #[test]
@@ -843,10 +838,26 @@ globalThis.__rex_resolve_gsp = function() {
             None,
         )]);
         let result = iso.render_page("seo", r#"{"title":"My Page"}"#).unwrap();
-        assert!(result.body.contains("<h1>My Page</h1>"), "body should have h1: {}", result.body);
-        assert!(!result.body.contains("<title>"), "body should NOT contain title: {}", result.body);
-        assert!(result.head.contains("<title>My Page</title>"), "head should contain title: {}", result.head);
-        assert!(result.head.contains("description"), "head should contain meta description: {}", result.head);
+        assert!(
+            result.body.contains("<h1>My Page</h1>"),
+            "body should have h1: {}",
+            result.body
+        );
+        assert!(
+            !result.body.contains("<title>"),
+            "body should NOT contain title: {}",
+            result.body
+        );
+        assert!(
+            result.head.contains("<title>My Page</title>"),
+            "head should contain title: {}",
+            result.head
+        );
+        assert!(
+            result.head.contains("description"),
+            "head should contain meta description: {}",
+            result.head
+        );
     }
 
     fn make_isolate_ext(pages: &[TestPage]) -> SsrIsolate {
@@ -859,7 +870,8 @@ globalThis.__rex_resolve_gsp = function() {
     fn test_gsp_sync() {
         let mut iso = make_isolate_ext(&[TestPage {
             key: "page",
-            component: "function Page(props) { return React.createElement('span', null, props.title); }",
+            component:
+                "function Page(props) { return React.createElement('span', null, props.title); }",
             gssp: None,
             gsp: Some("function(ctx) { return { props: { title: 'from gsp' } }; }"),
         }]);
@@ -879,49 +891,6 @@ globalThis.__rex_resolve_gsp = function() {
         let json = iso.get_static_props("page", r#"{"params":{}}"#).unwrap();
         let val: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(val["props"]["async"], true);
-    }
-
-    #[test]
-    fn test_detect_data_strategy_gsp() {
-        let mut iso = make_isolate_ext(&[TestPage {
-            key: "static_page",
-            component: "function P() { return React.createElement('div'); }",
-            gssp: None,
-            gsp: Some("function() { return { props: {} }; }"),
-        }]);
-        assert_eq!(iso.detect_data_strategy("static_page").unwrap(), "getStaticProps");
-    }
-
-    #[test]
-    fn test_detect_data_strategy_gssp() {
-        let mut iso = make_isolate(&[(
-            "ssr_page",
-            "function P() { return React.createElement('div'); }",
-            Some("function() { return { props: {} }; }"),
-        )]);
-        assert_eq!(iso.detect_data_strategy("ssr_page").unwrap(), "getServerSideProps");
-    }
-
-    #[test]
-    fn test_detect_data_strategy_none() {
-        let mut iso = make_isolate(&[(
-            "plain_page",
-            "function P() { return React.createElement('div'); }",
-            None,
-        )]);
-        assert_eq!(iso.detect_data_strategy("plain_page").unwrap(), "none");
-    }
-
-    #[test]
-    fn test_detect_data_strategy_both_errors() {
-        let mut iso = make_isolate_ext(&[TestPage {
-            key: "both",
-            component: "function P() { return React.createElement('div'); }",
-            gssp: Some("function() { return { props: {} }; }"),
-            gsp: Some("function() { return { props: {} }; }"),
-        }]);
-        let err = iso.detect_data_strategy("both").unwrap_err();
-        assert!(err.to_string().contains("both getStaticProps and getServerSideProps"), "got: {err}");
     }
 
     #[test]
@@ -946,9 +915,15 @@ globalThis.__rex_resolve_gsp = function() {
             ),
         ]);
         let r1 = iso.render_page("page1", "{}").unwrap();
-        assert!(r1.head.contains("<title>Page 1</title>"), "page1 should have title");
+        assert!(
+            r1.head.contains("<title>Page 1</title>"),
+            "page1 should have title"
+        );
 
         let r2 = iso.render_page("page2", "{}").unwrap();
-        assert_eq!(r2.head, "", "page2 should have empty head (no leak from page1)");
+        assert_eq!(
+            r2.head, "",
+            "page2 should have empty head (no leak from page1)"
+        );
     }
 }

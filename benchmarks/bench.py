@@ -43,10 +43,11 @@ NEXT_DIR = SCRIPT_DIR / "next-basic"
 NEXT_APP_DIR = SCRIPT_DIR / "next-app-basic"
 TANSTACK_DIR = SCRIPT_DIR / "tanstack-basic"
 
-ENDPOINTS = ["/", "/about", "/blog/hello-world", "/api/hello"]
+ENDPOINTS = ["/", "/about", "/static", "/blog/hello-world", "/api/hello"]
 ENDPOINT_LABELS = {
     "/": "SSR index",
     "/about": "SSG about",
+    "/static": "Static (no data)",
     "/blog/hello-world": "Dynamic route",
     "/api/hello": "API route",
 }
@@ -454,7 +455,7 @@ def dx_framework(
         backup = None
         if nm.exists():
             backup = Path(tempfile.mkdtemp())
-            nm.rename(backup / "node_modules")
+            shutil.move(str(nm), str(backup / "node_modules"))
 
         t0 = time.monotonic()
         subprocess.run(
@@ -957,16 +958,16 @@ def main():
     )
     parser.add_argument("--json", dest="json_file", help="Write results to JSON file")
     parser.add_argument(
-        "--requests", type=int, default=5000, help="Requests per benchmark (default: 5000)"
+        "--requests", type=int, default=10000, help="Requests per benchmark (default: 10000)"
     )
     parser.add_argument(
-        "--concurrency", type=int, default=50, help="Concurrent connections (default: 50)"
+        "--concurrency", type=int, default=100, help="Concurrent connections (default: 100)"
     )
-    parser.add_argument("--warmup", type=int, default=100, help="Warmup requests (default: 100)")
+    parser.add_argument("--warmup", type=int, default=200, help="Warmup requests (default: 200)")
     parser.add_argument(
         "--iterations",
         type=int,
-        default=1,
+        default=5,
         help="Iterations for noisy metrics like cold start, HMR, build time (default: 1). Reports median and stddev when >1.",
     )
     args = parser.parse_args()

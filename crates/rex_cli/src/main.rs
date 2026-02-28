@@ -181,7 +181,8 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
         scan.error.is_some(),
         scan.document.is_some(),
         project_config,
-    );
+    )
+    .await;
 
     let router = server.build_router_with_extra(extra_routes);
     let state = server.state();
@@ -645,7 +646,8 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
         scan.error.is_some(),
         scan.document.is_some(),
         project_config,
-    );
+    )
+    .await;
 
     let elapsed = start.elapsed();
     eprintln!("  {} {}", green_bold("✓ Ready in"), green_bold(&format_duration(elapsed)));

@@ -4,7 +4,7 @@ use anyhow::Result;
 use rex_build::build_bundles;
 use rex_core::RexConfig;
 use rex_router::{scan_pages, RouteTrie};
-use rex_server::handlers::AppState;
+use rex_server::handlers::{self, AppState, HotState};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info};
@@ -46,24 +46,43 @@ pub async fn handle_file_event(
             );
 
             // Build manifest JSON for HMR before moving into hot state
-            let manifest_json = serde_json::json!({
+            let hmr_manifest_json = serde_json::json!({
                 "build_id": &build_result.build_id,
                 "pages": &build_result.manifest.pages,
             });
 
-            // Update hot state with new manifest and build_id
-            {
-                let mut hot = state.hot.write().unwrap();
-                hot.manifest = build_result.manifest;
-                hot.build_id = build_result.build_id;
-            }
+            // Snapshot the old hot state (Arc clone, cheap)
+            let old_hot = Arc::clone(&state.hot.read().unwrap());
+
+            // Recompute document descriptor after reload
+            let document_descriptor = if old_hot.has_custom_document {
+                handlers::compute_document_descriptor(&state.isolate_pool).await
+            } else {
+                None
+            };
+
+            // Update hot state atomically with new Arc
+            let manifest_json = HotState::compute_manifest_json(&build_result.build_id, &build_result.manifest);
+            *state.hot.write().unwrap() = Arc::new(HotState {
+                manifest: build_result.manifest,
+                build_id: build_result.build_id,
+                manifest_json,
+                document_descriptor,
+                // Preserve unchanged fields
+                route_trie: old_hot.route_trie.clone(),
+                api_route_trie: old_hot.api_route_trie.clone(),
+                has_custom_404: old_hot.has_custom_404,
+                has_custom_error: old_hot.has_custom_error,
+                has_custom_document: old_hot.has_custom_document,
+                project_config: old_hot.project_config.clone(),
+            });
 
             // Notify HMR clients with the new manifest
             let rel_path = event
                 .path
                 .strip_prefix(&config.pages_dir)
                 .unwrap_or(&event.path);
-            hmr.send_update(&rel_path.to_string_lossy(), manifest_json);
+            hmr.send_update(&rel_path.to_string_lossy(), hmr_manifest_json);
 
             debug!("Hot reload complete");
         }
@@ -77,17 +96,31 @@ pub async fn handle_file_event(
 
             state.isolate_pool.reload_all(bundle_arc).await?;
 
-            // Update all hot state: route tries, manifest, build_id, feature flags
-            {
-                let mut hot = state.hot.write().unwrap();
-                hot.route_trie = RouteTrie::from_routes(&scan.routes);
-                hot.api_route_trie = RouteTrie::from_routes(&scan.api_routes);
-                hot.manifest = build_result.manifest;
-                hot.build_id = build_result.build_id;
-                hot.has_custom_404 = scan.not_found.is_some();
-                hot.has_custom_error = scan.error.is_some();
-                hot.has_custom_document = scan.document.is_some();
-            }
+            // Snapshot old state for project_config
+            let old_hot = Arc::clone(&state.hot.read().unwrap());
+
+            let has_custom_document = scan.document.is_some();
+            let document_descriptor = if has_custom_document {
+                handlers::compute_document_descriptor(&state.isolate_pool).await
+            } else {
+                None
+            };
+
+            let manifest_json = HotState::compute_manifest_json(&build_result.build_id, &build_result.manifest);
+
+            // Update all hot state atomically with new Arc
+            *state.hot.write().unwrap() = Arc::new(HotState {
+                route_trie: RouteTrie::from_routes(&scan.routes),
+                api_route_trie: RouteTrie::from_routes(&scan.api_routes),
+                manifest: build_result.manifest,
+                build_id: build_result.build_id,
+                has_custom_404: scan.not_found.is_some(),
+                has_custom_error: scan.error.is_some(),
+                has_custom_document,
+                project_config: old_hot.project_config.clone(),
+                manifest_json,
+                document_descriptor,
+            });
 
             // Signal full reload to clients
             hmr.send_full_reload();
