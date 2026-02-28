@@ -7,10 +7,14 @@
     ".": "./src/index.js",
     "./document": "./src/document.js",
     "./link": "./src/link.js",
-    "./router": "./src/router.js"
+    "./router": "./src/router.js",
+    "./image": "./src/image.js"
+  },
+  "dependencies": {
+    "oxlint": "^1.0.0"
   },
   "peerDependencies": {
-    "react": "^18.0.0",
-    "react-dom": "^18.0.0"
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
   }
 }

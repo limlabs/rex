@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "plugins": ["react", "react-hooks", "nextjs", "import"],
+  "rules": {
+    "react/jsx-no-target-blank": "warn",
+    "react/no-unknown-property": "warn",
+    "react/react-in-jsx-scope": "off",
+    "react-hooks/rules-of-hooks": "error",
+    "react-hooks/exhaustive-deps": "warn",
+    "nextjs/no-html-link-for-pages": "warn",
+    "nextjs/no-img-element": "warn",
+    "nextjs/no-head-import-in-document": "warn",
+    "nextjs/no-duplicate-head": "warn",
+    "import/no-cycle": "warn"
+  },
+  "ignorePatterns": [".rex/", "node_modules/"]
+}
