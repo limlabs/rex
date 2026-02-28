@@ -798,6 +798,11 @@ fn extract_css_imports(source_path: &Path) -> Result<Vec<PathBuf>> {
 /// Detect data strategy by scanning source for exported getServerSideProps / getStaticProps.
 fn detect_data_strategy(source_path: &Path) -> Result<DataStrategy> {
     let source = fs::read_to_string(source_path)?;
+    detect_data_strategy_from_source(&source)
+}
+
+/// Detect data strategy from source content (no filesystem access).
+fn detect_data_strategy_from_source(source: &str) -> Result<DataStrategy> {
     let has_gssp = source.lines().any(|l| {
         let t = l.trim();
         t.contains("getServerSideProps")
@@ -2136,6 +2141,83 @@ export default function Home() {
         assert!(
             render.body.contains("Home_heading_"),
             "should have scoped class name for heading: {}", render.body
+        );
+    }
+
+    // ── detect_data_strategy_from_source tests ──────────────────
+
+    #[test]
+    fn test_detect_strategy_gssp() {
+        let source = r#"
+            import React from 'react';
+            export default function Page() { return <div/>; }
+            export function getServerSideProps(ctx) { return { props: {} }; }
+        "#;
+        assert_eq!(
+            detect_data_strategy_from_source(source).unwrap(),
+            DataStrategy::GetServerSideProps,
+        );
+    }
+
+    #[test]
+    fn test_detect_strategy_gssp_async() {
+        let source = r#"
+            export default function Page() { return <div/>; }
+            export async function getServerSideProps(ctx) { return { props: {} }; }
+        "#;
+        assert_eq!(
+            detect_data_strategy_from_source(source).unwrap(),
+            DataStrategy::GetServerSideProps,
+        );
+    }
+
+    #[test]
+    fn test_detect_strategy_gsp() {
+        let source = r#"
+            export default function Page() { return <div/>; }
+            export function getStaticProps() { return { props: {} }; }
+        "#;
+        assert_eq!(
+            detect_data_strategy_from_source(source).unwrap(),
+            DataStrategy::GetStaticProps,
+        );
+    }
+
+    #[test]
+    fn test_detect_strategy_none() {
+        let source = r#"
+            import React from 'react';
+            export default function Page() { return <div>Static</div>; }
+        "#;
+        assert_eq!(
+            detect_data_strategy_from_source(source).unwrap(),
+            DataStrategy::None,
+        );
+    }
+
+    #[test]
+    fn test_detect_strategy_both_errors() {
+        let source = r#"
+            export default function Page() { return <div/>; }
+            export function getServerSideProps() { return { props: {} }; }
+            export function getStaticProps() { return { props: {} }; }
+        "#;
+        let err = detect_data_strategy_from_source(source).unwrap_err();
+        assert!(
+            err.to_string().contains("both getStaticProps and getServerSideProps"),
+            "expected dual-export error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_detect_strategy_reexport_syntax() {
+        let source = r#"
+            export default function Page() { return <div/>; }
+            export{ getServerSideProps } from './data';
+        "#;
+        assert_eq!(
+            detect_data_strategy_from_source(source).unwrap(),
+            DataStrategy::GetServerSideProps,
         );
     }
 }
