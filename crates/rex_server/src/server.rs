@@ -1,5 +1,6 @@
 use crate::handlers::{self, AppState, HotState};
 use anyhow::Result;
+use axum::handler::Handler;
 use axum::routing::{any, get};
 use axum::Router;
 use rex_build::AssetManifest;
@@ -21,6 +22,7 @@ pub struct ServerConfig {
     pub manifest: AssetManifest,
     pub build_id: String,
     pub static_dir: PathBuf,
+    pub project_root: PathBuf,
     pub port: u16,
     pub is_dev: bool,
     pub has_custom_404: bool,
@@ -33,6 +35,7 @@ pub struct RexServer {
     state: Arc<AppState>,
     port: u16,
     static_dir: PathBuf,
+    project_root: PathBuf,
 }
 
 impl RexServer {
@@ -46,9 +49,15 @@ impl RexServer {
             None
         };
 
+        let image_cache = rex_image::ImageCache::new(
+            config.project_root.join(".rex").join("cache").join("images"),
+        );
+
         let state = Arc::new(AppState {
             isolate_pool: config.isolate_pool,
             is_dev: config.is_dev,
+            project_root: config.project_root.clone(),
+            image_cache,
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: config.route_trie,
                 api_route_trie: config.api_route_trie,
@@ -67,6 +76,7 @@ impl RexServer {
             state,
             port: config.port,
             static_dir: config.static_dir,
+            project_root: config.project_root,
         }
     }
 
@@ -81,12 +91,18 @@ impl RexServer {
     pub fn build_router_with_extra(&self, extra_routes: Router<Arc<AppState>>) -> Router {
         let static_service = ServeDir::new(&self.static_dir);
 
+        // Serve public/ directory — uses fallback so unmatched paths fall through to SSR
+        let public_dir = self.project_root.join("public");
+        let public_service = ServeDir::new(&public_dir).append_index_html_on_directories(false);
+
         Router::new()
             // Data endpoint
             .route(
                 "/_rex/data/{build_id}/{*path}",
                 get(handlers::data_handler),
             )
+            // Image optimization endpoint
+            .route("/_rex/image", get(handlers::image_handler))
             // Client-side router script
             .route("/_rex/router.js", get(router_js_handler))
             // Merge any extra routes (e.g., HMR websocket)
@@ -95,8 +111,11 @@ impl RexServer {
             .nest_service("/_rex/static", static_service)
             // API routes: all HTTP methods on /api/*
             .route("/api/{*path}", any(handlers::api_handler))
-            // Fallback: all other routes go through SSR
-            .fallback(handlers::page_handler)
+            // Public directory fallback (before SSR)
+            .fallback_service(
+                public_service
+                    .fallback(handlers::page_handler.with_state(self.state.clone())),
+            )
             .with_state(self.state.clone())
             .layer(CompressionLayer::new().gzip(true))
     }

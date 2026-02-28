@@ -450,8 +450,35 @@ mod tests {
                 var attrs = '';
                 var p = el.props || {};
                 for (var k in p) {
-                    if (k === 'children') continue;
-                    if (p.hasOwnProperty(k)) attrs += ' ' + k + '="' + p[k] + '"';
+                    if (k === 'children' || k === 'dangerouslySetInnerHTML') continue;
+                    if (!p.hasOwnProperty(k)) continue;
+                    var v = p[k];
+                    // Skip event handlers and undefined/null
+                    if (typeof v === 'function' || v === null || v === undefined) continue;
+                    // Convert React prop names to HTML attributes
+                    var attrName = k;
+                    if (k === 'className') attrName = 'class';
+                    else if (k === 'htmlFor') attrName = 'for';
+                    else if (k === 'fetchPriority') attrName = 'fetchpriority';
+                    // Serialize style objects to CSS strings
+                    if (k === 'style' && typeof v === 'object') {
+                        var css = '';
+                        for (var sk in v) {
+                            if (v.hasOwnProperty(sk)) {
+                                // Convert camelCase to kebab-case
+                                var prop = sk.replace(/([A-Z])/g, '-$1').toLowerCase();
+                                var sv = v[sk];
+                                if (typeof sv === 'number' && sv !== 0 && prop !== 'opacity' && prop !== 'z-index' && prop !== 'font-weight' && prop !== 'line-height' && prop !== 'flex' && prop !== 'order') sv = sv + 'px';
+                                css += prop + ':' + sv + ';';
+                            }
+                        }
+                        attrs += ' style="' + css + '"';
+                        continue;
+                    }
+                    // Boolean attributes
+                    if (v === true) { attrs += ' ' + attrName; continue; }
+                    if (v === false) continue;
+                    attrs += ' ' + attrName + '="' + String(v).replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '"';
                 }
                 var inner = '';
                 if (p.children) inner += renderElement(p.children);
