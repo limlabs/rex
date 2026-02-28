@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum DataStrategy {
+    #[default]
+    None,
+    GetServerSideProps,
+    GetStaticProps,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DynamicSegment {
     /// `[slug]` - matches a single path segment

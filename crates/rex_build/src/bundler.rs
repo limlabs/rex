@@ -1,6 +1,6 @@
 use crate::manifest::AssetManifest;
 use anyhow::Result;
-use rex_core::RexConfig;
+use rex_core::{DataStrategy, RexConfig};
 use rex_router::ScanResult;
 use rolldown_common::Output;
 use std::collections::HashMap;
@@ -683,15 +683,17 @@ if (!window.__REX_NAVIGATING__) {{
             if name == "_app" {
                 manifest.app_script = Some(filename);
             } else if let Some(route) = find_route_for_chunk(&name, &scan.routes) {
+                let strategy = detect_data_strategy(&route.abs_path)?;
                 // Check if this route has CSS module files to include
                 if let Some(css_files) = css_modules.route_css.get(&route.pattern) {
                     manifest.add_page_with_css(
                         &route.pattern,
                         &filename,
                         css_files,
+                        strategy,
                     );
                 } else {
-                    manifest.add_page(&route.pattern, &filename);
+                    manifest.add_page(&route.pattern, &filename, strategy);
                 }
             }
         }
@@ -773,7 +775,8 @@ fn collect_css_files(
         if !page_css.is_empty() {
             let chunk_name = route_to_chunk_name(route);
             let js_filename = format!("{chunk_name}-{hash}.js");
-            manifest.add_page_with_css(&route.pattern, &js_filename, &page_css);
+            let strategy = detect_data_strategy(&route.abs_path)?;
+            manifest.add_page_with_css(&route.pattern, &js_filename, &page_css, strategy);
         }
     }
 
@@ -802,6 +805,30 @@ fn extract_css_imports(source_path: &Path) -> Result<Vec<PathBuf>> {
     }
 
     Ok(css_paths)
+}
+
+/// Detect data strategy by scanning source for exported getServerSideProps / getStaticProps.
+fn detect_data_strategy(source_path: &Path) -> Result<DataStrategy> {
+    let source = fs::read_to_string(source_path)?;
+    let has_gssp = source.lines().any(|l| {
+        let t = l.trim();
+        t.contains("getServerSideProps")
+            && (t.starts_with("export ") || t.starts_with("export{"))
+    });
+    let has_gsp = source.lines().any(|l| {
+        let t = l.trim();
+        t.contains("getStaticProps") && (t.starts_with("export ") || t.starts_with("export{"))
+    });
+    if has_gssp && has_gsp {
+        anyhow::bail!("Page exports both getStaticProps and getServerSideProps");
+    }
+    if has_gsp {
+        return Ok(DataStrategy::GetStaticProps);
+    }
+    if has_gssp {
+        return Ok(DataStrategy::GetServerSideProps);
+    }
+    Ok(DataStrategy::None)
 }
 
 /// Extract the string literal from an import statement.

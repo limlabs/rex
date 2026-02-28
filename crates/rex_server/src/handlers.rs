@@ -3,7 +3,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
 use futures::stream::{self, StreamExt};
-use rex_core::{ProjectConfig, ServerSidePropsContext, ServerSidePropsResult};
+use rex_core::{DataStrategy, ProjectConfig, ServerSidePropsContext, ServerSidePropsResult};
 use rex_router::RouteTrie;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -468,19 +468,18 @@ async fn page_handler_inner(
     };
     let context_json = serde_json::to_string(&context).unwrap();
 
-    // Detect data strategy and execute the appropriate data function
-    let route_key_for_detect = route_key.clone();
-    let strategy = state
-        .isolate_pool
-        .execute(move |iso| iso.detect_data_strategy(&route_key_for_detect))
-        .await
-        .ok()
-        .and_then(|r| r.ok())
-        .unwrap_or_else(|| "getServerSideProps".to_string());
+    // Look up data strategy from build manifest (detected at build time)
+    let strategy = hot
+        .manifest
+        .pages
+        .get(&route_match.route.pattern)
+        .map(|p| &p.data_strategy)
+        .cloned()
+        .unwrap_or_default();
 
     let route_key_clone = route_key.clone();
-    let gssp_result = match strategy.as_str() {
-        "getStaticProps" => {
+    let gssp_result = match strategy {
+        DataStrategy::GetStaticProps => {
             // In dev mode, re-execute GSP on each request (like Next.js)
             let ctx_json = serde_json::json!({ "params": context.params }).to_string();
             state
@@ -664,18 +663,17 @@ pub async fn data_handler(
     let route_key = route_match.route.module_name();
     let params = route_match.params.clone();
 
-    // Detect data strategy
-    let route_key_detect = route_key.clone();
-    let strategy = state
-        .isolate_pool
-        .execute(move |iso| iso.detect_data_strategy(&route_key_detect))
-        .await
-        .ok()
-        .and_then(|r| r.ok())
-        .unwrap_or_else(|| "getServerSideProps".to_string());
+    // Look up data strategy from build manifest (detected at build time)
+    let strategy = hot
+        .manifest
+        .pages
+        .get(&route_match.route.pattern)
+        .map(|p| &p.data_strategy)
+        .cloned()
+        .unwrap_or_default();
 
-    let result = match strategy.as_str() {
-        "getStaticProps" => {
+    let result = match strategy {
+        DataStrategy::GetStaticProps => {
             let ctx_json = serde_json::json!({ "params": params }).to_string();
             state
                 .isolate_pool

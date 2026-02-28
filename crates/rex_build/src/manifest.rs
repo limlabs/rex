@@ -1,3 +1,4 @@
+use rex_core::DataStrategy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -29,6 +30,9 @@ pub struct PageAssets {
     /// Per-page CSS files
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub css: Vec<String>,
+    /// Data-fetching strategy detected at build time from source exports
+    #[serde(default)]
+    pub data_strategy: DataStrategy,
 }
 
 impl AssetManifest {
@@ -43,12 +47,18 @@ impl AssetManifest {
         }
     }
 
-    pub fn add_page(&mut self, route_pattern: &str, js_filename: &str) {
+    pub fn add_page(
+        &mut self,
+        route_pattern: &str,
+        js_filename: &str,
+        data_strategy: DataStrategy,
+    ) {
         self.pages.insert(
             route_pattern.to_string(),
             PageAssets {
                 js: js_filename.to_string(),
                 css: Vec::new(),
+                data_strategy,
             },
         );
     }
@@ -58,12 +68,14 @@ impl AssetManifest {
         route_pattern: &str,
         js_filename: &str,
         css_filenames: &[String],
+        data_strategy: DataStrategy,
     ) {
         self.pages.insert(
             route_pattern.to_string(),
             PageAssets {
                 js: js_filename.to_string(),
                 css: css_filenames.to_vec(),
+                data_strategy,
             },
         );
     }
