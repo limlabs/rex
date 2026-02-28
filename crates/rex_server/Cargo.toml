@@ -3,6 +3,9 @@ name = "rex_server"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [dependencies]
 rex_core = { path = "../rex_core" }
 rex_router = { path = "../rex_router" }

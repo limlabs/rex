@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use rex_build::{build_bundles, AssetManifest};
 use rex_core::{ProjectConfig, RexConfig};
 use rex_router::{scan_pages, RouteTrie};
-use rex_server::RexServer;
+use rex_server::{RexServer, ServerConfig};
 use rex_v8::{init_v8, IsolatePool};
 use std::path::PathBuf;
 use std::process::Command;
@@ -168,20 +168,20 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
     // Load project config (redirects, rewrites, headers)
     let project_config = ProjectConfig::load(&config.project_root)?;
 
-    let server = RexServer::with_error_pages(
-        trie,
-        api_trie,
-        pool,
-        build_result.manifest,
-        build_result.build_id,
-        config.client_build_dir(),
+    let server = RexServer::new(ServerConfig {
+        route_trie: trie,
+        api_route_trie: api_trie,
+        isolate_pool: pool,
+        manifest: build_result.manifest,
+        build_id: build_result.build_id,
+        static_dir: config.client_build_dir(),
         port,
-        true,
-        scan.not_found.is_some(),
-        scan.error.is_some(),
-        scan.document.is_some(),
+        is_dev: true,
+        has_custom_404: scan.not_found.is_some(),
+        has_custom_error: scan.error.is_some(),
+        has_custom_document: scan.document.is_some(),
         project_config,
-    )
+    })
     .await;
 
     let router = server.build_router_with_extra(extra_routes);
@@ -266,7 +266,7 @@ async fn cmd_build(root: PathBuf) -> Result<()> {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "js") {
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                let name = path.file_name().unwrap().to_string_lossy().to_string();
+                let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
                 total_client += size;
                 if name.starts_with("chunk-") {
                     chunk_sizes.push((name, size));
@@ -633,20 +633,20 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
     // Load project config (redirects, rewrites, headers)
     let project_config = ProjectConfig::load(&config.project_root)?;
 
-    let server = RexServer::with_error_pages(
-        trie,
-        api_trie,
-        pool,
-        manifest.clone(),
-        manifest.build_id.clone(),
-        config.client_build_dir(),
+    let server = RexServer::new(ServerConfig {
+        route_trie: trie,
+        api_route_trie: api_trie,
+        isolate_pool: pool,
+        manifest: manifest.clone(),
+        build_id: manifest.build_id.clone(),
+        static_dir: config.client_build_dir(),
         port,
-        false,
-        scan.not_found.is_some(),
-        scan.error.is_some(),
-        scan.document.is_some(),
+        is_dev: false,
+        has_custom_404: scan.not_found.is_some(),
+        has_custom_error: scan.error.is_some(),
+        has_custom_document: scan.document.is_some(),
         project_config,
-    )
+    })
     .await;
 
     let elapsed = start.elapsed();

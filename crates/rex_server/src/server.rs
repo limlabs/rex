@@ -13,6 +13,22 @@ use tower_http::compression::CompressionLayer;
 use tower_http::services::ServeDir;
 use tracing::info;
 
+/// Configuration for constructing a `RexServer`.
+pub struct ServerConfig {
+    pub route_trie: RouteTrie,
+    pub api_route_trie: RouteTrie,
+    pub isolate_pool: IsolatePool,
+    pub manifest: AssetManifest,
+    pub build_id: String,
+    pub static_dir: PathBuf,
+    pub port: u16,
+    pub is_dev: bool,
+    pub has_custom_404: bool,
+    pub has_custom_error: bool,
+    pub has_custom_document: bool,
+    pub project_config: ProjectConfig,
+}
+
 pub struct RexServer {
     state: Arc<AppState>,
     port: u16,
@@ -20,41 +36,28 @@ pub struct RexServer {
 }
 
 impl RexServer {
-    pub async fn with_error_pages(
-        route_trie: RouteTrie,
-        api_route_trie: RouteTrie,
-        isolate_pool: IsolatePool,
-        manifest: AssetManifest,
-        build_id: String,
-        static_dir: PathBuf,
-        port: u16,
-        is_dev: bool,
-        has_custom_404: bool,
-        has_custom_error: bool,
-        has_custom_document: bool,
-        project_config: ProjectConfig,
-    ) -> Self {
-        let manifest_json = HotState::compute_manifest_json(&build_id, &manifest);
+    pub async fn new(config: ServerConfig) -> Self {
+        let manifest_json = HotState::compute_manifest_json(&config.build_id, &config.manifest);
 
         // Compute document descriptor from V8 if _document exists
-        let document_descriptor = if has_custom_document {
-            handlers::compute_document_descriptor(&isolate_pool).await
+        let document_descriptor = if config.has_custom_document {
+            handlers::compute_document_descriptor(&config.isolate_pool).await
         } else {
             None
         };
 
         let state = Arc::new(AppState {
-            isolate_pool,
-            is_dev,
+            isolate_pool: config.isolate_pool,
+            is_dev: config.is_dev,
             hot: RwLock::new(Arc::new(HotState {
-                route_trie,
-                api_route_trie,
-                manifest,
-                build_id,
-                has_custom_404,
-                has_custom_error,
-                has_custom_document,
-                project_config,
+                route_trie: config.route_trie,
+                api_route_trie: config.api_route_trie,
+                manifest: config.manifest,
+                build_id: config.build_id,
+                has_custom_404: config.has_custom_404,
+                has_custom_error: config.has_custom_error,
+                has_custom_document: config.has_custom_document,
+                project_config: config.project_config,
                 manifest_json,
                 document_descriptor,
             })),
@@ -62,8 +65,8 @@ impl RexServer {
 
         Self {
             state,
-            port,
-            static_dir,
+            port: config.port,
+            static_dir: config.static_dir,
         }
     }
 

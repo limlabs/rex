@@ -31,7 +31,8 @@ macro_rules! v8_eval {
 
         let source = v8::String::new(tc, $code)
             .ok_or_else(|| anyhow::anyhow!("Failed to create V8 string"))?;
-        let name = v8::String::new(tc, $filename).unwrap();
+        let name = v8::String::new(tc, $filename)
+            .ok_or_else(|| anyhow::anyhow!("Failed to create V8 filename string"))?;
         let origin = v8::ScriptOrigin::new(
             tc,
             name.into(),
@@ -90,6 +91,29 @@ macro_rules! v8_call {
     }};
 }
 
+/// Look up a required global function by name.
+macro_rules! v8_get_global_fn {
+    ($scope:expr, $global:expr, $name:expr) => {{
+        let k = v8::String::new($scope, $name)
+            .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed for '{}'", $name))?;
+        let v = $global
+            .get($scope, k.into())
+            .ok_or_else(|| anyhow::anyhow!("{} not found", $name))?;
+        v8::Local::<v8::Function>::try_from(v)
+            .map_err(|_| anyhow::anyhow!("{} is not a function", $name))
+    }};
+}
+
+/// Look up an optional global function by name.
+macro_rules! v8_get_optional_fn {
+    ($scope:expr, $global:expr, $name:expr) => {{
+        v8::String::new($scope, $name)
+            .and_then(|k| $global.get($scope, k.into()))
+            .and_then(|v| v8::Local::<v8::Function>::try_from(v).ok())
+            .map(|f| v8::Global::new($scope, f))
+    }};
+}
+
 impl SsrIsolate {
     /// Create a new SSR isolate and evaluate the server bundle.
     ///
@@ -111,29 +135,29 @@ impl SsrIsolate {
                 let console = v8::Object::new(scope);
 
                 let t = v8::FunctionTemplate::new(scope, console_log);
-                let f = t.get_function(scope).unwrap();
-                let k = v8::String::new(scope, "log").unwrap();
+                let f = t.get_function(scope).ok_or_else(|| anyhow::anyhow!("Failed to create console.log"))?;
+                let k = v8::String::new(scope, "log").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
                 console.set(scope, k.into(), f.into());
 
                 let t = v8::FunctionTemplate::new(scope, console_warn);
-                let f = t.get_function(scope).unwrap();
-                let k = v8::String::new(scope, "warn").unwrap();
+                let f = t.get_function(scope).ok_or_else(|| anyhow::anyhow!("Failed to create console.warn"))?;
+                let k = v8::String::new(scope, "warn").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
                 console.set(scope, k.into(), f.into());
 
                 let t = v8::FunctionTemplate::new(scope, console_error);
-                let f = t.get_function(scope).unwrap();
-                let k = v8::String::new(scope, "error").unwrap();
+                let f = t.get_function(scope).ok_or_else(|| anyhow::anyhow!("Failed to create console.error"))?;
+                let k = v8::String::new(scope, "error").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
                 console.set(scope, k.into(), f.into());
 
                 let t = v8::FunctionTemplate::new(scope, console_log);
-                let f = t.get_function(scope).unwrap();
-                let k = v8::String::new(scope, "info").unwrap();
+                let f = t.get_function(scope).ok_or_else(|| anyhow::anyhow!("Failed to create console.info"))?;
+                let k = v8::String::new(scope, "info").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
                 console.set(scope, k.into(), f.into());
 
-                let k = v8::String::new(scope, "console").unwrap();
+                let k = v8::String::new(scope, "console").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
                 global.set(scope, k.into(), console.into());
 
-                let k = v8::String::new(scope, "globalThis").unwrap();
+                let k = v8::String::new(scope, "globalThis").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
                 global.set(scope, k.into(), global.into());
             }
 
@@ -145,44 +169,15 @@ impl SsrIsolate {
             let ctx = scope.get_current_context();
             let global = ctx.global(scope);
 
-            let k = v8::String::new(scope, "__rex_render_page").unwrap();
-            let v = global
-                .get(scope, k.into())
-                .ok_or_else(|| anyhow::anyhow!("__rex_render_page not found"))?;
-            let render_fn = v8::Local::<v8::Function>::try_from(v)
-                .map_err(|_| anyhow::anyhow!("__rex_render_page is not a function"))?;
-
-            let k = v8::String::new(scope, "__rex_get_server_side_props").unwrap();
-            let v = global
-                .get(scope, k.into())
-                .ok_or_else(|| anyhow::anyhow!("__rex_get_server_side_props not found"))?;
-            let gssp_fn = v8::Local::<v8::Function>::try_from(v)
-                .map_err(|_| anyhow::anyhow!("__rex_get_server_side_props is not a function"))?;
-
-            let k = v8::String::new(scope, "__rex_get_static_props").unwrap();
-            let v = global
-                .get(scope, k.into())
-                .ok_or_else(|| anyhow::anyhow!("__rex_get_static_props not found"))?;
-            let gsp_fn = v8::Local::<v8::Function>::try_from(v)
-                .map_err(|_| anyhow::anyhow!("__rex_get_static_props is not a function"))?;
+            let render_fn = v8_get_global_fn!(scope, global, "__rex_render_page")?;
+            let gssp_fn = v8_get_global_fn!(scope, global, "__rex_get_server_side_props")?;
+            let gsp_fn = v8_get_global_fn!(scope, global, "__rex_get_static_props")?;
 
             // API handler is optional — only present when api/ routes exist
-            let api_handler_fn = {
-                let k = v8::String::new(scope, "__rex_call_api_handler").unwrap();
-                global
-                    .get(scope, k.into())
-                    .and_then(|v| v8::Local::<v8::Function>::try_from(v).ok())
-                    .map(|f| v8::Global::new(scope, f))
-            };
+            let api_handler_fn = v8_get_optional_fn!(scope, global, "__rex_call_api_handler");
 
             // Document renderer is optional — only present when _document exists
-            let document_fn = {
-                let k = v8::String::new(scope, "__rex_render_document").unwrap();
-                global
-                    .get(scope, k.into())
-                    .and_then(|v| v8::Local::<v8::Function>::try_from(v).ok())
-                    .map(|f| v8::Global::new(scope, f))
-            };
+            let document_fn = v8_get_optional_fn!(scope, global, "__rex_render_document");
 
             (
                 v8::Global::new(scope, context),
@@ -326,10 +321,10 @@ impl SsrIsolate {
     /// Call __rex_render_document() to get document descriptor JSON.
     /// Returns None if no custom _document is loaded.
     pub fn render_document(&mut self) -> Result<Option<String>> {
-        if self.document_fn.is_none() {
-            return Ok(None);
-        }
-        let doc_fn = self.document_fn.as_ref().unwrap();
+        let doc_fn = match &self.document_fn {
+            Some(f) => f,
+            None => return Ok(None),
+        };
 
         v8::scope_with_context!(scope, &mut self.isolate, &self.context);
 
@@ -353,39 +348,19 @@ impl SsrIsolate {
         let ctx = scope.get_current_context();
         let global = ctx.global(scope);
 
-        let k = v8::String::new(scope, "__rex_render_page").unwrap();
-        let v = global.get(scope, k.into()).unwrap();
-        let render_fn = v8::Local::<v8::Function>::try_from(v).unwrap();
-
-        let k = v8::String::new(scope, "__rex_get_server_side_props").unwrap();
-        let v = global.get(scope, k.into()).unwrap();
-        let gssp_fn = v8::Local::<v8::Function>::try_from(v).unwrap();
-
-        let k = v8::String::new(scope, "__rex_get_static_props").unwrap();
-        let v = global.get(scope, k.into()).unwrap();
-        let gsp_fn = v8::Local::<v8::Function>::try_from(v).unwrap();
+        let render_fn = v8_get_global_fn!(scope, global, "__rex_render_page")?;
+        let gssp_fn = v8_get_global_fn!(scope, global, "__rex_get_server_side_props")?;
+        let gsp_fn = v8_get_global_fn!(scope, global, "__rex_get_static_props")?;
 
         self.render_fn = v8::Global::new(scope, render_fn);
         self.gssp_fn = v8::Global::new(scope, gssp_fn);
         self.gsp_fn = v8::Global::new(scope, gsp_fn);
 
         // Re-lookup API handler (may be added/removed on reload)
-        self.api_handler_fn = {
-            let k = v8::String::new(scope, "__rex_call_api_handler").unwrap();
-            global
-                .get(scope, k.into())
-                .and_then(|v| v8::Local::<v8::Function>::try_from(v).ok())
-                .map(|f| v8::Global::new(scope, f))
-        };
+        self.api_handler_fn = v8_get_optional_fn!(scope, global, "__rex_call_api_handler");
 
         // Re-lookup document renderer (may be added/removed on reload)
-        self.document_fn = {
-            let k = v8::String::new(scope, "__rex_render_document").unwrap();
-            global
-                .get(scope, k.into())
-                .and_then(|v| v8::Local::<v8::Function>::try_from(v).ok())
-                .map(|f| v8::Global::new(scope, f))
-        };
+        self.document_fn = v8_get_optional_fn!(scope, global, "__rex_render_document");
 
         debug!("SSR isolate reloaded");
         Ok(())
@@ -418,6 +393,7 @@ fn console_error(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

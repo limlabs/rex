@@ -187,8 +187,8 @@ impl ProjectConfig {
                 if *last == "*" && path_segs.len() >= pat_segs.len() - 1 {
                     let mut params = HashMap::new();
                     for (p, s) in pat_segs.iter().zip(path_segs.iter()) {
-                        if p.starts_with(':') {
-                            params.insert(p[1..].to_string(), s.to_string());
+                        if let Some(name) = p.strip_prefix(':') {
+                            params.insert(name.to_string(), s.to_string());
                         } else if *p != "*" && *p != *s {
                             return None;
                         }
@@ -201,8 +201,8 @@ impl ProjectConfig {
 
         let mut params = HashMap::new();
         for (p, s) in pat_segs.iter().zip(path_segs.iter()) {
-            if p.starts_with(':') {
-                params.insert(p[1..].to_string(), s.to_string());
+            if let Some(name) = p.strip_prefix(':') {
+                params.insert(name.to_string(), s.to_string());
             } else if *p != *s {
                 return None;
             }
@@ -221,6 +221,7 @@ impl ProjectConfig {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

@@ -701,8 +701,7 @@ fn route_to_chunk_name(route: &rex_core::Route) -> String {
     let module_name = route.module_name();
     let cn = module_name
         .replace('/', "-")
-        .replace('[', "_")
-        .replace(']', "_");
+        .replace(['[', ']'], "_");
     if cn.is_empty() {
         "index".to_string()
     } else {
@@ -1216,7 +1215,19 @@ fn absolutize_relative_imports(source: &str, source_dir: &Path) -> String {
     result
 }
 
+/// Generate a build ID based on current timestamp
+fn generate_build_id() -> String {
+    use sha2::{Digest, Sha256};
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock before UNIX epoch")
+        .as_millis();
+    let hash = Sha256::digest(timestamp.to_string().as_bytes());
+    hex::encode(&hash[..8])
+}
+
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use rex_core::{PageType, Route};
@@ -2220,16 +2231,5 @@ export default function Home() {
             DataStrategy::GetServerSideProps,
         );
     }
-}
-
-/// Generate a build ID based on current timestamp
-fn generate_build_id() -> String {
-    use sha2::{Digest, Sha256};
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    let hash = Sha256::digest(timestamp.to_string().as_bytes());
-    hex::encode(&hash[..8])
 }
 

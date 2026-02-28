@@ -3,6 +3,9 @@ name = "rex_cli"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "rex"
 path = "src/main.rs"

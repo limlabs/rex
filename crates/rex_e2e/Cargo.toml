@@ -3,6 +3,9 @@ name = "rex_e2e"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [dev-dependencies]
 tokio = { workspace = true }
 tokio-tungstenite = "0.26"

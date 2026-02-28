@@ -55,10 +55,10 @@ impl RouteTrie {
                 return;
             } else if let Some(param_name) = segment.strip_prefix(':') {
                 // Dynamic parameter
-                if node.param_child.is_none() {
-                    node.param_child = Some((param_name.to_string(), Box::new(TrieNode::new())));
-                }
-                node = node.param_child.as_mut().unwrap().1.as_mut();
+                let (_, child) = node.param_child.get_or_insert_with(|| {
+                    (param_name.to_string(), Box::new(TrieNode::new()))
+                });
+                node = child.as_mut();
             } else {
                 // Static segment
                 node = node
@@ -153,6 +153,7 @@ fn parse_url_segments(path: &str) -> Vec<&str> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use rex_core::{PageType, Route};

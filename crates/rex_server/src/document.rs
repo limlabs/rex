@@ -11,28 +11,31 @@ pub struct DocumentDescriptor {
     pub head_content: String,
 }
 
-/// Assemble the final HTML document
-pub fn assemble_document(
-    ssr_html: &str,
-    head_html: &str,
-    props_json: &str,
-    client_scripts: &[String],
-    css_files: &[String],
-    css_contents: &HashMap<String, String>,
-    app_script: Option<&str>,
-    is_dev: bool,
-    doc_descriptor: Option<&DocumentDescriptor>,
-    manifest_json: Option<&str>,
-) -> String {
-    let escaped_props = escape_script_content(props_json);
+/// Parameters for assembling the final HTML document.
+pub struct DocumentParams<'a> {
+    pub ssr_html: &'a str,
+    pub head_html: &'a str,
+    pub props_json: &'a str,
+    pub client_scripts: &'a [String],
+    pub css_files: &'a [String],
+    pub css_contents: &'a HashMap<String, String>,
+    pub app_script: Option<&'a str>,
+    pub is_dev: bool,
+    pub doc_descriptor: Option<&'a DocumentDescriptor>,
+    pub manifest_json: Option<&'a str>,
+}
 
-    let mut html = String::with_capacity(ssr_html.len() + 2048);
+/// Assemble the final HTML document
+pub fn assemble_document(params: &DocumentParams<'_>) -> String {
+    let escaped_props = escape_script_content(params.props_json);
+
+    let mut html = String::with_capacity(params.ssr_html.len() + 2048);
 
     html.push_str("<!DOCTYPE html>\n");
 
     // <html> tag with optional attributes from _document
     html.push_str("<html");
-    if let Some(desc) = doc_descriptor {
+    if let Some(desc) = params.doc_descriptor {
         for (k, v) in &desc.html_attrs {
             html.push_str(&format!(" {k}=\"{}\"", escape_attr(v)));
         }
@@ -42,14 +45,14 @@ pub fn assemble_document(
     html.push_str("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n");
 
     // Inject head elements from rex/head (title, meta, etc.)
-    if !head_html.is_empty() {
+    if !params.head_html.is_empty() {
         html.push_str("  ");
-        html.push_str(head_html);
+        html.push_str(params.head_html);
         html.push('\n');
     }
 
     // Inject extra head content from _document
-    if let Some(desc) = doc_descriptor {
+    if let Some(desc) = params.doc_descriptor {
         if !desc.head_content.is_empty() {
             html.push_str("  ");
             html.push_str(&desc.head_content);
@@ -58,8 +61,8 @@ pub fn assemble_document(
     }
 
     // CSS: inline content to avoid render-blocking network requests
-    for css in css_files {
-        if let Some(content) = css_contents.get(css) {
+    for css in params.css_files {
+        if let Some(content) = params.css_contents.get(css) {
             html.push_str("  <style>");
             html.push_str(content);
             html.push_str("</style>\n");
@@ -73,7 +76,7 @@ pub fn assemble_document(
 
     // <body> tag with optional attributes from _document
     html.push_str("</head>\n<body");
-    if let Some(desc) = doc_descriptor {
+    if let Some(desc) = params.doc_descriptor {
         for (k, v) in &desc.body_attrs {
             html.push_str(&format!(" {k}=\"{}\"", escape_attr(v)));
         }
@@ -81,7 +84,7 @@ pub fn assemble_document(
     html.push_str(">\n");
 
     // Main content
-    html.push_str(&format!("  <div id=\"__rex\">{ssr_html}</div>\n"));
+    html.push_str(&format!("  <div id=\"__rex\">{}</div>\n", params.ssr_html));
 
     // Props data for hydration
     html.push_str(&format!(
@@ -89,7 +92,7 @@ pub fn assemble_document(
     ));
 
     // Route manifest for client-side navigation
-    if let Some(manifest) = manifest_json {
+    if let Some(manifest) = params.manifest_json {
         let escaped_manifest = escape_script_content(manifest);
         html.push_str(&format!(
             "  <script>window.__REX_MANIFEST__={escaped_manifest}</script>\n"
@@ -97,26 +100,26 @@ pub fn assemble_document(
     }
 
     // _app client chunk (must load before page scripts for hydration wrapping)
-    if let Some(app) = app_script {
+    if let Some(app) = params.app_script {
         html.push_str(&format!(
             "  <script type=\"module\" src=\"/_rex/static/{app}\"></script>\n"
         ));
     }
 
     // Client chunks (ESM bundles produced by rolldown)
-    for script in client_scripts {
+    for script in params.client_scripts {
         html.push_str(&format!(
             "  <script type=\"module\" src=\"/_rex/static/{script}\"></script>\n"
         ));
     }
 
     // Client-side router (must load after page scripts register __REX_RENDER__)
-    if manifest_json.is_some() {
+    if params.manifest_json.is_some() {
         html.push_str("  <script defer src=\"/_rex/router.js\"></script>\n");
     }
 
     // HMR client in dev mode
-    if is_dev {
+    if params.is_dev {
         html.push_str("  <script defer src=\"/_rex/hmr-client.js\"></script>\n");
     }
 

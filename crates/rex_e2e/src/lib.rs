@@ -7,6 +7,7 @@
 //   - `cd fixtures/basic && npm install`
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use std::net::TcpStream;
     use std::path::PathBuf;
@@ -483,6 +484,8 @@ mod tests {
 
         // Send SIGTERM (graceful shutdown)
         #[cfg(unix)]
+        // SAFETY: child.id() is a valid PID from a process we spawned
+        #[allow(unsafe_code)]
         unsafe {
             libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
         }

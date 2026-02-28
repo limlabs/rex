@@ -2,4 +2,4 @@ pub mod document;
 pub mod handlers;
 pub mod server;
 
-pub use server::RexServer;
+pub use server::{RexServer, ServerConfig};

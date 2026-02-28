@@ -52,7 +52,10 @@ pub async fn handle_file_event(
             });
 
             // Snapshot the old hot state (Arc clone, cheap)
-            let old_hot = Arc::clone(&state.hot.read().unwrap());
+            let old_hot = {
+                let guard = state.hot.read().map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
+                Arc::clone(&guard)
+            };
 
             // Recompute document descriptor after reload
             let document_descriptor = if old_hot.has_custom_document {
@@ -63,7 +66,8 @@ pub async fn handle_file_event(
 
             // Update hot state atomically with new Arc
             let manifest_json = HotState::compute_manifest_json(&build_result.build_id, &build_result.manifest);
-            *state.hot.write().unwrap() = Arc::new(HotState {
+            let mut hot_guard = state.hot.write().map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
+            *hot_guard = Arc::new(HotState {
                 manifest: build_result.manifest,
                 build_id: build_result.build_id,
                 manifest_json,
@@ -97,7 +101,10 @@ pub async fn handle_file_event(
             state.isolate_pool.reload_all(bundle_arc).await?;
 
             // Snapshot old state for project_config
-            let old_hot = Arc::clone(&state.hot.read().unwrap());
+            let old_hot = {
+                let guard = state.hot.read().map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
+                Arc::clone(&guard)
+            };
 
             let has_custom_document = scan.document.is_some();
             let document_descriptor = if has_custom_document {
@@ -109,7 +116,8 @@ pub async fn handle_file_event(
             let manifest_json = HotState::compute_manifest_json(&build_result.build_id, &build_result.manifest);
 
             // Update all hot state atomically with new Arc
-            *state.hot.write().unwrap() = Arc::new(HotState {
+            let mut hot_guard = state.hot.write().map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
+            *hot_guard = Arc::new(HotState {
                 route_trie: RouteTrie::from_routes(&scan.routes),
                 api_route_trie: RouteTrie::from_routes(&scan.api_routes),
                 manifest: build_result.manifest,

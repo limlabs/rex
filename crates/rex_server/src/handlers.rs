@@ -9,7 +9,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tracing::{debug, error, info};
 
-use crate::document::{assemble_body_tail, assemble_document, assemble_head_shell, DocumentDescriptor};
+use crate::document::{
+    assemble_body_tail, assemble_document, assemble_head_shell, DocumentDescriptor, DocumentParams,
+};
 
 /// State that can change during dev-mode rebuilds.
 #[derive(Clone)]
@@ -34,7 +36,7 @@ impl HotState {
         serde_json::to_string(&serde_json::json!({
             "build_id": build_id,
             "pages": manifest.pages,
-        })).unwrap()
+        })).expect("JSON serialization")
     }
 }
 
@@ -45,9 +47,9 @@ pub struct AppState {
     pub hot: RwLock<Arc<HotState>>,
 }
 
-/// Snapshot the hot state (Arc ref-count bump, no deep clone).
+/// Snapshot the hot state (O(1) Arc clone, no lock held across await).
 fn snapshot(state: &Arc<AppState>) -> Arc<HotState> {
-    Arc::clone(&state.hot.read().unwrap())
+    Arc::clone(&state.hot.read().expect("HotState lock poisoned"))
 }
 
 /// Generate a full-page error overlay for dev mode.
@@ -181,7 +183,7 @@ h1 {{
 /// Render a custom error page (404 or _error) via SSR, returning the full HTML document.
 async fn render_error_page(
     state: &Arc<AppState>,
-    hot: &HotState,
+    hot: &Arc<HotState>,
     page_key: &str,
     status: StatusCode,
     props: &str,
@@ -198,18 +200,18 @@ async fn render_error_page(
         _ => return (status, Html(format!("{} Error", status.as_u16()))).into_response(),
     };
 
-    let document = assemble_document(
-        &render.body,
-        &render.head,
-        props,
-        &[],
-        &hot.manifest.global_css,
-        &hot.manifest.css_contents,
-        hot.manifest.app_script.as_deref(),
-        state.is_dev,
-        hot.document_descriptor.as_ref(),
-        Some(&hot.manifest_json),
-    );
+    let document = assemble_document(&DocumentParams {
+        ssr_html: &render.body,
+        head_html: &render.head,
+        props_json: props,
+        client_scripts: &[],
+        css_files: &hot.manifest.global_css,
+        css_contents: &hot.manifest.css_contents,
+        app_script: hot.manifest.app_script.as_deref(),
+        is_dev: state.is_dev,
+        doc_descriptor: hot.document_descriptor.as_ref(),
+        manifest_json: Some(&hot.manifest_json),
+    });
 
     (status, Html(document)).into_response()
 }
@@ -292,7 +294,7 @@ pub async fn api_handler(
         "body": body_value,
         "cookies": {},
     });
-    let req_json = serde_json::to_string(&req_data).unwrap();
+    let req_json = serde_json::to_string(&req_data).expect("JSON serialization");
 
     // Execute in V8
     let result = state
@@ -315,7 +317,7 @@ pub async fn api_handler(
             for (k, v) in &api_res.headers {
                 builder = builder.header(k.as_str(), v.as_str());
             }
-            builder.body(Body::from(api_res.body)).unwrap()
+            builder.body(Body::from(api_res.body)).expect("response build")
         }
         Ok(Err(e)) => {
             error!("API handler V8 error: {e}");
@@ -345,7 +347,7 @@ fn check_redirects(path: &str, config: &ProjectConfig) -> Option<Response> {
                     .status(status)
                     .header("location", &dest)
                     .body(Body::empty())
-                    .unwrap(),
+                    .expect("response build"),
             );
         }
     }
@@ -422,7 +424,7 @@ pub async fn page_handler(
 
 async fn page_handler_inner(
     state: &Arc<AppState>,
-    hot: &HotState,
+    hot: &Arc<HotState>,
     path: &str,
     uri: &Uri,
     headers: &HeaderMap,
@@ -434,7 +436,7 @@ async fn page_handler_inner(
         None => {
             debug!(path, "No route matched");
             if hot.has_custom_404 {
-                return render_error_page(&state, &hot, "404", StatusCode::NOT_FOUND, "{}").await;
+                return render_error_page(state, hot, "404", StatusCode::NOT_FOUND, "{}").await;
             }
             return (StatusCode::NOT_FOUND, Html("404 - Page Not Found".to_string())).into_response();
         }
@@ -491,7 +493,7 @@ async fn page_handler_inner(
                 headers: header_map,
                 cookies: HashMap::new(),
             };
-            let context_json = serde_json::to_string(&context).unwrap();
+            let context_json = serde_json::to_string(&context).expect("JSON serialization");
 
             state
                 .isolate_pool
@@ -508,7 +510,7 @@ async fn page_handler_inner(
                 return Html(dev_error_overlay("Server Props Error", &e.to_string(), None)).into_response();
             } else if hot.has_custom_error {
                 let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
-                return render_error_page(&state, &hot, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
+                return render_error_page(state, hot, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
             }
             return (StatusCode::INTERNAL_SERVER_ERROR, Html(format!("Server error: {e}"))).into_response();
         }
@@ -518,7 +520,7 @@ async fn page_handler_inner(
                 return Html(dev_error_overlay("Runtime Error", &e.to_string(), None)).into_response();
             } else if hot.has_custom_error {
                 let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
-                return render_error_page(&state, &hot, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
+                return render_error_page(state, hot, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
             }
             return (StatusCode::INTERNAL_SERVER_ERROR, Html("Internal server error".to_string())).into_response();
         }
@@ -541,20 +543,20 @@ async fn page_handler_inner(
             .status(status)
             .header("Location", destination)
             .body(Body::empty())
-            .unwrap();
+            .expect("response build");
     }
 
     // Check for notFound
     if parsed.get("notFound").and_then(|n| n.as_bool()).unwrap_or(false) {
         if hot.has_custom_404 {
-            return render_error_page(&state, &hot, "404", StatusCode::NOT_FOUND, "{}").await;
+            return render_error_page(state, hot, "404", StatusCode::NOT_FOUND, "{}").await;
         }
         return (StatusCode::NOT_FOUND, Html("404 - Not Found".to_string())).into_response();
     }
 
     // Extract props for rendering (already parsed, no re-parse needed)
     let render_props = match parsed.get("props") {
-        Some(props) => serde_json::to_string(props).unwrap(),
+        Some(props) => serde_json::to_string(props).expect("JSON serialization"),
         None => "{}".to_string(),
     };
 
@@ -635,7 +637,7 @@ async fn page_handler_inner(
     Response::builder()
         .header("content-type", "text/html; charset=utf-8")
         .body(body)
-        .unwrap()
+        .expect("response build")
 }
 
 /// Data endpoint: GET /_rex/data/{buildId}/{path}.json
@@ -693,7 +695,7 @@ pub async fn data_handler(
                     .collect(),
                 cookies: HashMap::new(),
             };
-            let context_json = serde_json::to_string(&context).unwrap();
+            let context_json = serde_json::to_string(&context).expect("JSON serialization");
             state
                 .isolate_pool
                 .execute(move |iso| iso.get_server_side_props(&route_key, &context_json))
@@ -705,7 +707,7 @@ pub async fn data_handler(
         Ok(Ok(json)) => Response::builder()
             .header("Content-Type", "application/json")
             .body(Body::from(json))
-            .unwrap(),
+            .expect("response build"),
         Ok(Err(e)) => {
             error!("Data endpoint GSSP error: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
@@ -718,6 +720,7 @@ pub async fn data_handler(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use axum::http::Request;

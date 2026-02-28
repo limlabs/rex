@@ -30,6 +30,12 @@ pub struct HmrBroadcast {
     tx: broadcast::Sender<HmrMessage>,
 }
 
+impl Default for HmrBroadcast {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HmrBroadcast {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(64);
@@ -39,7 +45,7 @@ impl HmrBroadcast {
     pub fn send_update(&self, path: &str, manifest: serde_json::Value) {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("system clock before UNIX epoch")
             .as_millis() as u64;
 
         let _ = self.tx.send(HmrMessage::Update {
@@ -65,7 +71,7 @@ pub async fn handle_hmr_socket(mut socket: WebSocket, hmr: HmrBroadcast) {
     info!("HMR client connected");
 
     // Send connected message
-    let connected = serde_json::to_string(&HmrMessage::Connected).unwrap();
+    let connected = serde_json::to_string(&HmrMessage::Connected).expect("HmrMessage serialization");
     if socket.send(Message::Text(connected.into())).await.is_err() {
         return;
     }
@@ -77,14 +83,14 @@ pub async fn handle_hmr_socket(mut socket: WebSocket, hmr: HmrBroadcast) {
             msg = rx.recv() => {
                 match msg {
                     Ok(hmr_msg) => {
-                        let json = serde_json::to_string(&hmr_msg).unwrap();
+                        let json = serde_json::to_string(&hmr_msg).expect("HmrMessage serialization");
                         if socket.send(Message::Text(json.into())).await.is_err() {
                             break;
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         debug!("HMR client lagged by {n} messages, sending full reload");
-                        let json = serde_json::to_string(&HmrMessage::FullReload).unwrap();
+                        let json = serde_json::to_string(&HmrMessage::FullReload).expect("HmrMessage serialization");
                         let _ = socket.send(Message::Text(json.into())).await;
                     }
                     Err(broadcast::error::RecvError::Closed) => break,

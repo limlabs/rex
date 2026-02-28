@@ -68,13 +68,17 @@ fn walk_dir(
         let path = entry.path();
         if path.is_dir() {
             // Skip directories starting with _ (except pages themselves can have _app etc.)
-            let dir_name = path.file_name().unwrap().to_string_lossy();
+            let dir_name = match path.file_name() {
+                Some(n) => n.to_string_lossy(),
+                None => continue,
+            };
             if dir_name.starts_with('.') || dir_name == "node_modules" {
                 continue;
             }
             walk_dir(base, &path, callback)?;
         } else if is_page_file(&path) {
-            let rel_path = path.strip_prefix(base).unwrap();
+            let rel_path = path.strip_prefix(base)
+                .map_err(|e| anyhow::anyhow!("Failed to strip prefix {}: {e}", base.display()))?;
             callback(rel_path, &path);
         }
     }
@@ -186,6 +190,7 @@ fn parse_dynamic_segment(part: &str) -> Option<DynamicSegment> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

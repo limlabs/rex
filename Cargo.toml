@@ -21,7 +21,7 @@ rolldown_common = { git = "https://github.com/rolldown/rolldown", branch = "main
 
 # HTTP
 axum = { version = "0.8", features = ["ws"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync"] }
 tower-http = { version = "0.6", features = ["fs", "cors", "compression-gzip"] }
 
 # File watching
@@ -59,6 +59,12 @@ futures = "0.3"
 # File hashing
 sha2 = "0.10"
 hex = "0.4"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
 
 [profile.dev]
 opt-level = 0
