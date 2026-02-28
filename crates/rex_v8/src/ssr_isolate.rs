@@ -135,29 +135,43 @@ impl SsrIsolate {
                 let console = v8::Object::new(scope);
 
                 let t = v8::FunctionTemplate::new(scope, console_log);
-                let f = t.get_function(scope).ok_or_else(|| anyhow::anyhow!("Failed to create console.log"))?;
-                let k = v8::String::new(scope, "log").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+                let f = t
+                    .get_function(scope)
+                    .ok_or_else(|| anyhow::anyhow!("Failed to create console.log"))?;
+                let k = v8::String::new(scope, "log")
+                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
                 console.set(scope, k.into(), f.into());
 
                 let t = v8::FunctionTemplate::new(scope, console_warn);
-                let f = t.get_function(scope).ok_or_else(|| anyhow::anyhow!("Failed to create console.warn"))?;
-                let k = v8::String::new(scope, "warn").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+                let f = t
+                    .get_function(scope)
+                    .ok_or_else(|| anyhow::anyhow!("Failed to create console.warn"))?;
+                let k = v8::String::new(scope, "warn")
+                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
                 console.set(scope, k.into(), f.into());
 
                 let t = v8::FunctionTemplate::new(scope, console_error);
-                let f = t.get_function(scope).ok_or_else(|| anyhow::anyhow!("Failed to create console.error"))?;
-                let k = v8::String::new(scope, "error").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+                let f = t
+                    .get_function(scope)
+                    .ok_or_else(|| anyhow::anyhow!("Failed to create console.error"))?;
+                let k = v8::String::new(scope, "error")
+                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
                 console.set(scope, k.into(), f.into());
 
                 let t = v8::FunctionTemplate::new(scope, console_log);
-                let f = t.get_function(scope).ok_or_else(|| anyhow::anyhow!("Failed to create console.info"))?;
-                let k = v8::String::new(scope, "info").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+                let f = t
+                    .get_function(scope)
+                    .ok_or_else(|| anyhow::anyhow!("Failed to create console.info"))?;
+                let k = v8::String::new(scope, "info")
+                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
                 console.set(scope, k.into(), f.into());
 
-                let k = v8::String::new(scope, "console").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+                let k = v8::String::new(scope, "console")
+                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
                 global.set(scope, k.into(), console.into());
 
-                let k = v8::String::new(scope, "globalThis").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+                let k = v8::String::new(scope, "globalThis")
+                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
                 global.set(scope, k.into(), global.into());
             }
 
@@ -404,7 +418,8 @@ mod tests {
             createElement: function(type, props) {
                 var children = Array.prototype.slice.call(arguments, 2);
                 return { type: type, props: props || {}, children: children };
-            }
+            },
+            Suspense: Symbol.for('react.suspense')
         };
         var React = globalThis.__React;
 
@@ -413,6 +428,19 @@ mod tests {
             if (typeof el === 'string') return el;
             if (typeof el === 'number') return String(el);
             if (Array.isArray(el)) return el.map(renderElement).join('');
+            if (el.type === globalThis.__React.Suspense) {
+                try {
+                    var inner = '';
+                    if (el.props && el.props.children) inner += renderElement(el.props.children);
+                    inner += el.children.map(renderElement).join('');
+                    return inner;
+                } catch (e) {
+                    if (e && typeof e.then === 'function') {
+                        return renderElement(el.props && el.props.fallback);
+                    }
+                    throw e;
+                }
+            }
             if (typeof el.type === 'function') {
                 var merged = Object.assign({}, el.props);
                 if (el.children.length > 0) merged.children = el.children.length === 1 ? el.children[0] : el.children;
@@ -867,6 +895,50 @@ globalThis.__rex_resolve_gsp = function() {
         let json = iso.get_static_props("page", r#"{"params":{}}"#).unwrap();
         let val: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(val["props"]["async"], true);
+    }
+
+    #[test]
+    fn test_render_suspense_renders_children() {
+        let mut iso = make_isolate(&[(
+            "page",
+            r#"function Page() {
+                return React.createElement(React.Suspense, { fallback: 'Loading' },
+                    React.createElement('div', null, 'Suspense child content')
+                );
+            }"#,
+            None,
+        )]);
+        let result = iso.render_page("page", "{}").unwrap();
+        assert!(
+            result.body.contains("Suspense child content"),
+            "should render children, not fallback: {}",
+            result.body
+        );
+        assert!(
+            !result.body.contains("Loading"),
+            "should NOT render fallback when children render normally: {}",
+            result.body
+        );
+    }
+
+    #[test]
+    fn test_render_suspense_fallback_on_throw() {
+        let mut iso = make_isolate(&[(
+            "page",
+            r#"function Page() {
+                function Thrower() { throw Promise.resolve(); }
+                return React.createElement(React.Suspense, { fallback: 'Loading...' },
+                    React.createElement(Thrower)
+                );
+            }"#,
+            None,
+        )]);
+        let result = iso.render_page("page", "{}").unwrap();
+        assert!(
+            result.body.contains("Loading..."),
+            "should render fallback when child throws a promise: {}",
+            result.body
+        );
     }
 
     #[test]

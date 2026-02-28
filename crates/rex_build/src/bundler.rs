@@ -379,6 +379,12 @@ async fn build_server_bundle(
                             .to_string(),
                     )],
                 ),
+                (
+                    "rex/image".to_string(),
+                    vec![Some(
+                        runtime_dir.join("image.js").to_string_lossy().to_string(),
+                    )],
+                ),
                 // Next.js compatibility shims
                 (
                     "next/head".to_string(),
@@ -405,6 +411,12 @@ async fn build_server_bundle(
                             .join("document.js")
                             .to_string_lossy()
                             .to_string(),
+                    )],
+                ),
+                (
+                    "next/image".to_string(),
+                    vec![Some(
+                        runtime_dir.join("image.js").to_string_lossy().to_string(),
                     )],
                 ),
             ]),
@@ -605,6 +617,12 @@ if (!window.__REX_NAVIGATING__) {{
                             .to_string(),
                     )],
                 ),
+                (
+                    "rex/image".to_string(),
+                    vec![Some(
+                        runtime_dir.join("image.js").to_string_lossy().to_string(),
+                    )],
+                ),
                 // Next.js compatibility shims
                 (
                     "next/link".to_string(),
@@ -625,6 +643,12 @@ if (!window.__REX_NAVIGATING__) {{
                             .join("use-router.js")
                             .to_string_lossy()
                             .to_string(),
+                    )],
+                ),
+                (
+                    "next/image".to_string(),
+                    vec![Some(
+                        runtime_dir.join("image.js").to_string_lossy().to_string(),
                     )],
                 ),
             ]),
@@ -1563,17 +1587,17 @@ mod tests {
         .unwrap();
         fs::write(
             react_dir.join("index.js"),
-            "export function createElement(type, props, ...children) { return { type, props, children }; }\nexport default { createElement };\n",
+            "export function createElement(type, props, ...children) { return { type, props, children }; }\nexport const Suspense = Symbol.for('react.suspense');\nexport default { createElement, Suspense };\n",
         )
         .unwrap();
         fs::write(
             react_dir.join("jsx-runtime.js"),
-            "export function jsx(type, props) { return { type, props }; }\nexport function jsxs(type, props) { return { type, props }; }\nexport const Fragment = 'Fragment';\n",
+            "export function jsx(type, props) { return { type, props }; }\nexport function jsxs(type, props) { return { type, props }; }\nexport const Fragment = 'Fragment';\nexport const Suspense = Symbol.for('react.suspense');\n",
         )
         .unwrap();
         fs::write(
             react_dir.join("jsx-dev-runtime.js"),
-            "export function jsxDEV(type, props) { return { type, props }; }\nexport const Fragment = 'Fragment';\n",
+            "export function jsxDEV(type, props) { return { type, props }; }\nexport const Fragment = 'Fragment';\nexport const Suspense = Symbol.for('react.suspense');\n",
         )
         .unwrap();
 
@@ -1594,12 +1618,27 @@ mod tests {
         fs::write(
             react_dom_dir.join("server.js"),
             r#"
+var _Suspense = Symbol.for('react.suspense');
 function renderEl(el) {
   if (el == null || el === false) return '';
   if (typeof el === 'string') return el;
   if (typeof el === 'number') return '' + el;
   if (Array.isArray(el)) return el.map(renderEl).join('');
   if (typeof el === 'object' && el.type) {
+    if (el.type === _Suspense) {
+      try {
+        var inner = '';
+        if (el.children && el.children.length) inner += el.children.map(renderEl).join('');
+        var pr = el.props || {};
+        if (pr.children != null && !(el.children && el.children.length)) inner += renderEl(pr.children);
+        return inner;
+      } catch (e) {
+        if (e && typeof e.then === 'function') {
+          return renderEl(el.props && el.props.fallback);
+        }
+        throw e;
+      }
+    }
     if (typeof el.type === 'function') {
       var p = Object.assign({}, el.props || {});
       if (el.children && el.children.length) p.children = el.children.length === 1 ? el.children[0] : el.children;
@@ -2152,6 +2191,45 @@ export default function Home() {
         assert!(
             render.body.contains("Home_heading_"),
             "should have scoped class name for heading: {}", render.body
+        );
+    }
+
+    #[tokio::test]
+    async fn test_integration_suspense_ssr() {
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                r#"
+                import { Suspense } from 'react';
+                export default function Home() {
+                    return (
+                        <Suspense fallback={<div>Loading...</div>}>
+                            <div><h1>Suspense Content</h1></div>
+                        </Suspense>
+                    );
+                }
+                "#,
+            )],
+            None,
+        );
+
+        let (_result, pool) = build_and_load(&config, &scan).await;
+
+        let render = pool
+            .execute(|iso| iso.render_page("index", "{}"))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert!(
+            render.body.contains("Suspense Content"),
+            "SSR should render Suspense children: {}",
+            render.body
+        );
+        assert!(
+            !render.body.contains("Loading..."),
+            "SSR should NOT render fallback when children render normally: {}",
+            render.body
         );
     }
 
