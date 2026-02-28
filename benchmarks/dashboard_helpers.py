@@ -18,15 +18,29 @@ COLORS = {
     "Next.js (Pages)": "#171717",
     "Next.js (App)": "#3b82f6",
     "TanStack Start": "#e8590c",
+    "Rex + TW": "#a855f7",
+    "Next.js + TW": "#06b6d4",
+    "TanStack + TW": "#f59e0b",
 }
 
-FW_ORDER = ["Rex", "Next.js (Pages)", "Next.js (App)", "TanStack Start"]
+FW_ORDER = [
+    "Rex",
+    "Next.js (Pages)",
+    "Next.js (App)",
+    "TanStack Start",
+    "Rex + TW",
+    "Next.js + TW",
+    "TanStack + TW",
+]
 
 FW_MAP = {
     "rex": "Rex",
     "nextjs": "Next.js (Pages)",
     "nextjs_app": "Next.js (App)",
     "tanstack": "TanStack Start",
+    "rex_tw": "Rex + TW",
+    "nextjs_tw": "Next.js + TW",
+    "tanstack_tw": "TanStack + TW",
 }
 
 EP_LABELS = {

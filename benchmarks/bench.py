@@ -42,14 +42,24 @@ REX_FIXTURE = Path(os.environ.get("REX_FIXTURE", PROJECT_ROOT / "fixtures/basic"
 NEXT_DIR = SCRIPT_DIR / "next-basic"
 NEXT_APP_DIR = SCRIPT_DIR / "next-app-basic"
 TANSTACK_DIR = SCRIPT_DIR / "tanstack-basic"
+NEXT_TW_DIR = SCRIPT_DIR / "next-tailwind"
+TANSTACK_TW_DIR = SCRIPT_DIR / "tanstack-tailwind"
+REX_TW_FIXTURE = PROJECT_ROOT / "fixtures/tailwind"
 
-ENDPOINTS = ["/", "/about", "/static", "/blog/hello-world", "/api/hello"]
+ENDPOINTS = ["/", "/about", "/static", "/blog/hello-world", "/api/hello", "/gallery"]
 ENDPOINT_LABELS = {
     "/": "SSR index",
     "/about": "SSG about",
     "/static": "Static (no data)",
     "/blog/hello-world": "Dynamic route",
     "/api/hello": "API route",
+    "/gallery": "Gallery (images)",
+}
+
+# Image optimization endpoints per framework
+IMAGE_ENDPOINTS = {
+    "rex": "/_rex/image?url=%2Fimages%2Fhero.jpg&w=640&q=75",
+    "nextjs": "/_next/image?url=%2Fimages%2Fhero.jpg&w=640&q=75",
 }
 
 # ── Colors ──────────────────────────────────────────────────────
@@ -79,12 +89,23 @@ def yellow(s: str) -> str:
     return f"\033[33m{s}\033[0m"
 
 
-FW_COLOR = {"rex": magenta, "nextjs": cyan, "nextjs_app": cyan, "tanstack": yellow}
+FW_COLOR = {
+    "rex": magenta,
+    "nextjs": cyan,
+    "nextjs_app": cyan,
+    "tanstack": yellow,
+    "rex_tw": magenta,
+    "nextjs_tw": cyan,
+    "tanstack_tw": yellow,
+}
 FW_LABEL = {
     "rex": "Rex",
     "nextjs": "Next.js (Pages)",
     "nextjs_app": "Next.js (App)",
     "tanstack": "TanStack Start",
+    "rex_tw": "Rex + TW",
+    "nextjs_tw": "Next.js + TW",
+    "tanstack_tw": "TanStack + TW",
 }
 
 
@@ -282,6 +303,58 @@ def start_tanstack(mode: str, port: int) -> Optional[ServerProcess]:
     if not wait_for_port(port, timeout=timeout):
         proc.kill()
         print(f"  {yellow('SKIP')}: TanStack Start failed to start on port {port}")
+        return None
+    return ServerProcess(proc, port)
+
+
+def start_rex_tw(mode: str, port: int) -> Optional[ServerProcess]:
+    if not REX_BIN.exists():
+        print(f"  {yellow('SKIP')}: Rex binary not found at {REX_BIN}")
+        return None
+    cmd = [str(REX_BIN), mode, "--root", str(REX_TW_FIXTURE), "--port", str(port)]
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if not wait_for_port(port, timeout=30):
+        proc.kill()
+        print(f"  {yellow('SKIP')}: Rex (Tailwind) failed to start on port {port}")
+        return None
+    return ServerProcess(proc, port)
+
+
+def start_next_tw(mode: str, port: int) -> Optional[ServerProcess]:
+    if not (NEXT_TW_DIR / "node_modules").exists():
+        print(
+            f"  {yellow('SKIP')}: Next.js + TW not installed. Run: cd benchmarks/next-tailwind && npm install"
+        )
+        return None
+    cmd = ["npx", "next", mode, "--port", str(port)]
+    proc = subprocess.Popen(
+        cmd, cwd=NEXT_TW_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    timeout = 60 if mode == "dev" else 30
+    if not wait_for_port(port, timeout=timeout):
+        proc.kill()
+        print(f"  {yellow('SKIP')}: Next.js + TW failed to start on port {port}")
+        return None
+    return ServerProcess(proc, port)
+
+
+def start_tanstack_tw(mode: str, port: int) -> Optional[ServerProcess]:
+    if not (TANSTACK_TW_DIR / "node_modules").exists():
+        print(
+            f"  {yellow('SKIP')}: TanStack + TW not installed. Run: cd benchmarks/tanstack-tailwind && npm install"
+        )
+        return None
+    if mode == "dev":
+        cmd = ["npx", "vite", "dev", "--port", str(port), "--host", "127.0.0.1"]
+    else:
+        cmd = ["npx", "vite", "preview", "--port", str(port), "--host", "127.0.0.1"]
+    proc = subprocess.Popen(
+        cmd, cwd=TANSTACK_TW_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    timeout = 60 if mode == "dev" else 30
+    if not wait_for_port(port, timeout=timeout):
+        proc.kill()
+        print(f"  {yellow('SKIP')}: TanStack + TW failed to start on port {port}")
         return None
     return ServerProcess(proc, port)
 
@@ -583,6 +656,22 @@ def run_dx(frameworks: list[str], iterations: int = 1):
             TANSTACK_DIR / "src/routes/about.tsx",
             iterations,
         )
+    if "rex_tw" in frameworks:
+        dx_framework(
+            "rex_tw", REX_TW_FIXTURE, start_rex_tw, REX_TW_FIXTURE / "pages/about.tsx", iterations
+        )
+    if "nextjs_tw" in frameworks:
+        dx_framework(
+            "nextjs_tw", NEXT_TW_DIR, start_next_tw, NEXT_TW_DIR / "pages/about.tsx", iterations
+        )
+    if "tanstack_tw" in frameworks:
+        dx_framework(
+            "tanstack_tw",
+            TANSTACK_TW_DIR,
+            start_tanstack_tw,
+            TANSTACK_TW_DIR / "src/routes/about.tsx",
+            iterations,
+        )
 
 
 # ════════════════════════════════════════════════════════════════
@@ -664,6 +753,28 @@ def server_framework(
             add("server", fw, "latency_mean_ms", ab.latency_mean_ms, endpoint=ep)
             add("server", fw, "latency_p50_ms", ab.latency_p50_ms, endpoint=ep)
             add("server", fw, "latency_p99_ms", ab.latency_p99_ms, endpoint=ep)
+
+        # ── Image optimization endpoint ──
+        img_ep = IMAGE_ENDPOINTS.get(fw)
+        if img_ep:
+            # Cold resize: clear cache and time first request
+            if fw == "rex":
+                cache_dir = REX_FIXTURE / ".rex" / "cache" / "images"
+                if cache_dir.exists():
+                    shutil.rmtree(cache_dir)
+            t0 = time.monotonic()
+            curl_body(last_port, img_ep)
+            cold_ms = round((time.monotonic() - t0) * 1000, 1)
+            print(f"\n  {bold('Image cold resize:')}  {green(f'{cold_ms}ms')}")
+            add("server", fw, "image_cold_resize_ms", cold_ms)
+
+            # Cached image serve throughput
+            print(f"\n  {bold('Image endpoint (cached)')}")
+            ab = run_ab(f"http://127.0.0.1:{last_port}{img_ep}", requests, concurrency, warmup)
+            add("server", fw, "rps", ab.rps, endpoint=img_ep)
+            add("server", fw, "latency_mean_ms", ab.latency_mean_ms, endpoint=img_ep)
+            add("server", fw, "latency_p50_ms", ab.latency_p50_ms, endpoint=img_ep)
+            add("server", fw, "latency_p99_ms", ab.latency_p99_ms, endpoint=img_ep)
 
         # ── Memory ──
         mem = last_server.rss_mb()
@@ -785,6 +896,80 @@ def run_server(
             iterations,
         )
 
+    if "rex_tw" in frameworks:
+
+        def build_rex_tw():
+            if not REX_BIN.exists():
+                print(f"  {yellow('SKIP')}: Rex binary not found")
+                return False
+            subprocess.run(
+                [str(REX_BIN), "build", "--root", str(REX_TW_FIXTURE)],
+                capture_output=True,
+                timeout=60,
+            )
+            return True
+
+        server_framework(
+            "rex_tw",
+            build_rex_tw,
+            start_rex_tw,
+            REX_TW_FIXTURE / ".rex/build",
+            requests,
+            concurrency,
+            warmup,
+            iterations,
+        )
+
+    if "nextjs_tw" in frameworks:
+
+        def build_next_tw():
+            if not (NEXT_TW_DIR / "node_modules").exists():
+                print(f"  {yellow('SKIP')}: Next.js + TW not installed")
+                return False
+            subprocess.run(
+                ["npx", "next", "build"],
+                cwd=NEXT_TW_DIR,
+                capture_output=True,
+                timeout=120,
+            )
+            return True
+
+        server_framework(
+            "nextjs_tw",
+            build_next_tw,
+            start_next_tw,
+            NEXT_TW_DIR / ".next",
+            requests,
+            concurrency,
+            warmup,
+            iterations,
+        )
+
+    if "tanstack_tw" in frameworks:
+
+        def build_tanstack_tw():
+            if not (TANSTACK_TW_DIR / "node_modules").exists():
+                print(f"  {yellow('SKIP')}: TanStack + TW not installed")
+                return False
+            subprocess.run(
+                ["npx", "vite", "build"],
+                cwd=TANSTACK_TW_DIR,
+                capture_output=True,
+                timeout=120,
+            )
+            return True
+
+        server_framework(
+            "tanstack_tw",
+            build_tanstack_tw,
+            start_tanstack_tw,
+            TANSTACK_TW_DIR / "dist",
+            requests,
+            concurrency,
+            warmup,
+            iterations,
+        )
+
 
 # ════════════════════════════════════════════════════════════════
 # CLIENT SUITE
@@ -821,7 +1006,12 @@ def lighthouse_audit(fw: str, port: int):
     color = FW_COLOR.get(fw, dim)
     print(f"\n  {color(f'Lighthouse — {fw_label}')}", flush=True)
 
-    pages = [("/", "index"), ("/about", "about"), ("/blog/hello-world", "blog")]
+    pages = [
+        ("/", "index"),
+        ("/about", "about"),
+        ("/blog/hello-world", "blog"),
+        ("/gallery", "gallery"),
+    ]
 
     for ep, label in pages:
         url = f"http://127.0.0.1:{port}{ep}"
@@ -908,6 +1098,23 @@ def run_client(frameworks: list[str]):
             subprocess.run(["npx", "vite", "build"], cwd=TANSTACK_DIR, capture_output=True)
         client_bundle_sizes("tanstack", TANSTACK_DIR / "dist/client")
 
+    if "rex_tw" in frameworks:
+        if not (REX_TW_FIXTURE / ".rex/build").exists() and REX_BIN.exists():
+            subprocess.run(
+                [str(REX_BIN), "build", "--root", str(REX_TW_FIXTURE)], capture_output=True
+            )
+        client_bundle_sizes("rex_tw", REX_TW_FIXTURE / ".rex/build/client")
+
+    if "nextjs_tw" in frameworks:
+        if not (NEXT_TW_DIR / ".next").exists():
+            subprocess.run(["npx", "next", "build"], cwd=NEXT_TW_DIR, capture_output=True)
+        client_bundle_sizes("nextjs_tw", NEXT_TW_DIR / ".next/static")
+
+    if "tanstack_tw" in frameworks:
+        if not (TANSTACK_TW_DIR / "dist").exists():
+            subprocess.run(["npx", "vite", "build"], cwd=TANSTACK_TW_DIR, capture_output=True)
+        client_bundle_sizes("tanstack_tw", TANSTACK_TW_DIR / "dist/client")
+
     # Lighthouse
     if has_lighthouse:
         print(f"  {dim('Running Lighthouse audits (this takes a while)...')}\n")
@@ -940,6 +1147,27 @@ def run_client(frameworks: list[str]):
                 with server:
                     lighthouse_audit("tanstack", port)
 
+        if "rex_tw" in frameworks and REX_BIN.exists():
+            port = find_free_port()
+            server = start_rex_tw("start", port)
+            if server:
+                with server:
+                    lighthouse_audit("rex_tw", port)
+
+        if "nextjs_tw" in frameworks and (NEXT_TW_DIR / "node_modules").exists():
+            port = find_free_port()
+            server = start_next_tw("start", port)
+            if server:
+                with server:
+                    lighthouse_audit("nextjs_tw", port)
+
+        if "tanstack_tw" in frameworks and (TANSTACK_TW_DIR / "dist").exists():
+            port = find_free_port()
+            server = start_tanstack_tw("start", port)
+            if server:
+                with server:
+                    lighthouse_audit("tanstack_tw", port)
+
 
 # ── Main ────────────────────────────────────────────────────────
 
@@ -953,8 +1181,8 @@ def main():
     )
     parser.add_argument(
         "--framework",
-        default="rex,nextjs,nextjs_app,tanstack",
-        help="Comma-separated: rex, nextjs, nextjs_app, tanstack (default: all)",
+        default="rex,nextjs,nextjs_app,tanstack,rex_tw,nextjs_tw,tanstack_tw",
+        help="Comma-separated: rex, nextjs, nextjs_app, tanstack, rex_tw, nextjs_tw, tanstack_tw (default: all)",
     )
     parser.add_argument("--json", dest="json_file", help="Write results to JSON file")
     parser.add_argument(

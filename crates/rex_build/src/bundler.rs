@@ -1,12 +1,13 @@
 use crate::manifest::AssetManifest;
 use anyhow::Result;
-use rex_core::{DataStrategy, RexConfig};
+use rex_core::{DataStrategy, ProjectConfig, RexConfig};
 use rex_router::ScanResult;
 use rolldown_common::Output;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info_span, Instrument};
+use std::process::Command;
+use tracing::{debug, info, info_span, Instrument};
 
 /// Build result containing paths to generated bundles
 #[derive(Debug, Clone)]
@@ -17,7 +18,11 @@ pub struct BuildResult {
 }
 
 /// Build both server and client bundles
-pub async fn build_bundles(config: &RexConfig, scan: &ScanResult) -> Result<BuildResult> {
+pub async fn build_bundles(
+    config: &RexConfig,
+    scan: &ScanResult,
+    project_config: &ProjectConfig,
+) -> Result<BuildResult> {
     let build_id = generate_build_id();
     let server_dir = config.server_build_dir();
     let client_dir = config.client_build_dir();
@@ -35,6 +40,9 @@ pub async fn build_bundles(config: &RexConfig, scan: &ScanResult) -> Result<Buil
     // Pre-process CSS modules (generates scoped CSS + JS proxy files)
     let css_modules = process_css_modules(scan, &client_dir, &build_id)?;
 
+    // Pre-process Tailwind CSS files (compile with tailwindcss CLI)
+    let tailwind_outputs = process_tailwind_css(config, scan, &client_dir)?;
+
     // Replace process.env.NODE_ENV so React/scheduler resolve to production builds
     let node_env = if config.dev {
         "\"development\""
@@ -44,12 +52,26 @@ pub async fn build_bundles(config: &RexConfig, scan: &ScanResult) -> Result<Buil
     let define = vec![("process.env.NODE_ENV".to_string(), node_env.to_string())];
 
     // Build server and client bundles in parallel
-    let server_fut =
-        build_server_bundle(config, scan, &server_dir, &css_modules.page_overrides, &define)
-            .instrument(info_span!("build_server_bundle"));
-    let client_fut =
-        build_client_bundles(config, scan, &client_dir, &build_id, &css_modules, &define)
-            .instrument(info_span!("build_client_bundles"));
+    let server_fut = build_server_bundle(
+        config,
+        scan,
+        &server_dir,
+        &css_modules.page_overrides,
+        &define,
+        project_config,
+    )
+    .instrument(info_span!("build_server_bundle"));
+    let client_fut = build_client_bundles(
+        config,
+        scan,
+        &client_dir,
+        &build_id,
+        &css_modules,
+        &define,
+        &tailwind_outputs,
+        project_config,
+    )
+    .instrument(info_span!("build_client_bundles"));
 
     let (server_bundle_path, manifest) = tokio::try_join!(server_fut, client_fut)?;
 
@@ -242,6 +264,7 @@ async fn build_server_bundle(
     output_dir: &Path,
     page_overrides: &HashMap<PathBuf, PathBuf>,
     define: &[(String, String)],
+    project_config: &ProjectConfig,
 ) -> Result<PathBuf> {
     let runtime_dir = runtime_server_dir()?;
 
@@ -334,6 +357,79 @@ async fn build_server_bundle(
         None
     };
 
+    // Rex built-in aliases first, then user aliases (first match wins in rolldown)
+    let mut aliases = vec![
+        (
+            "rex/head".to_string(),
+            vec![Some(
+                runtime_dir.join("head.js").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "rex/link".to_string(),
+            vec![Some(
+                runtime_dir.join("link.js").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "rex/router".to_string(),
+            vec![Some(
+                runtime_dir.join("router.js").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "rex/document".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("document.js")
+                    .to_string_lossy()
+                    .to_string(),
+            )],
+        ),
+        (
+            "rex/image".to_string(),
+            vec![Some(
+                runtime_dir.join("image.js").to_string_lossy().to_string(),
+            )],
+        ),
+        // Next.js compatibility shims
+        (
+            "next/head".to_string(),
+            vec![Some(
+                runtime_dir.join("head.js").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "next/link".to_string(),
+            vec![Some(
+                runtime_dir.join("link.js").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "next/router".to_string(),
+            vec![Some(
+                runtime_dir.join("router.js").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "next/document".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("document.js")
+                    .to_string_lossy()
+                    .to_string(),
+            )],
+        ),
+        (
+            "next/image".to_string(),
+            vec![Some(
+                runtime_dir.join("image.js").to_string_lossy().to_string(),
+            )],
+        ),
+    ];
+    // Append user-defined aliases from rex.config.json build.alias
+    aliases.extend(project_config.build.resolved_aliases(&config.project_root));
+
     let options = rolldown::BundlerOptions {
         input: Some(vec![rolldown::InputItem {
             name: Some("server-bundle".to_string()),
@@ -350,76 +446,9 @@ async fn build_server_bundle(
         banner: Some(rolldown::AddonOutputOption::String(Some(
             V8_POLYFILLS.to_string(),
         ))),
+        tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
         resolve: Some(rolldown::ResolveOptions {
-            alias: Some(vec![
-                (
-                    "rex/head".to_string(),
-                    vec![Some(
-                        runtime_dir.join("head.js").to_string_lossy().to_string(),
-                    )],
-                ),
-                (
-                    "rex/link".to_string(),
-                    vec![Some(
-                        runtime_dir.join("link.js").to_string_lossy().to_string(),
-                    )],
-                ),
-                (
-                    "rex/router".to_string(),
-                    vec![Some(
-                        runtime_dir.join("router.js").to_string_lossy().to_string(),
-                    )],
-                ),
-                (
-                    "rex/document".to_string(),
-                    vec![Some(
-                        runtime_dir
-                            .join("document.js")
-                            .to_string_lossy()
-                            .to_string(),
-                    )],
-                ),
-                (
-                    "rex/image".to_string(),
-                    vec![Some(
-                        runtime_dir.join("image.js").to_string_lossy().to_string(),
-                    )],
-                ),
-                // Next.js compatibility shims
-                (
-                    "next/head".to_string(),
-                    vec![Some(
-                        runtime_dir.join("head.js").to_string_lossy().to_string(),
-                    )],
-                ),
-                (
-                    "next/link".to_string(),
-                    vec![Some(
-                        runtime_dir.join("link.js").to_string_lossy().to_string(),
-                    )],
-                ),
-                (
-                    "next/router".to_string(),
-                    vec![Some(
-                        runtime_dir.join("router.js").to_string_lossy().to_string(),
-                    )],
-                ),
-                (
-                    "next/document".to_string(),
-                    vec![Some(
-                        runtime_dir
-                            .join("document.js")
-                            .to_string_lossy()
-                            .to_string(),
-                    )],
-                ),
-                (
-                    "next/image".to_string(),
-                    vec![Some(
-                        runtime_dir.join("image.js").to_string_lossy().to_string(),
-                    )],
-                ),
-            ]),
+            alias: Some(aliases),
             extensions: Some(vec![
                 ".tsx".to_string(),
                 ".ts".to_string(),
@@ -468,12 +497,14 @@ async fn build_client_bundles(
     build_id: &str,
     css_modules: &CssModuleProcessing,
     define: &[(String, String)],
+    tailwind_outputs: &HashMap<PathBuf, PathBuf>,
+    project_config: &ProjectConfig,
 ) -> Result<AssetManifest> {
     let mut manifest = AssetManifest::new(build_id.to_string());
     let hash = &build_id[..8];
 
     // Collect and copy CSS files referenced by source (rolldown doesn't bundle CSS)
-    collect_css_files(scan, output_dir, build_id, &mut manifest)?;
+    collect_css_files(scan, output_dir, build_id, &mut manifest, tailwind_outputs)?;
 
     // Add CSS module files to manifest
     for css_file in &css_modules.global_css {
@@ -582,6 +613,67 @@ if (!window.__REX_NAVIGATING__) {{
         None
     };
 
+    // Rex built-in aliases first, then user aliases (first match wins in rolldown)
+    let mut client_aliases = vec![
+        (
+            "rex/link".to_string(),
+            vec![Some(
+                runtime_dir.join("link.js").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "rex/head".to_string(),
+            vec![Some(
+                runtime_dir.join("head.js").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "rex/router".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("use-router.js")
+                    .to_string_lossy()
+                    .to_string(),
+            )],
+        ),
+        (
+            "rex/image".to_string(),
+            vec![Some(
+                runtime_dir.join("image.js").to_string_lossy().to_string(),
+            )],
+        ),
+        // Next.js compatibility shims
+        (
+            "next/link".to_string(),
+            vec![Some(
+                runtime_dir.join("link.js").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "next/head".to_string(),
+            vec![Some(
+                runtime_dir.join("head.js").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "next/router".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("use-router.js")
+                    .to_string_lossy()
+                    .to_string(),
+            )],
+        ),
+        (
+            "next/image".to_string(),
+            vec![Some(
+                runtime_dir.join("image.js").to_string_lossy().to_string(),
+            )],
+        ),
+    ];
+    // Append user-defined aliases from rex.config.json build.alias
+    client_aliases.extend(project_config.build.resolved_aliases(&config.project_root));
+
     let options = rolldown::BundlerOptions {
         input: Some(inputs),
         cwd: Some(config.project_root.clone()),
@@ -594,64 +686,9 @@ if (!window.__REX_NAVIGATING__) {{
         module_types: Some(module_types),
         minify,
         define: Some(define.iter().cloned().collect()),
+        tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
         resolve: Some(rolldown::ResolveOptions {
-            alias: Some(vec![
-                (
-                    "rex/link".to_string(),
-                    vec![Some(
-                        runtime_dir.join("link.js").to_string_lossy().to_string(),
-                    )],
-                ),
-                (
-                    "rex/head".to_string(),
-                    vec![Some(
-                        runtime_dir.join("head.js").to_string_lossy().to_string(),
-                    )],
-                ),
-                (
-                    "rex/router".to_string(),
-                    vec![Some(
-                        runtime_dir
-                            .join("use-router.js")
-                            .to_string_lossy()
-                            .to_string(),
-                    )],
-                ),
-                (
-                    "rex/image".to_string(),
-                    vec![Some(
-                        runtime_dir.join("image.js").to_string_lossy().to_string(),
-                    )],
-                ),
-                // Next.js compatibility shims
-                (
-                    "next/link".to_string(),
-                    vec![Some(
-                        runtime_dir.join("link.js").to_string_lossy().to_string(),
-                    )],
-                ),
-                (
-                    "next/head".to_string(),
-                    vec![Some(
-                        runtime_dir.join("head.js").to_string_lossy().to_string(),
-                    )],
-                ),
-                (
-                    "next/router".to_string(),
-                    vec![Some(
-                        runtime_dir
-                            .join("use-router.js")
-                            .to_string_lossy()
-                            .to_string(),
-                    )],
-                ),
-                (
-                    "next/image".to_string(),
-                    vec![Some(
-                        runtime_dir.join("image.js").to_string_lossy().to_string(),
-                    )],
-                ),
-            ]),
+            alias: Some(client_aliases),
             extensions: Some(vec![
                 ".tsx".to_string(),
                 ".ts".to_string(),
@@ -743,11 +780,14 @@ fn find_route_for_chunk<'a>(
 
 /// Scan source files for CSS imports and copy them to the output directory.
 /// Registers global CSS (from _app) and per-page CSS in the manifest.
+/// When a CSS file has been pre-processed by Tailwind (present in `tailwind_outputs`),
+/// the processed output is used instead of the raw source.
 fn collect_css_files(
     scan: &ScanResult,
     output_dir: &Path,
     build_id: &str,
     manifest: &mut AssetManifest,
+    tailwind_outputs: &HashMap<PathBuf, PathBuf>,
 ) -> Result<()> {
     let hash = &build_id[..8];
 
@@ -758,9 +798,17 @@ fn collect_css_files(
             if css_path.exists() {
                 let stem = css_path.file_stem().unwrap_or_default().to_string_lossy();
                 let filename = format!("{stem}-{hash}.css");
-                let content = fs::read_to_string(&css_path)?;
-                fs::copy(&css_path, output_dir.join(&filename))?;
-                manifest.css_contents.insert(filename.clone(), content);
+                let dest = output_dir.join(&filename);
+                // Use Tailwind-processed output if available, otherwise raw source
+                if let Some(tw_output) = tailwind_outputs.get(&css_path) {
+                    let content = fs::read_to_string(tw_output)?;
+                    fs::write(&dest, &content)?;
+                    manifest.css_contents.insert(filename.clone(), content);
+                } else {
+                    let content = fs::read_to_string(&css_path)?;
+                    fs::copy(&css_path, &dest)?;
+                    manifest.css_contents.insert(filename.clone(), content);
+                }
                 manifest.global_css.push(filename);
             }
         }
@@ -777,9 +825,16 @@ fn collect_css_files(
             if css_path.exists() {
                 let stem = css_path.file_stem().unwrap_or_default().to_string_lossy();
                 let filename = format!("{stem}-{hash}.css");
-                let content = fs::read_to_string(&css_path)?;
-                fs::copy(&css_path, output_dir.join(&filename))?;
-                manifest.css_contents.insert(filename.clone(), content);
+                let dest = output_dir.join(&filename);
+                if let Some(tw_output) = tailwind_outputs.get(&css_path) {
+                    let content = fs::read_to_string(tw_output)?;
+                    fs::write(&dest, &content)?;
+                    manifest.css_contents.insert(filename.clone(), content);
+                } else {
+                    let content = fs::read_to_string(&css_path)?;
+                    fs::copy(&css_path, &dest)?;
+                    manifest.css_contents.insert(filename.clone(), content);
+                }
                 page_css.push(filename);
             }
         }
@@ -1239,6 +1294,99 @@ fn absolutize_relative_imports(source: &str, source_dir: &Path) -> String {
     result
 }
 
+// --- Tailwind CSS ---
+
+/// Check if a CSS file contains Tailwind directives (v4 or v3).
+pub fn needs_tailwind(content: &str) -> bool {
+    content.lines().any(|line| {
+        let t = line.trim();
+        t.starts_with("@import \"tailwindcss\"")
+            || t.starts_with("@import 'tailwindcss'")
+            || t.starts_with("@tailwind ")
+    })
+}
+
+/// Find the tailwindcss CLI binary in the project's node_modules.
+pub fn find_tailwind_bin(project_root: &Path) -> Option<PathBuf> {
+    let local = project_root.join("node_modules/.bin/tailwindcss");
+    if local.exists() {
+        return Some(local);
+    }
+    None
+}
+
+/// Run a one-shot Tailwind CSS compilation.
+fn run_tailwind(bin: &Path, input: &Path, output: &Path, project_root: &Path) -> Result<()> {
+    let status = Command::new(bin)
+        .arg("-i")
+        .arg(input)
+        .arg("-o")
+        .arg(output)
+        .arg("--minify")
+        .current_dir(project_root)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .status()?;
+
+    if !status.success() {
+        anyhow::bail!("tailwindcss exited with status {status}");
+    }
+    Ok(())
+}
+
+/// Collect all CSS import paths from _app and pages (reusing extract_css_imports).
+pub fn collect_all_css_import_paths(scan: &ScanResult) -> Result<Vec<PathBuf>> {
+    let mut all = Vec::new();
+    if let Some(app) = &scan.app {
+        all.extend(extract_css_imports(&app.abs_path)?);
+    }
+    for route in &scan.routes {
+        all.extend(extract_css_imports(&route.abs_path)?);
+    }
+    Ok(all)
+}
+
+/// Pre-process Tailwind CSS files. Returns a map of original CSS path → processed output path.
+/// If no Tailwind CSS files are found, returns an empty map.
+pub fn process_tailwind_css(
+    config: &RexConfig,
+    scan: &ScanResult,
+    output_dir: &Path,
+) -> Result<HashMap<PathBuf, PathBuf>> {
+    let all_css = collect_all_css_import_paths(scan)?;
+    let tw_bin = find_tailwind_bin(&config.project_root);
+
+    let mut mappings = HashMap::new();
+
+    for css_path in &all_css {
+        if !css_path.exists() {
+            continue;
+        }
+        let content = fs::read_to_string(css_path)?;
+        if !needs_tailwind(&content) {
+            continue;
+        }
+        let bin = tw_bin.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "CSS file {} uses Tailwind directives but tailwindcss is not installed.\n\
+                 Install it: npm install tailwindcss",
+                css_path.display()
+            )
+        })?;
+
+        let stem = css_path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy();
+        let tw_output = output_dir.join(format!("{stem}.tailwind.css"));
+        info!(input = %css_path.display(), "Processing Tailwind CSS");
+        run_tailwind(bin, css_path, &tw_output, &config.project_root)?;
+        mappings.insert(css_path.clone(), tw_output);
+    }
+
+    Ok(mappings)
+}
+
 /// Generate a build ID based on current timestamp
 fn generate_build_id() -> String {
     use sha2::{Digest, Sha256};
@@ -1361,7 +1509,7 @@ mod tests {
             )],
             None,
         );
-        let result = build_bundles(&config, &scan).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         // V8 polyfills (injected as banner)
@@ -1407,7 +1555,7 @@ mod tests {
             )],
             None,
         );
-        let result = build_bundles(&config, &scan).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         // Should be IIFE format — no raw ESM import/export at top level
@@ -1446,7 +1594,7 @@ mod tests {
             ],
             None,
         );
-        let result = build_bundles(&config, &scan).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         assert!(
@@ -1478,7 +1626,7 @@ mod tests {
                 "#,
             ),
         );
-        let result = build_bundles(&config, &scan).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         assert!(
@@ -1502,7 +1650,7 @@ mod tests {
             ],
             None,
         );
-        let result = build_bundles(&config, &scan).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
         let client_dir = config.client_build_dir();
         let build_hash = &result.build_id[..8];
 
@@ -1545,7 +1693,7 @@ mod tests {
             ],
             None,
         );
-        let result = build_bundles(&config, &scan).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
 
         // Manifest should track both pages
         assert!(
@@ -1683,7 +1831,7 @@ export function renderToString(el) { return renderEl(el); }
                 "#,
             ),
         );
-        let result = build_bundles(&config, &scan).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         assert!(
@@ -1747,7 +1895,7 @@ export function renderToString(el) { return renderEl(el); }
             not_found: None,
         };
 
-        let result = build_bundles(&config, &scan).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
 
         // Manifest should have global CSS
         assert_eq!(
@@ -1794,7 +1942,7 @@ export function renderToString(el) { return renderEl(el); }
                 "#,
             ),
         );
-        let result = build_bundles(&config, &scan).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
 
         // _app client chunk should exist
         assert!(
@@ -1836,7 +1984,7 @@ export function renderToString(el) { return renderEl(el); }
         );
 
         // Should build without errors — next/* aliases resolve to rex runtime stubs
-        let result = build_bundles(&config, &scan).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
 
         // Server bundle should contain the page
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
@@ -1900,7 +2048,7 @@ export default function Home() {
             not_found: None,
         };
 
-        let result = build_bundles(&config, &scan).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
 
         // Server bundle should contain the CSS module class mapping
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
@@ -2000,7 +2148,7 @@ export default function Home() {
         config: &RexConfig,
         scan: &ScanResult,
     ) -> (BuildResult, rex_v8::IsolatePool) {
-        let result = build_bundles(config, scan).await.expect("build failed");
+        let result = build_bundles(config, scan, &ProjectConfig::default()).await.expect("build failed");
         let bundle = fs::read_to_string(&result.server_bundle_path).expect("read bundle");
         rex_v8::init_v8();
         let pool = rex_v8::IsolatePool::new(1, std::sync::Arc::new(bundle))
@@ -2308,6 +2456,84 @@ export default function Home() {
             detect_data_strategy_from_source(source).unwrap(),
             DataStrategy::GetServerSideProps,
         );
+    }
+
+    // --- Tailwind CSS detection tests ---
+
+    #[test]
+    fn test_needs_tailwind_v4() {
+        assert!(needs_tailwind("@import \"tailwindcss\";\n"));
+        assert!(needs_tailwind("  @import \"tailwindcss\";\n"));
+        assert!(needs_tailwind("@import 'tailwindcss';\n"));
+    }
+
+    #[test]
+    fn test_needs_tailwind_v3() {
+        assert!(needs_tailwind("@tailwind base;\n@tailwind components;\n@tailwind utilities;\n"));
+        assert!(needs_tailwind("  @tailwind utilities;\n"));
+    }
+
+    #[test]
+    fn test_needs_tailwind_negative() {
+        assert!(!needs_tailwind("body { margin: 0; }\n"));
+        assert!(!needs_tailwind(".container { max-width: 1200px; }\n"));
+        assert!(!needs_tailwind("/* @import \"tailwindcss\" */\nbody {}\n"));
+        assert!(!needs_tailwind(""));
+    }
+
+    #[test]
+    #[ignore] // Requires tailwindcss CLI installed
+    fn test_tailwind_processing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        // Create styles dir
+        let styles_dir = root.join("styles");
+        fs::create_dir_all(&styles_dir).unwrap();
+
+        // Write a Tailwind CSS file
+        fs::write(
+            styles_dir.join("globals.css"),
+            "@import \"tailwindcss\";\n",
+        )
+        .unwrap();
+
+        // Create pages with CSS import
+        let pages_dir = root.join("pages");
+        fs::create_dir_all(&pages_dir).unwrap();
+        fs::write(
+            pages_dir.join("_app.tsx"),
+            "import '../styles/globals.css';\nexport default function App({ Component, pageProps }) { return <Component {...pageProps} />; }\n",
+        )
+        .unwrap();
+        fs::write(
+            pages_dir.join("index.tsx"),
+            "export default function Home() { return <div className=\"p-4\">Hello</div>; }\n",
+        )
+        .unwrap();
+
+        // Must have tailwindcss installed
+        let bin = find_tailwind_bin(&root);
+        if bin.is_none() {
+            eprintln!("tailwindcss not found, skipping integration test");
+            return;
+        }
+
+        let config = RexConfig::new(root).with_dev(false);
+        let scan = rex_router::scan_pages(&config.pages_dir).unwrap();
+        let output_dir = tmp.path().join("output");
+        fs::create_dir_all(&output_dir).unwrap();
+
+        let mappings = process_tailwind_css(&config, &scan, &output_dir).unwrap();
+        assert!(!mappings.is_empty(), "should have processed at least one Tailwind file");
+
+        // The output file should exist and contain actual CSS (not just the directive)
+        for (_input, output) in &mappings {
+            assert!(output.exists(), "Tailwind output file should exist");
+            let content = fs::read_to_string(output).unwrap();
+            assert!(!content.contains("@import \"tailwindcss\""), "should be compiled");
+            assert!(!content.is_empty(), "compiled CSS should not be empty");
+        }
     }
 }
 

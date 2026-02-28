@@ -111,10 +111,19 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
         "Routes scanned"
     );
 
+    // Load project config (redirects, rewrites, headers, build aliases)
+    let project_config = ProjectConfig::load(&config.project_root)?;
+
     // Build
     debug!("Building bundles...");
-    let build_result = build_bundles(&config, &scan).await?;
+    let build_result = build_bundles(&config, &scan, &project_config).await?;
     debug!(build_id = %build_result.build_id, "Build complete");
+
+    // Start Tailwind CSS watch process (if Tailwind is detected)
+    let _tailwind = rex_dev::TailwindProcess::start(&config, &scan)?;
+    if _tailwind.is_some() {
+        eprintln!("  {} {}", dim("◇"), dim("Tailwind CSS (watching)"));
+    }
 
     // Initialize V8
     debug!("Initializing V8...");
@@ -142,8 +151,8 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
     // Create HMR broadcast
     let hmr = rex_dev::HmrBroadcast::new();
 
-    // Start file watcher
-    let event_rx = rex_dev::start_watcher(&config.pages_dir)?;
+    // Start file watcher (watches project root for CSS changes too)
+    let event_rx = rex_dev::start_watcher(&config.project_root, &config.pages_dir)?;
 
     // Bridge sync file watcher to async rebuild handler
     let (rebuild_tx, mut rebuild_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -165,9 +174,6 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
         .route("/_rex/hmr", hmr_route)
         .route("/_rex/hmr-client.js", axum::routing::get(hmr_client_handler));
 
-    // Load project config (redirects, rewrites, headers)
-    let project_config = ProjectConfig::load(&config.project_root)?;
-
     let server = RexServer::new(ServerConfig {
         route_trie: trie,
         api_route_trie: api_trie,
@@ -175,6 +181,7 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
         manifest: build_result.manifest,
         build_id: build_result.build_id,
         static_dir: config.client_build_dir(),
+        project_root: config.project_root.clone(),
         port,
         is_dev: true,
         has_custom_404: scan.not_found.is_some(),
@@ -243,7 +250,8 @@ async fn cmd_build(root: PathBuf) -> Result<()> {
     let scan = scan_pages(&config.pages_dir)?;
     debug!(routes = scan.routes.len(), "Routes scanned");
 
-    let build_result = build_bundles(&config, &scan).await?;
+    let project_config = ProjectConfig::load(&config.project_root)?;
+    let build_result = build_bundles(&config, &scan, &project_config).await?;
     let elapsed = start.elapsed();
 
     eprintln!("  {} {}", green_bold("✓ Built in"), green_bold(&format_duration(elapsed)));
@@ -640,6 +648,7 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
         manifest: manifest.clone(),
         build_id: manifest.build_id.clone(),
         static_dir: config.client_build_dir(),
+        project_root: config.project_root.clone(),
         port,
         is_dev: false,
         has_custom_404: scan.not_found.is_some(),

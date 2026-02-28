@@ -19,14 +19,20 @@ pub async fn handle_file_event(
     debug!(path = %event.path.display(), kind = ?event.kind, "Processing file change");
 
     match event.kind {
-        FileEventKind::PageModified => {
+        FileEventKind::PageModified | FileEventKind::CssModified => {
             let t0 = Instant::now();
 
             // Rescan, rebuild, reload isolates, update hot state
             let scan = scan_pages(&config.pages_dir)?;
             let t_scan = t0.elapsed();
 
-            let build_result = build_bundles(config, &scan).await?;
+            // Get project_config from current hot state for build aliases
+            let project_config = {
+                let guard = state.hot.read().map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
+                guard.project_config.clone()
+            };
+
+            let build_result = build_bundles(config, &scan, &project_config).await?;
             let t_bundle = t0.elapsed();
 
             // Read the new server bundle
@@ -93,7 +99,14 @@ pub async fn handle_file_event(
         FileEventKind::PageRemoved => {
             // Full rebuild: routes changed, need new trie + manifest
             let scan = scan_pages(&config.pages_dir)?;
-            let build_result = build_bundles(config, &scan).await?;
+
+            // Get project_config from current hot state for build aliases
+            let project_config = {
+                let guard = state.hot.read().map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
+                guard.project_config.clone()
+            };
+
+            let build_result = build_bundles(config, &scan, &project_config).await?;
 
             let bundle_js = std::fs::read_to_string(&build_result.server_bundle_path)?;
             let bundle_arc = Arc::new(bundle_js);
