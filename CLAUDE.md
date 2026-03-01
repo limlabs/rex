@@ -13,7 +13,7 @@ docker build -f Dockerfile.sandbox -t rex-sandbox .
 
 The wrapper fetches a GitHub PAT from 1Password (`op://claude/ClaudeLiminal-GitHub/pat`) and injects it into the sandbox so commits and PRs use the bot identity instead of your personal account.
 
-**On every session start**, run `.claude/scripts/sandbox-init.sh`. It is idempotent — first run configures git/gh identity from the PAT and fetches project dependencies (`cargo fetch`, `npm install`). Subsequent runs exit immediately.
+On first boot, the sandbox entrypoint automatically configures git/gh identity from the PAT and fetches project dependencies (`cargo fetch`, `npm install`). Subsequent sessions skip initialization.
 
 ### Conventional Commits
 

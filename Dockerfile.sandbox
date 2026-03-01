@@ -29,4 +29,7 @@ RUN apt-get update \
 # lefthook (git hooks manager)
 RUN curl -fsSL https://raw.githubusercontent.com/evilmartians/lefthook/master/install.sh | sh -s
 
+COPY --chmod=755 .claude/scripts/sandbox-entrypoint.sh /usr/local/bin/sandbox-entrypoint.sh
+
 USER agent
+ENTRYPOINT ["sandbox-entrypoint.sh"]
