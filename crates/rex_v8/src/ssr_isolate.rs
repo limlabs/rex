@@ -20,6 +20,7 @@ pub struct SsrIsolate {
     gsp_fn: v8::Global<v8::Function>,
     api_handler_fn: Option<v8::Global<v8::Function>>,
     document_fn: Option<v8::Global<v8::Function>>,
+    middleware_fn: Option<v8::Global<v8::Function>>,
     /// Last successfully loaded bundle, used to restore state on failed reload
     last_bundle: String,
 }
@@ -124,7 +125,7 @@ impl SsrIsolate {
     pub fn new(server_bundle_js: &str) -> Result<Self> {
         let mut isolate = v8::Isolate::new(v8::CreateParams::default());
 
-        let (context, render_fn, gssp_fn, gsp_fn, api_handler_fn, document_fn) = {
+        let (context, render_fn, gssp_fn, gsp_fn, api_handler_fn, document_fn, middleware_fn) = {
             v8::scope!(scope, &mut isolate);
 
             let context = v8::Context::new(scope, Default::default());
@@ -195,6 +196,9 @@ impl SsrIsolate {
             // Document renderer is optional — only present when _document exists
             let document_fn = v8_get_optional_fn!(scope, global, "__rex_render_document");
 
+            // Middleware is optional — only present when middleware.ts exists
+            let middleware_fn = v8_get_optional_fn!(scope, global, "__rex_run_middleware");
+
             (
                 v8::Global::new(scope, context),
                 v8::Global::new(scope, render_fn),
@@ -202,6 +206,7 @@ impl SsrIsolate {
                 v8::Global::new(scope, gsp_fn),
                 api_handler_fn,
                 document_fn,
+                middleware_fn,
             )
         };
 
@@ -213,6 +218,7 @@ impl SsrIsolate {
             gsp_fn,
             api_handler_fn,
             document_fn,
+            middleware_fn,
             last_bundle: server_bundle_js.to_string(),
         })
     }
@@ -354,6 +360,45 @@ impl SsrIsolate {
         Ok(Some(result.to_rust_string_lossy(scope)))
     }
 
+    /// Call __rex_run_middleware(reqJson) and return JSON result.
+    /// Returns Ok(None) if no middleware is loaded.
+    /// Handles async middleware by pumping V8's microtask queue.
+    pub fn run_middleware(&mut self, req_json: &str) -> Result<Option<String>> {
+        let mw_fn = match &self.middleware_fn {
+            Some(f) => f,
+            None => return Ok(None),
+        };
+
+        let result_str = {
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+            let func = v8::Local::new(scope, mw_fn);
+            let undef = v8::undefined(scope);
+            let arg0 = v8::String::new(scope, req_json)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+
+            let result = v8_call!(scope, func, undef.into(), &[arg0.into()])
+                .map_err(|e| anyhow::anyhow!("Middleware error: {e}"))?;
+
+            result.to_rust_string_lossy(scope)
+        };
+
+        if result_str == "__REX_MW_ASYNC__" {
+            self.isolate.perform_microtask_checkpoint();
+
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+            let resolve_result = v8_eval!(
+                scope,
+                "globalThis.__rex_resolve_middleware()",
+                "<mw-resolve>"
+            )
+            .map_err(|e| anyhow::anyhow!("Middleware error: {e}"))?;
+            Ok(Some(resolve_result.to_rust_string_lossy(scope)))
+        } else {
+            Ok(Some(result_str))
+        }
+    }
+
     /// Reload the server bundle (for dev mode hot reload)
     pub fn reload(&mut self, server_bundle_js: &str) -> Result<()> {
         v8::scope_with_context!(scope, &mut self.isolate, &self.context);
@@ -385,6 +430,9 @@ impl SsrIsolate {
 
         // Re-lookup document renderer (may be added/removed on reload)
         self.document_fn = v8_get_optional_fn!(scope, global, "__rex_render_document");
+
+        // Re-lookup middleware (may be added/removed on reload)
+        self.middleware_fn = v8_get_optional_fn!(scope, global, "__rex_run_middleware");
 
         self.last_bundle = server_bundle_js.to_string();
         debug!("SSR isolate reloaded");
@@ -1011,5 +1059,94 @@ globalThis.__rex_resolve_gsp = function() {
             r2.head, "",
             "page2 should have empty head (no leak from page1)"
         );
+    }
+
+    #[test]
+    fn test_run_middleware_no_middleware() {
+        let mut iso = make_isolate(&[(
+            "index",
+            "function Index() { return React.createElement('h1', null, 'Hello'); }",
+            None,
+        )]);
+        let result = iso.run_middleware(r#"{"method":"GET","url":"/"}"#).unwrap();
+        assert!(result.is_none(), "should return None when no middleware");
+    }
+
+    #[test]
+    fn test_run_middleware_next() {
+        crate::init_v8();
+        let mut bundle = format!(
+            "{}\n{}",
+            MOCK_REACT_RUNTIME,
+            make_server_bundle(&[(
+                "index",
+                "function Index() { return React.createElement('h1', null, 'Hello'); }",
+                None,
+            )])
+        );
+        bundle.push_str(r#"
+            globalThis.__rex_middleware = {
+                middleware: function(req) {
+                    return { _action: 'next', _url: null, _status: 307, _requestHeaders: {}, _responseHeaders: {} };
+                }
+            };
+            globalThis.__rex_run_middleware = function(reqJson) {
+                var mw = globalThis.__rex_middleware;
+                var result = mw.middleware(JSON.parse(reqJson));
+                return JSON.stringify({
+                    action: result._action,
+                    url: result._url || null,
+                    status: result._status || 307,
+                    request_headers: result._requestHeaders || {},
+                    response_headers: result._responseHeaders || {}
+                });
+            };
+        "#);
+        let mut iso = SsrIsolate::new(&bundle).unwrap();
+        let result = iso.run_middleware(r#"{"method":"GET","url":"/"}"#).unwrap();
+        assert!(result.is_some());
+        let json: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        assert_eq!(json["action"], "next");
+    }
+
+    #[test]
+    fn test_run_middleware_redirect() {
+        crate::init_v8();
+        let mut bundle = format!(
+            "{}\n{}",
+            MOCK_REACT_RUNTIME,
+            make_server_bundle(&[(
+                "index",
+                "function Index() { return React.createElement('h1', null, 'Hello'); }",
+                None,
+            )])
+        );
+        bundle.push_str(r#"
+            globalThis.__rex_middleware = {
+                middleware: function(req) {
+                    return { _action: 'redirect', _url: '/login', _status: 302, _requestHeaders: {}, _responseHeaders: {} };
+                }
+            };
+            globalThis.__rex_run_middleware = function(reqJson) {
+                var mw = globalThis.__rex_middleware;
+                var result = mw.middleware(JSON.parse(reqJson));
+                return JSON.stringify({
+                    action: result._action,
+                    url: result._url || null,
+                    status: result._status || 307,
+                    request_headers: result._requestHeaders || {},
+                    response_headers: result._responseHeaders || {}
+                });
+            };
+        "#);
+        let mut iso = SsrIsolate::new(&bundle).unwrap();
+        let result = iso
+            .run_middleware(r#"{"method":"GET","url":"/dashboard"}"#)
+            .unwrap();
+        assert!(result.is_some());
+        let json: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        assert_eq!(json["action"], "redirect");
+        assert_eq!(json["url"], "/login");
+        assert_eq!(json["status"], 302);
     }
 }

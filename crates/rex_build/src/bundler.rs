@@ -73,7 +73,13 @@ pub async fn build_bundles(
     )
     .instrument(info_span!("build_client_bundles"));
 
-    let (server_bundle_path, manifest) = tokio::try_join!(server_fut, client_fut)?;
+    let (server_bundle_path, mut manifest) = tokio::try_join!(server_fut, client_fut)?;
+
+    // Set middleware matchers on manifest (if middleware exists)
+    if let Some(mw_path) = &scan.middleware {
+        let source = fs::read_to_string(mw_path)?;
+        manifest.middleware_matchers = Some(extract_middleware_matchers(&source));
+    }
 
     // Save manifest
     manifest.save(&config.manifest_path())?;
@@ -127,6 +133,33 @@ if (typeof globalThis.TextDecoder === 'undefined') {
 }
 if (typeof globalThis.performance === 'undefined') {
     globalThis.performance = { now: function() { return Date.now(); } };
+}
+if (typeof globalThis.URL === 'undefined') {
+    globalThis.URL = function(path, base) {
+        if (base) {
+            // Simple URL joining: extract origin from base, append path
+            var m = String(base).match(/^(https?:\/\/[^\/]+)/);
+            var origin = m ? m[1] : '';
+            var p = String(path);
+            if (p.startsWith('/')) {
+                this.href = origin + p;
+            } else if (p.startsWith('http://') || p.startsWith('https://')) {
+                this.href = p;
+            } else {
+                this.href = origin + '/' + p;
+            }
+        } else {
+            this.href = String(path);
+        }
+        // Parse pathname from href
+        var withoutProto = this.href.replace(/^https?:\/\/[^\/]+/, '');
+        this.pathname = withoutProto ? withoutProto.split('?')[0].split('#')[0] : '/';
+        if (!this.pathname.startsWith('/')) this.pathname = '/' + this.pathname;
+        this.search = '';
+        var qi = this.href.indexOf('?');
+        if (qi !== -1) this.search = this.href.substring(qi).split('#')[0];
+    };
+    globalThis.URL.prototype.toString = function() { return this.href; };
 }
 "#;
 
@@ -254,6 +287,138 @@ globalThis.__rex_resolve_gsp = function() {
 };
 "#;
 
+/// Middleware runtime functions appended to the virtual entry when middleware.ts exists.
+/// Defines __rex_run_middleware(reqJson) and __rex_resolve_middleware().
+const MIDDLEWARE_RUNTIME: &str = r#"
+globalThis.__rex_mw_resolved = null;
+globalThis.__rex_mw_rejected = null;
+
+globalThis.__rex_run_middleware = function(reqJson) {
+    var mw = globalThis.__rex_middleware;
+    if (!mw) return JSON.stringify({ action: 'next' });
+
+    var middlewareFn = mw.middleware || mw.default;
+    if (!middlewareFn) return JSON.stringify({ action: 'next' });
+
+    var reqData = JSON.parse(reqJson);
+    var request = {
+        method: reqData.method,
+        url: reqData.url,
+        headers: reqData.headers || {},
+        cookies: reqData.cookies || {},
+        nextUrl: { pathname: reqData.pathname || reqData.url }
+    };
+
+    var result = middlewareFn(request);
+    if (result && typeof result.then === 'function') {
+        globalThis.__rex_mw_resolved = null;
+        globalThis.__rex_mw_rejected = null;
+        result.then(
+            function(v) { globalThis.__rex_mw_resolved = v; },
+            function(e) { globalThis.__rex_mw_rejected = e; }
+        );
+        return '__REX_MW_ASYNC__';
+    }
+    return JSON.stringify(__rex_serialize_mw(result));
+};
+
+globalThis.__rex_resolve_middleware = function() {
+    if (globalThis.__rex_mw_rejected) throw globalThis.__rex_mw_rejected;
+    if (globalThis.__rex_mw_resolved !== null) return JSON.stringify(__rex_serialize_mw(globalThis.__rex_mw_resolved));
+    throw new Error('Middleware promise did not resolve');
+};
+
+function __rex_serialize_mw(res) {
+    if (!res || !res._action) return { action: 'next' };
+    return {
+        action: res._action,
+        url: res._url || null,
+        status: res._status || 307,
+        request_headers: res._requestHeaders || {},
+        response_headers: res._responseHeaders || {}
+    };
+}
+"#;
+
+/// Extract middleware matcher patterns from middleware source code.
+/// Looks for `export const config = { matcher: [...] }` and extracts string literals.
+/// Returns empty vec if no matcher found (meaning: run on all paths).
+fn extract_middleware_matchers(source: &str) -> Vec<String> {
+    let mut matchers = Vec::new();
+    let mut in_config = false;
+    let mut in_matcher = false;
+    let mut brace_depth: i32 = 0;
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+
+        if !in_config {
+            if trimmed.contains("export") && trimmed.contains("config") {
+                in_config = true;
+                // Check if matcher is on the same line
+                if let Some(idx) = trimmed.find("matcher") {
+                    let after = &trimmed[idx..];
+                    extract_strings_from_fragment(after, &mut matchers);
+                    if after.contains(']') {
+                        return matchers;
+                    }
+                    in_matcher = true;
+                }
+                brace_depth = trimmed.matches('{').count() as i32
+                    - trimmed.matches('}').count() as i32;
+                if brace_depth <= 0 && trimmed.contains('}') {
+                    in_config = false;
+                }
+            }
+        } else {
+            brace_depth +=
+                trimmed.matches('{').count() as i32 - trimmed.matches('}').count() as i32;
+
+            if !in_matcher {
+                if let Some(idx) = trimmed.find("matcher") {
+                    let after = &trimmed[idx..];
+                    extract_strings_from_fragment(after, &mut matchers);
+                    if after.contains(']') {
+                        return matchers;
+                    }
+                    in_matcher = true;
+                }
+            } else {
+                extract_strings_from_fragment(trimmed, &mut matchers);
+                if trimmed.contains(']') {
+                    return matchers;
+                }
+            }
+
+            if brace_depth <= 0 {
+                in_config = false;
+                in_matcher = false;
+            }
+        }
+    }
+
+    matchers
+}
+
+/// Extract string literals (single or double quoted) from a code fragment.
+fn extract_strings_from_fragment(fragment: &str, out: &mut Vec<String>) {
+    let mut chars = fragment.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\'' || ch == '"' {
+            let mut s = String::new();
+            for c in chars.by_ref() {
+                if c == ch {
+                    break;
+                }
+                s.push(c);
+            }
+            if !s.is_empty() {
+                out.push(s);
+            }
+        }
+    }
+}
+
 /// Build the server bundle using rolldown.
 ///
 /// Produces a self-contained IIFE that includes React, all pages, and SSR
@@ -340,8 +505,20 @@ async fn build_server_bundle(
         entry.push_str("globalThis.__rex_document = __doc;\n");
     }
 
+    // Middleware (if middleware.ts exists at project root)
+    if let Some(mw_path) = &scan.middleware {
+        let path = mw_path.to_string_lossy().replace('\\', "/");
+        entry.push_str(&format!("\nimport * as __middleware from '{path}';\n"));
+        entry.push_str("globalThis.__rex_middleware = __middleware;\n");
+    }
+
     // SSR runtime functions
     entry.push_str(SSR_RUNTIME);
+
+    // Middleware runtime (only when middleware exists)
+    if scan.middleware.is_some() {
+        entry.push_str(MIDDLEWARE_RUNTIME);
+    }
 
     let entry_path = entries_dir.join("server-entry.js");
     fs::write(&entry_path, &entry)?;
@@ -390,6 +567,15 @@ async fn build_server_bundle(
             "rex/image".to_string(),
             vec![Some(
                 runtime_dir.join("image.js").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "rex/middleware".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("middleware.js")
+                    .to_string_lossy()
+                    .to_string(),
             )],
         ),
         // Next.js compatibility shims
@@ -1491,6 +1677,7 @@ mod tests {
             document,
             error: None,
             not_found: None,
+            middleware: None,
         };
 
         (tmp, config, scan)
@@ -1893,6 +2080,7 @@ export function renderToString(el) { return renderEl(el); }
             document: None,
             error: None,
             not_found: None,
+            middleware: None,
         };
 
         let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
@@ -2046,6 +2234,7 @@ export default function Home() {
             document: None,
             error: None,
             not_found: None,
+            middleware: None,
         };
 
         let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
@@ -2320,6 +2509,7 @@ export default function Home() {
             document: None,
             error: None,
             not_found: None,
+            middleware: None,
         };
 
         let (_result, pool) = build_and_load(&config, &scan).await;
@@ -2534,6 +2724,50 @@ export default function Home() {
             assert!(!content.contains("@import \"tailwindcss\""), "should be compiled");
             assert!(!content.is_empty(), "compiled CSS should not be empty");
         }
+    }
+
+    #[test]
+    fn test_extract_middleware_matchers_array() {
+        let source = r#"
+export function middleware(request) {}
+
+export const config = {
+    matcher: ['/dashboard/:path*', '/api/admin/:path*']
+}
+"#;
+        let matchers = extract_middleware_matchers(source);
+        assert_eq!(matchers, vec!["/dashboard/:path*", "/api/admin/:path*"]);
+    }
+
+    #[test]
+    fn test_extract_middleware_matchers_single_line() {
+        let source = r#"
+export function middleware(req) { return NextResponse.next(); }
+export const config = { matcher: ['/protected'] }
+"#;
+        let matchers = extract_middleware_matchers(source);
+        assert_eq!(matchers, vec!["/protected"]);
+    }
+
+    #[test]
+    fn test_extract_middleware_matchers_no_config() {
+        let source = r#"
+export function middleware(request) {
+    return NextResponse.next();
+}
+"#;
+        let matchers = extract_middleware_matchers(source);
+        assert!(matchers.is_empty());
+    }
+
+    #[test]
+    fn test_extract_middleware_matchers_no_matcher() {
+        let source = r#"
+export function middleware(request) {}
+export const config = { runtime: 'edge' }
+"#;
+        let matchers = extract_middleware_matchers(source);
+        assert!(matchers.is_empty());
     }
 }
 

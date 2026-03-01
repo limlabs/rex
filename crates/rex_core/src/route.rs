@@ -105,6 +105,29 @@ fn default_redirect_status() -> u16 {
     307
 }
 
+// --- Middleware types ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MiddlewareAction {
+    Next,
+    Redirect,
+    Rewrite,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MiddlewareResult {
+    pub action: MiddlewareAction,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default = "default_redirect_status")]
+    pub status: u16,
+    #[serde(default)]
+    pub request_headers: HashMap<String, String>,
+    #[serde(default)]
+    pub response_headers: HashMap<String, String>,
+}
+
 // --- Middleware config types (rex.config.json) ---
 
 /// A redirect rule from rex.config.json
@@ -342,5 +365,35 @@ mod tests {
         assert_eq!(config.headers[0].headers[0].key, "X-Frame-Options");
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_middleware_result_deserialize_next() {
+        let json = r#"{"action":"next"}"#;
+        let result: MiddlewareResult = serde_json::from_str(json).unwrap();
+        assert!(matches!(result.action, MiddlewareAction::Next));
+        assert!(result.url.is_none());
+        assert_eq!(result.status, 307);
+        assert!(result.request_headers.is_empty());
+        assert!(result.response_headers.is_empty());
+    }
+
+    #[test]
+    fn test_middleware_result_deserialize_redirect() {
+        let json = r#"{"action":"redirect","url":"/login","status":302}"#;
+        let result: MiddlewareResult = serde_json::from_str(json).unwrap();
+        assert!(matches!(result.action, MiddlewareAction::Redirect));
+        assert_eq!(result.url.as_deref(), Some("/login"));
+        assert_eq!(result.status, 302);
+    }
+
+    #[test]
+    fn test_middleware_result_deserialize_rewrite() {
+        let json =
+            r#"{"action":"rewrite","url":"/internal","response_headers":{"x-rewritten":"true"}}"#;
+        let result: MiddlewareResult = serde_json::from_str(json).unwrap();
+        assert!(matches!(result.action, MiddlewareAction::Rewrite));
+        assert_eq!(result.url.as_deref(), Some("/internal"));
+        assert_eq!(result.response_headers.get("x-rewritten").unwrap(), "true");
     }
 }

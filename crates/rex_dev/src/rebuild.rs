@@ -3,7 +3,7 @@ use crate::watcher::{FileEvent, FileEventKind};
 use anyhow::Result;
 use rex_build::build_bundles;
 use rex_core::RexConfig;
-use rex_router::{scan_pages, RouteTrie};
+use rex_router::{scan_project, RouteTrie};
 use rex_server::handlers::{self, AppState, HotState};
 use std::sync::Arc;
 use std::time::Instant;
@@ -19,11 +19,11 @@ pub async fn handle_file_event(
     debug!(path = %event.path.display(), kind = ?event.kind, "Processing file change");
 
     match event.kind {
-        FileEventKind::PageModified | FileEventKind::CssModified => {
+        FileEventKind::PageModified | FileEventKind::CssModified | FileEventKind::MiddlewareModified => {
             let t0 = Instant::now();
 
             // Rescan, rebuild, reload isolates, update hot state
-            let scan = scan_pages(&config.pages_dir)?;
+            let scan = scan_project(&config.project_root, &config.pages_dir)?;
             let t_scan = t0.elapsed();
 
             // Get project_config from current hot state for build aliases
@@ -74,6 +74,8 @@ pub async fn handle_file_event(
             let manifest_json = HotState::compute_manifest_json(&build_result.build_id, &build_result.manifest);
             let mut hot_guard = state.hot.write().map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
             *hot_guard = Arc::new(HotState {
+                has_middleware: scan.middleware.is_some(),
+                middleware_matchers: build_result.manifest.middleware_matchers.clone(),
                 manifest: build_result.manifest,
                 build_id: build_result.build_id,
                 manifest_json,
@@ -98,7 +100,7 @@ pub async fn handle_file_event(
         }
         FileEventKind::PageRemoved => {
             // Full rebuild: routes changed, need new trie + manifest
-            let scan = scan_pages(&config.pages_dir)?;
+            let scan = scan_project(&config.project_root, &config.pages_dir)?;
 
             // Get project_config from current hot state for build aliases
             let project_config = {
@@ -133,6 +135,8 @@ pub async fn handle_file_event(
             *hot_guard = Arc::new(HotState {
                 route_trie: RouteTrie::from_routes(&scan.routes),
                 api_route_trie: RouteTrie::from_routes(&scan.api_routes),
+                has_middleware: scan.middleware.is_some(),
+                middleware_matchers: build_result.manifest.middleware_matchers.clone(),
                 manifest: build_result.manifest,
                 build_id: build_result.build_id,
                 has_custom_404: scan.not_found.is_some(),

@@ -4,7 +4,7 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use std::path::PathBuf;
 use axum::response::{Html, IntoResponse, Response};
 use futures::stream::{self, StreamExt};
-use rex_core::{DataStrategy, ProjectConfig, ServerSidePropsContext};
+use rex_core::{DataStrategy, MiddlewareAction, MiddlewareResult, ProjectConfig, ServerSidePropsContext};
 use rex_router::RouteTrie;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -29,6 +29,10 @@ pub struct HotState {
     pub manifest_json: String,
     /// Cached document descriptor from _document rendering. None if no custom _document.
     pub document_descriptor: Option<DocumentDescriptor>,
+    /// Whether middleware.ts exists in the project root.
+    pub has_middleware: bool,
+    /// Middleware matcher patterns (None = no middleware, Some(empty) = run on all).
+    pub middleware_matchers: Option<Vec<String>>,
 }
 
 impl HotState {
@@ -256,6 +260,36 @@ pub async fn api_handler(
     info!(path, method = %method, "Handling API request");
 
     let hot = snapshot(&state);
+
+    // Run middleware before route matching
+    if should_run_middleware(path, &hot) {
+        let header_map: HashMap<String, String> = headers
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect();
+        match execute_middleware(&state, path, method.as_str(), &header_map).await {
+            Ok(Some(mw)) => match mw.action {
+                MiddlewareAction::Redirect => {
+                    let url = mw.url.as_deref().unwrap_or("/");
+                    let status = StatusCode::from_u16(mw.status).unwrap_or(StatusCode::TEMPORARY_REDIRECT);
+                    return Response::builder()
+                        .status(status)
+                        .header("location", url)
+                        .body(Body::empty())
+                        .expect("response build");
+                }
+                MiddlewareAction::Rewrite | MiddlewareAction::Next => {
+                    // For API routes, rewrite/next continue normally
+                }
+            },
+            Ok(None) => {}
+            Err(e) => {
+                error!("Middleware error: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, format!("Middleware error: {e}")).into_response();
+            }
+        }
+    }
+
     let route_match = match hot.api_route_trie.match_path(path) {
         Some(m) => m,
         None => return StatusCode::NOT_FOUND.into_response(),
@@ -382,6 +416,57 @@ fn collect_headers(path: &str, config: &ProjectConfig) -> Vec<(String, String)> 
     result
 }
 
+/// Check if middleware should run for the given path.
+fn should_run_middleware(path: &str, hot: &HotState) -> bool {
+    if !hot.has_middleware {
+        return false;
+    }
+    match &hot.middleware_matchers {
+        None => false,
+        Some(matchers) => {
+            if matchers.is_empty() {
+                // No matcher = run on all paths
+                return true;
+            }
+            matchers
+                .iter()
+                .any(|pattern| ProjectConfig::match_pattern(pattern, path).is_some())
+        }
+    }
+}
+
+/// Execute middleware in V8 and return the result.
+async fn execute_middleware(
+    state: &Arc<AppState>,
+    path: &str,
+    method: &str,
+    headers: &HashMap<String, String>,
+) -> Result<Option<MiddlewareResult>, String> {
+    let req_data = serde_json::json!({
+        "method": method,
+        "url": path,
+        "pathname": path,
+        "headers": headers,
+        "cookies": {},
+    });
+    let req_json = serde_json::to_string(&req_data).expect("JSON serialization");
+
+    let result = state
+        .isolate_pool
+        .execute(move |iso| iso.run_middleware(&req_json))
+        .await;
+
+    match result {
+        Ok(Ok(Some(json))) => match serde_json::from_str::<MiddlewareResult>(&json) {
+            Ok(mw) => Ok(Some(mw)),
+            Err(e) => Err(format!("Failed to parse middleware result: {e}")),
+        },
+        Ok(Ok(None)) => Ok(None),
+        Ok(Err(e)) => Err(format!("Middleware V8 error: {e}")),
+        Err(e) => Err(format!("Middleware pool error: {e}")),
+    }
+}
+
 /// Main page handler - catches all routes and performs SSR
 pub async fn page_handler(
     State(state): State<Arc<AppState>>,
@@ -392,6 +477,61 @@ pub async fn page_handler(
     info!(path, "Handling page request");
 
     let hot = snapshot(&state);
+
+    // Run middleware before anything else
+    let mut mw_response_headers: Vec<(String, String)> = Vec::new();
+    if should_run_middleware(path, &hot) {
+        let header_map: HashMap<String, String> = headers
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect();
+        match execute_middleware(&state, path, "GET", &header_map).await {
+            Ok(Some(mw)) => match mw.action {
+                MiddlewareAction::Redirect => {
+                    let url = mw.url.as_deref().unwrap_or("/");
+                    let status = StatusCode::from_u16(mw.status).unwrap_or(StatusCode::TEMPORARY_REDIRECT);
+                    return Response::builder()
+                        .status(status)
+                        .header("location", url)
+                        .body(Body::empty())
+                        .expect("response build");
+                }
+                MiddlewareAction::Rewrite => {
+                    if let Some(url) = &mw.url {
+                        // Parse the URL to get just the path
+                        let rewrite_path = if let Ok(parsed) = url::Url::parse(url) {
+                            parsed.path().to_string()
+                        } else {
+                            url.clone()
+                        };
+                        mw_response_headers = mw.response_headers.into_iter().collect();
+                        let custom_headers = collect_headers(&rewrite_path, &hot.project_config);
+                        let mut response = page_handler_inner(&state, &hot, &rewrite_path, &uri, &headers).await;
+                        for (key, value) in custom_headers.into_iter().chain(mw_response_headers) {
+                            if let (Ok(name), Ok(val)) = (
+                                axum::http::header::HeaderName::from_bytes(key.as_bytes()),
+                                axum::http::header::HeaderValue::from_str(&value),
+                            ) {
+                                response.headers_mut().insert(name, val);
+                            }
+                        }
+                        return response;
+                    }
+                }
+                MiddlewareAction::Next => {
+                    mw_response_headers = mw.response_headers.into_iter().collect();
+                }
+            },
+            Ok(None) => {}
+            Err(e) => {
+                error!("Middleware error: {e}");
+                if state.is_dev {
+                    return Html(dev_error_overlay("Middleware Error", &e, None)).into_response();
+                }
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        }
+    }
 
     // Check redirect rules first
     if let Some(redirect_response) = check_redirects(path, &hot.project_config) {
@@ -412,8 +552,8 @@ pub async fn page_handler(
 
     let mut response = page_handler_inner(&state, &hot, path, &uri, &headers).await;
 
-    // Apply custom headers
-    for (key, value) in custom_headers {
+    // Apply custom headers + middleware response headers
+    for (key, value) in custom_headers.into_iter().chain(mw_response_headers) {
         if let (Ok(name), Ok(val)) = (
             axum::http::header::HeaderName::from_bytes(key.as_bytes()),
             axum::http::header::HeaderValue::from_str(&value),
@@ -1048,6 +1188,8 @@ globalThis.__rex_resolve_gsp = function() {
                 project_config: rex_core::ProjectConfig::default(),
                 manifest_json,
                 document_descriptor: None,
+                has_middleware: false,
+                middleware_matchers: None,
             })),
         });
 
@@ -1315,6 +1457,8 @@ globalThis.__rex_resolve_gsp = function() {
                 project_config,
                 manifest_json,
                 document_descriptor: None,
+                has_middleware: false,
+                middleware_matchers: None,
             })),
         });
 
@@ -1481,5 +1625,135 @@ globalThis.__rex_resolve_gsp = function() {
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(resp.headers().get("x-custom").unwrap(), "hello");
         assert_eq!(resp.headers().get("x-frame-options").unwrap(), "DENY");
+    }
+
+    /// Build a test app with middleware injected into V8.
+    fn build_test_app_with_middleware(
+        routes: Vec<Route>,
+        pages: &[(&str, &str, Option<&str>)],
+        middleware_js: &str,
+        matchers: Vec<String>,
+    ) -> Router {
+        rex_v8::init_v8();
+        let mut bundle = format!("{}\n{}", MOCK_REACT_RUNTIME, make_server_bundle(pages));
+        bundle.push_str(middleware_js);
+        let pool = rex_v8::IsolatePool::new(1, Arc::new(bundle)).expect("failed to create pool");
+
+        let trie = RouteTrie::from_routes(&routes);
+        let mut manifest = rex_build::AssetManifest::new("test-build-id".to_string());
+
+        for (route, (_, _, gssp)) in routes.iter().zip(pages.iter()) {
+            let strategy = if gssp.is_some() {
+                DataStrategy::GetServerSideProps
+            } else {
+                DataStrategy::None
+            };
+            manifest.add_page(&route.pattern, "test.js", strategy);
+        }
+
+        let build_id = "test-build-id".to_string();
+        let manifest_json = HotState::compute_manifest_json(&build_id, &manifest);
+
+        let state = Arc::new(AppState {
+            isolate_pool: pool,
+            is_dev: false,
+            project_root: PathBuf::from("/tmp/rex-test"),
+            image_cache: rex_image::ImageCache::new(PathBuf::from("/tmp/rex-test-cache")),
+            hot: RwLock::new(Arc::new(HotState {
+                route_trie: trie,
+                api_route_trie: RouteTrie::from_routes(&[]),
+                manifest,
+                build_id,
+                has_custom_404: false,
+                has_custom_error: false,
+                has_custom_document: false,
+                project_config: rex_core::ProjectConfig::default(),
+                manifest_json,
+                document_descriptor: None,
+                has_middleware: true,
+                middleware_matchers: Some(matchers),
+            })),
+        });
+
+        Router::new()
+            .route("/_rex/data/{build_id}/{*path}", get(data_handler))
+            .fallback(page_handler)
+            .with_state(state)
+    }
+
+    /// Minimal middleware runtime for tests (mirrors MIDDLEWARE_RUNTIME from bundler).
+    const TEST_MIDDLEWARE_REDIRECT: &str = r#"
+        globalThis.__rex_run_middleware = function(reqJson) {
+            var req = JSON.parse(reqJson);
+            if (req.pathname === '/protected') {
+                return JSON.stringify({
+                    action: 'redirect',
+                    url: '/login',
+                    status: 302,
+                    request_headers: {},
+                    response_headers: {}
+                });
+            }
+            return JSON.stringify({
+                action: 'next',
+                url: null,
+                status: 307,
+                request_headers: {},
+                response_headers: {}
+            });
+        };
+    "#;
+
+    #[tokio::test]
+    async fn test_middleware_redirect() {
+        let app = build_test_app_with_middleware(
+            vec![
+                make_route("/", "index.tsx", vec![]),
+                make_route("/login", "login.tsx", vec![]),
+                make_route("/protected", "protected.tsx", vec![]),
+            ],
+            &[
+                ("index", "function Index() { return React.createElement('div', null, 'Home'); }", None),
+                ("login", "function Login() { return React.createElement('div', null, 'Login'); }", None),
+                ("protected", "function Protected() { return React.createElement('div', null, 'Secret'); }", None),
+            ],
+            TEST_MIDDLEWARE_REDIRECT,
+            vec!["/protected".to_string()],
+        );
+
+        // /protected should redirect to /login
+        let resp = app.clone()
+            .oneshot(Request::get("/protected").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FOUND); // 302
+        assert_eq!(resp.headers().get("location").unwrap(), "/login");
+
+        // / should pass through (not matched by middleware matchers)
+        let resp = app
+            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_middleware_next_passthrough() {
+        let app = build_test_app_with_middleware(
+            vec![make_route("/", "index.tsx", vec![])],
+            &[("index", "function Index() { return React.createElement('div', null, 'Home'); }", None)],
+            TEST_MIDDLEWARE_REDIRECT,
+            vec!["/".to_string()],
+        );
+
+        // / matches middleware matchers but middleware returns next for non-/protected
+        let resp = app
+            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let html = String::from_utf8_lossy(&body);
+        assert!(html.contains("Home"), "should render the page: {html}");
     }
 }

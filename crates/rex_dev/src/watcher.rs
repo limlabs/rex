@@ -11,6 +11,7 @@ pub enum FileEventKind {
     PageModified,
     PageRemoved,
     CssModified,
+    MiddlewareModified,
 }
 
 #[derive(Debug, Clone)]
@@ -45,7 +46,13 @@ pub fn start_watcher(project_root: &Path, pages_dir: &Path) -> Result<mpsc::Rece
 
                         let kind = match event.kind {
                             DebouncedEventKind::Any => {
-                                if is_css_file(&path) {
+                                if is_middleware_file(&path, &project_root_owned) {
+                                    if path.exists() {
+                                        FileEventKind::MiddlewareModified
+                                    } else {
+                                        FileEventKind::PageRemoved
+                                    }
+                                } else if is_css_file(&path) {
                                     if path.exists() {
                                         FileEventKind::CssModified
                                     } else {
@@ -93,6 +100,18 @@ fn is_page_file(path: &Path) -> bool {
         path.extension().and_then(|e| e.to_str()),
         Some("tsx" | "ts" | "jsx" | "js")
     )
+}
+
+fn is_middleware_file(path: &Path, project_root: &Path) -> bool {
+    if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+        if name == "middleware" && is_page_file(path) {
+            // Must be at project root (not nested in pages/ or subdirs)
+            if let Some(parent) = path.parent() {
+                return parent == project_root;
+            }
+        }
+    }
+    false
 }
 
 fn is_css_file(path: &Path) -> bool {

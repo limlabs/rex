@@ -5,7 +5,7 @@ use anyhow::Result;
 use axum::Router;
 use rex_build::AssetManifest;
 use rex_core::{DataStrategy, ProjectConfig, RexConfig, ServerSidePropsContext};
-use rex_router::{scan_pages, ScanResult, RouteTrie};
+use rex_router::{scan_project, ScanResult, RouteTrie};
 use rex_v8::{init_v8, IsolatePool};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -97,9 +97,9 @@ impl Rex {
 
         let project_config = ProjectConfig::load(&config.project_root)?;
 
-        // Scan pages
+        // Scan pages + middleware
         debug!("Scanning routes...");
-        let scan = scan_pages(&config.pages_dir)?;
+        let scan = scan_project(&config.project_root, &config.pages_dir)?;
         debug!(
             routes = scan.routes.len(),
             has_app = scan.app.is_some(),
@@ -152,8 +152,8 @@ impl Rex {
         // Load manifest
         let manifest = AssetManifest::load(&config.manifest_path())?;
 
-        // Scan routes (for trie)
-        let scan = scan_pages(&config.pages_dir)?;
+        // Scan routes + middleware (for trie)
+        let scan = scan_project(&config.project_root, &config.pages_dir)?;
 
         // Initialize V8
         init_v8();
@@ -218,6 +218,8 @@ impl Rex {
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
                 api_route_trie: api_trie,
+                has_middleware: scan.middleware.is_some(),
+                middleware_matchers: manifest.middleware_matchers.clone(),
                 manifest,
                 build_id,
                 has_custom_404: scan.not_found.is_some(),

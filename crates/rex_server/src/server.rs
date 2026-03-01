@@ -29,6 +29,8 @@ pub struct ServerConfig {
     pub has_custom_error: bool,
     pub has_custom_document: bool,
     pub project_config: ProjectConfig,
+    pub has_middleware: bool,
+    pub middleware_matchers: Option<Vec<String>>,
 }
 
 pub struct RexServer {
@@ -61,6 +63,8 @@ impl RexServer {
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: config.route_trie,
                 api_route_trie: config.api_route_trie,
+                has_middleware: config.has_middleware,
+                middleware_matchers: config.middleware_matchers,
                 manifest: config.manifest,
                 build_id: config.build_id,
                 has_custom_404: config.has_custom_404,

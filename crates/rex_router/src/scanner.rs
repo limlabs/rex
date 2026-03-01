@@ -11,6 +11,8 @@ pub struct ScanResult {
     pub document: Option<Route>,
     pub error: Option<Route>,
     pub not_found: Option<Route>,
+    /// Path to middleware file at project root (middleware.ts/js/tsx/jsx)
+    pub middleware: Option<std::path::PathBuf>,
 }
 
 /// Scan the pages/ directory and produce routes
@@ -47,21 +49,34 @@ pub fn scan_pages(pages_dir: &Path) -> anyhow::Result<ScanResult> {
         document,
         error,
         not_found,
+        middleware: None,
     })
 }
 
-fn walk_dir(
-    base: &Path,
-    dir: &Path,
-    callback: &mut dyn FnMut(&Path, &Path),
-) -> anyhow::Result<()> {
+/// Find middleware file at the project root (next to `pages/`).
+pub fn find_middleware(project_root: &Path) -> Option<std::path::PathBuf> {
+    for ext in &["ts", "tsx", "js", "jsx"] {
+        let path = project_root.join(format!("middleware.{ext}"));
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Scan pages and detect middleware. Convenience wrapper for callers that have the project root.
+pub fn scan_project(project_root: &Path, pages_dir: &Path) -> anyhow::Result<ScanResult> {
+    let mut scan = scan_pages(pages_dir)?;
+    scan.middleware = find_middleware(project_root);
+    Ok(scan)
+}
+
+fn walk_dir(base: &Path, dir: &Path, callback: &mut dyn FnMut(&Path, &Path)) -> anyhow::Result<()> {
     if !dir.exists() {
         return Ok(());
     }
 
-    let mut entries: Vec<_> = std::fs::read_dir(dir)?
-        .filter_map(|e| e.ok())
-        .collect();
+    let mut entries: Vec<_> = std::fs::read_dir(dir)?.filter_map(|e| e.ok()).collect();
     entries.sort_by_key(|e| e.file_name());
 
     for entry in entries {
@@ -77,7 +92,8 @@ fn walk_dir(
             }
             walk_dir(base, &path, callback)?;
         } else if is_page_file(&path) {
-            let rel_path = path.strip_prefix(base)
+            let rel_path = path
+                .strip_prefix(base)
                 .map_err(|e| anyhow::anyhow!("Failed to strip prefix {}: {e}", base.display()))?;
             callback(rel_path, &path);
         }
@@ -260,10 +276,27 @@ mod tests {
         assert_eq!(route.module_name(), "api/users/[id]");
 
         // Non-API route should be Regular
-        let route = parse_route(
-            Path::new("about.tsx"),
-            Path::new("/tmp/pages/about.tsx"),
-        );
+        let route = parse_route(Path::new("about.tsx"), Path::new("/tmp/pages/about.tsx"));
         assert_eq!(route.page_type, PageType::Regular);
+    }
+
+    #[test]
+    fn test_find_middleware_ts() {
+        let tmp = std::env::temp_dir().join("rex_test_find_mw");
+        let _ = std::fs::create_dir_all(&tmp);
+        std::fs::write(tmp.join("middleware.ts"), "export function middleware() {}").unwrap();
+        let result = find_middleware(&tmp);
+        assert!(result.is_some());
+        assert!(result.unwrap().ends_with("middleware.ts"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_find_middleware_none() {
+        let tmp = std::env::temp_dir().join("rex_test_find_mw_none");
+        let _ = std::fs::create_dir_all(&tmp);
+        let result = find_middleware(&tmp);
+        assert!(result.is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

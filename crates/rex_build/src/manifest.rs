@@ -22,6 +22,10 @@ pub struct AssetManifest {
     /// These are modulepreloaded in the HTML head to avoid import waterfalls.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shared_chunks: Vec<String>,
+    /// Middleware matcher patterns extracted from `export const config = { matcher: [...] }`.
+    /// None = no middleware, Some(empty) = run on all paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub middleware_matchers: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +48,7 @@ impl AssetManifest {
             global_css: Vec::new(),
             css_contents: HashMap::new(),
             shared_chunks: Vec::new(),
+            middleware_matchers: None,
         }
     }
 

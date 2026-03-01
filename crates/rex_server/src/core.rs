@@ -1,4 +1,4 @@
-use rex_core::{DataStrategy, ProjectConfig, ServerSidePropsContext};
+use rex_core::{DataStrategy, MiddlewareAction, MiddlewareResult, ProjectConfig, ServerSidePropsContext};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info};
@@ -154,6 +154,56 @@ pub fn collect_custom_headers(path: &str, config: &ProjectConfig) -> Vec<(String
     result
 }
 
+/// Check if middleware should run for the given path.
+fn should_run_middleware(path: &str, hot: &HotState) -> bool {
+    if !hot.has_middleware {
+        return false;
+    }
+    match &hot.middleware_matchers {
+        None => false,
+        Some(matchers) => {
+            if matchers.is_empty() {
+                return true;
+            }
+            matchers
+                .iter()
+                .any(|pattern| ProjectConfig::match_pattern(pattern, path).is_some())
+        }
+    }
+}
+
+/// Execute middleware in V8 and return the result.
+async fn execute_middleware(
+    state: &Arc<AppState>,
+    path: &str,
+    method: &str,
+    headers: &HashMap<String, String>,
+) -> Result<Option<MiddlewareResult>, String> {
+    let req_data = serde_json::json!({
+        "method": method,
+        "url": path,
+        "pathname": path,
+        "headers": headers,
+        "cookies": {},
+    });
+    let req_json = serde_json::to_string(&req_data).expect("JSON serialization");
+
+    let result = state
+        .isolate_pool
+        .execute(move |iso| iso.run_middleware(&req_json))
+        .await;
+
+    match result {
+        Ok(Ok(Some(json))) => match serde_json::from_str::<MiddlewareResult>(&json) {
+            Ok(mw) => Ok(Some(mw)),
+            Err(e) => Err(format!("Failed to parse middleware result: {e}")),
+        },
+        Ok(Ok(None)) => Ok(None),
+        Ok(Err(e)) => Err(format!("Middleware V8 error: {e}")),
+        Err(e) => Err(format!("Middleware pool error: {e}")),
+    }
+}
+
 /// Render a custom error page (404 or _error) via SSR, returning a full HTML RexResponse.
 async fn render_error_page(
     state: &Arc<AppState>,
@@ -210,6 +260,49 @@ pub async fn handle_page(
     let path = &req.path;
     info!(path = path.as_str(), "Handling page request (core)");
 
+    // Run middleware before anything else
+    let mut mw_response_headers: Vec<(String, String)> = Vec::new();
+    if should_run_middleware(path, hot) {
+        match execute_middleware(state, path, &req.method, &req.headers).await {
+            Ok(Some(mw)) => match mw.action {
+                MiddlewareAction::Redirect => {
+                    let url = mw.url.as_deref().unwrap_or("/");
+                    return RexResponse::redirect(mw.status, url);
+                }
+                MiddlewareAction::Rewrite => {
+                    if let Some(url) = &mw.url {
+                        let rewrite_path = if let Ok(parsed) = url::Url::parse(url) {
+                            parsed.path().to_string()
+                        } else {
+                            url.clone()
+                        };
+                        mw_response_headers = mw.response_headers.into_iter().collect();
+                        let custom_headers = collect_custom_headers(&rewrite_path, &hot.project_config);
+                        let mut response = handle_page_inner(state, hot, &rewrite_path, req).await;
+                        for (key, value) in custom_headers.into_iter().chain(mw_response_headers) {
+                            response.headers.push((key, value));
+                        }
+                        return response;
+                    }
+                }
+                MiddlewareAction::Next => {
+                    mw_response_headers = mw.response_headers.into_iter().collect();
+                }
+            },
+            Ok(None) => {}
+            Err(e) => {
+                error!("Middleware error: {e}");
+                if state.is_dev {
+                    return RexResponse::html(
+                        500,
+                        dev_error_overlay("Middleware Error", &e, None),
+                    );
+                }
+                return RexResponse::internal_error();
+            }
+        }
+    }
+
     // Check redirect rules first
     if let Some(redirect) = check_redirects(path, &hot.project_config) {
         return redirect;
@@ -229,8 +322,8 @@ pub async fn handle_page(
 
     let mut response = handle_page_inner(state, hot, path, req).await;
 
-    // Apply custom headers
-    for (key, value) in custom_headers {
+    // Apply custom headers + middleware response headers
+    for (key, value) in custom_headers.into_iter().chain(mw_response_headers) {
         response.headers.push((key, value));
     }
 
@@ -431,6 +524,26 @@ pub async fn handle_api(
 ) -> RexResponse {
     let path = &req.path;
     info!(path = path.as_str(), method = req.method.as_str(), "Handling API request (core)");
+
+    // Run middleware before route matching
+    if should_run_middleware(path, hot) {
+        match execute_middleware(state, path, &req.method, &req.headers).await {
+            Ok(Some(mw)) => match mw.action {
+                MiddlewareAction::Redirect => {
+                    let url = mw.url.as_deref().unwrap_or("/");
+                    return RexResponse::redirect(mw.status, url);
+                }
+                MiddlewareAction::Rewrite | MiddlewareAction::Next => {
+                    // Continue normally
+                }
+            },
+            Ok(None) => {}
+            Err(e) => {
+                error!("Middleware error: {e}");
+                return RexResponse::text(500, format!("Middleware error: {e}"));
+            }
+        }
+    }
 
     let route_match = match hot.api_route_trie.match_path(path) {
         Some(m) => m,
