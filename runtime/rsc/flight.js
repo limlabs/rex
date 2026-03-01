@@ -12,9 +12,16 @@
 // References between rows use "$<id>" strings as placeholders.
 
 var _nextId = 0;
+var _pendingSlots = [];
+var _hasPending = false;
 
 function _resetIds() {
     _nextId = 0;
+}
+
+function _resetPending() {
+    _pendingSlots = [];
+    _hasPending = false;
 }
 
 function _allocId() {
@@ -75,6 +82,19 @@ function _serialize(value, rows) {
                 }));
                 return '$E' + errId;
             }
+            // Async server component — returns a Promise
+            if (rendered && typeof rendered.then === 'function') {
+                var slotId = _allocId();
+                var slot = { id: slotId, promise: rendered, resolved: false, rejected: false, value: undefined, error: undefined };
+                rendered.then(
+                    function(v) { slot.resolved = true; slot.value = v; },
+                    function(e) { slot.rejected = true; slot.error = e; }
+                );
+                _pendingSlots.push(slot);
+                _hasPending = true;
+                rows.push('J:' + slotId + ':null');  // placeholder
+                return '$' + slotId;
+            }
             return _serialize(rendered, rows);
         }
 
@@ -124,8 +144,209 @@ function _serializeProps(props, rows) {
     return result;
 }
 
+// Resolve pending async slots. Called iteratively from Rust after
+// fetch loop + microtask checkpoint. Returns "done" or "pending".
+globalThis.__rex_resolve_rsc_pending = function() {
+    var stillPending = false;
+    for (var i = 0; i < _pendingSlots.length; i++) {
+        var slot = _pendingSlots[i];
+        if (slot.resolved) {
+            // Re-serialize the resolved value, replacing the placeholder row
+            var newRows = [];
+            var ref = _serialize(slot.value, newRows);
+            // Find and replace the placeholder row for this slot
+            var placeholder = 'J:' + slot.id + ':null';
+            var rscRows = globalThis.__rex_rsc_rows;
+            for (var j = 0; j < rscRows.length; j++) {
+                if (rscRows[j] === placeholder) {
+                    // Replace with the resolved rows + a final row for this slot
+                    rscRows.splice(j, 1);
+                    // Insert new rows at the same position
+                    for (var k = 0; k < newRows.length; k++) {
+                        rscRows.splice(j + k, 0, newRows[k]);
+                    }
+                    // Add the resolved reference row
+                    rscRows.splice(j + newRows.length, 0, 'J:' + slot.id + ':' + JSON.stringify(ref));
+                    break;
+                }
+            }
+            // Mark as fully handled
+            slot.resolved = false;
+            slot.value = undefined;
+            slot.promise = null;
+        } else if (slot.rejected) {
+            var rscRows2 = globalThis.__rex_rsc_rows;
+            var placeholder2 = 'J:' + slot.id + ':null';
+            for (var j2 = 0; j2 < rscRows2.length; j2++) {
+                if (rscRows2[j2] === placeholder2) {
+                    rscRows2[j2] = 'E:' + slot.id + ':' + JSON.stringify({
+                        message: String(slot.error),
+                        stack: slot.error && slot.error.stack ? slot.error.stack : ''
+                    });
+                    break;
+                }
+            }
+            slot.rejected = false;
+            slot.error = undefined;
+            slot.promise = null;
+        }
+    }
+    // Check if re-serialization discovered new pending slots (async components
+    // that were nested inside the resolved value of another async component)
+    _hasPending = false;
+    for (var n = 0; n < _pendingSlots.length; n++) {
+        var s = _pendingSlots[n];
+        if (s.promise !== null) {
+            _hasPending = true;
+            stillPending = true;
+        }
+    }
+    return stillPending ? 'pending' : 'done';
+};
+
+// Finalize flight data after all async slots are resolved.
+globalThis.__rex_finalize_rsc_flight = function() {
+    var result = globalThis.__rex_rsc_rows.join('\n');
+    globalThis.__rex_rsc_rows = null;
+    _resetPending();
+    return result;
+};
+
+// Convert resolved flight rows to HTML string.
+// Parses flight data and reconstructs HTML without calling React renderToString
+// (which can't handle async components).
+function _flightToHtml(rows) {
+    var nodes = {};
+    var rootId = null;
+
+    for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        if (row.indexOf('J:') === 0) {
+            var firstColon = row.indexOf(':');
+            var secondColon = row.indexOf(':', firstColon + 1);
+            var id = row.substring(firstColon + 1, secondColon);
+            var json = row.substring(secondColon + 1);
+            try {
+                nodes[id] = JSON.parse(json);
+            } catch (e) {
+                nodes[id] = null;
+            }
+        } else if (row.indexOf('M:') === 0) {
+            // Client module reference — store for lookup
+            var firstColon2 = row.indexOf(':');
+            var secondColon2 = row.indexOf(':', firstColon2 + 1);
+            var modId = row.substring(firstColon2 + 1, secondColon2);
+            var modJson = row.substring(secondColon2 + 1);
+            try {
+                nodes['M' + modId] = JSON.parse(modJson);
+            } catch (e) {}
+        } else if (row.indexOf('R:') === 0) {
+            rootId = row.substring(2);
+        }
+    }
+
+    if (rootId === null) return '';
+    return _renderFlightNode(nodes[rootId], nodes);
+}
+
+// Void elements that must not have a closing tag
+var _voidElements = {area:1,base:1,br:1,col:1,embed:1,hr:1,img:1,input:1,link:1,meta:1,source:1,track:1,wbr:1};
+
+function _renderFlightNode(value, nodes) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') {
+        // Check if it's a reference like "$5"
+        if (value.charAt(0) === '$') {
+            var refPart = value.substring(1);
+            // Client module reference "$M<id>"
+            if (refPart.charAt(0) === 'M') {
+                return '<div data-client-component="true"></div>';
+            }
+            // Error reference "$E<id>"
+            if (refPart.charAt(0) === 'E') return '';
+            // Node reference
+            if (nodes[refPart] !== undefined) {
+                return _renderFlightNode(nodes[refPart], nodes);
+            }
+            return '';
+        }
+        // Escape HTML entities
+        return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+
+    if (Array.isArray(value)) {
+        var out = '';
+        for (var i = 0; i < value.length; i++) {
+            out += _renderFlightNode(value[i], nodes);
+        }
+        return out;
+    }
+
+    if (typeof value === 'object') {
+        // Element node: {"t":"div","p":{...}}
+        if (value.t !== undefined) {
+            var tag = value.t;
+            // Client component reference: "$M<id>"
+            if (typeof tag === 'string' && tag.charAt(0) === '$' && tag.charAt(1) === 'M') {
+                var clientModId = tag.substring(2);
+                return '<div data-client-component="' + (nodes['M' + clientModId] ? nodes['M' + clientModId].id : '') + '"></div>';
+            }
+            var attrs = '';
+            var childrenHtml = '';
+            var props = value.p || {};
+            for (var key in props) {
+                if (!Object.prototype.hasOwnProperty.call(props, key)) continue;
+                if (key === 'children') {
+                    childrenHtml = _renderFlightNode(props[key], nodes);
+                } else if (key === 'className') {
+                    attrs += ' class="' + _escapeAttr(String(props[key])) + '"';
+                } else if (key === 'htmlFor') {
+                    attrs += ' for="' + _escapeAttr(String(props[key])) + '"';
+                } else if (typeof props[key] === 'string') {
+                    attrs += ' ' + key + '="' + _escapeAttr(props[key]) + '"';
+                } else if (typeof props[key] === 'number') {
+                    attrs += ' ' + key + '="' + props[key] + '"';
+                } else if (props[key] === true) {
+                    attrs += ' ' + key;
+                }
+            }
+            if (_voidElements[tag]) {
+                return '<' + tag + attrs + '/>';
+            }
+            return '<' + tag + attrs + '>' + childrenHtml + '</' + tag + '>';
+        }
+        // Plain object — try to render its values
+        return '';
+    }
+
+    return '';
+}
+
+function _escapeAttr(s) {
+    return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Finalize RSC-to-HTML after all async slots are resolved.
+// Converts flight data to HTML directly (does not re-invoke React renderToString,
+// which cannot handle async server components).
+globalThis.__rex_finalize_rsc_to_html = function() {
+    var rows = globalThis.__rex_rsc_rows;
+    var flightData = rows.join('\n');
+    globalThis.__rex_rsc_rows = null;
+    _resetPending();
+
+    var html = _flightToHtml(rows);
+    return JSON.stringify({
+        body: html,
+        head: '',
+        flight: flightData
+    });
+};
+
 // Main entry: render a React element tree to flight data string.
 // Returns the flight data as a newline-delimited string.
+// Returns "__REX_RSC_ASYNC__" if async server components are pending.
 globalThis.__rex_render_flight = function(routeKey, propsJson) {
     var props = JSON.parse(propsJson);
     var Page = globalThis.__rex_app_pages[routeKey];
@@ -142,6 +363,7 @@ globalThis.__rex_render_flight = function(routeKey, propsJson) {
     }
 
     _resetIds();
+    _resetPending();
     var rows = [];
     var rootRef = _serialize(element, rows);
 
@@ -150,12 +372,18 @@ globalThis.__rex_render_flight = function(routeKey, propsJson) {
     rows.push('J:' + rootId + ':' + JSON.stringify(rootRef));
     rows.push('R:' + rootId); // Root marker
 
+    if (_hasPending) {
+        globalThis.__rex_rsc_rows = rows;
+        return '__REX_RSC_ASYNC__';
+    }
+
     return rows.join('\n');
 };
 
 // Two-pass render: produce flight data, then render to HTML.
 // For initial page loads, we need both the flight data (for hydration)
 // and the HTML (for immediate display).
+// Returns "__REX_RSC_HTML_ASYNC__" if async server components are pending.
 globalThis.__rex_render_rsc_to_html = function(routeKey, propsJson) {
     var props = JSON.parse(propsJson);
     var Page = globalThis.__rex_app_pages[routeKey];
@@ -177,11 +405,18 @@ globalThis.__rex_render_rsc_to_html = function(routeKey, propsJson) {
 
     // Pass 1: Generate flight data
     _resetIds();
+    _resetPending();
     var rows = [];
     var rootRef = _serialize(element, rows);
     var rootId = _allocId();
     rows.push('J:' + rootId + ':' + JSON.stringify(rootRef));
     rows.push('R:' + rootId);
+
+    if (_hasPending) {
+        globalThis.__rex_rsc_rows = rows;
+        return '__REX_RSC_HTML_ASYNC__';
+    }
+
     var flightData = rows.join('\n');
 
     // Pass 2: Render to HTML (re-create the element since server components

@@ -442,6 +442,7 @@ impl SsrIsolate {
 
     /// Render RSC flight data for a route (app/ routes only).
     /// Returns the flight data string for client-side navigation.
+    /// Handles async server components via iterative resolve loop.
     pub fn render_rsc_flight(&mut self, route_key: &str, props_json: &str) -> Result<String> {
         let rsc_fn = self
             .rsc_flight_fn
@@ -467,11 +468,28 @@ impl SsrIsolate {
         // Run fetch loop in case server components used fetch()
         crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
 
+        if result_str == "__REX_RSC_ASYNC__" {
+            self.resolve_rsc_async()?;
+
+            let finalized = {
+                v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+                let result = v8_eval!(
+                    scope,
+                    "globalThis.__rex_finalize_rsc_flight()",
+                    "<rsc-finalize-flight>"
+                )
+                .map_err(|e| anyhow::anyhow!("RSC finalize error: {e}"))?;
+                result.to_rust_string_lossy(scope)
+            };
+            return Ok(finalized);
+        }
+
         Ok(result_str)
     }
 
     /// Two-pass RSC render: flight data + HTML (app/ routes only).
     /// Returns RenderResult with body HTML, head, and flight data.
+    /// Handles async server components via iterative resolve loop.
     pub fn render_rsc_to_html(
         &mut self,
         route_key: &str,
@@ -501,9 +519,62 @@ impl SsrIsolate {
         // Run fetch loop in case server components used fetch()
         crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
 
+        if result_str == "__REX_RSC_HTML_ASYNC__" {
+            self.resolve_rsc_async()?;
+
+            let finalized = {
+                v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+                let result = v8_eval!(
+                    scope,
+                    "globalThis.__rex_finalize_rsc_to_html()",
+                    "<rsc-finalize-html>"
+                )
+                .map_err(|e| anyhow::anyhow!("RSC finalize error: {e}"))?;
+                result.to_rust_string_lossy(scope)
+            };
+
+            let parsed: RscRenderResult =
+                serde_json::from_str(&finalized).context("Failed to parse RSC finalize result")?;
+            return Ok(parsed);
+        }
+
         let parsed: RscRenderResult =
             serde_json::from_str(&result_str).context("Failed to parse RSC render result")?;
         Ok(parsed)
+    }
+
+    /// Iterative resolve loop for async server components.
+    /// Runs fetch loop + microtask pump, then calls __rex_resolve_rsc_pending()
+    /// until all async slots are resolved (or timeout).
+    fn resolve_rsc_async(&mut self) -> Result<()> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            if std::time::Instant::now() > deadline {
+                return Err(anyhow::anyhow!("RSC async resolution timed out after 30s"));
+            }
+
+            crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
+
+            let status = {
+                v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+                let result = v8_eval!(
+                    scope,
+                    "globalThis.__rex_resolve_rsc_pending()",
+                    "<rsc-resolve>"
+                )
+                .map_err(|e| anyhow::anyhow!("RSC resolve error: {e}"))?;
+                result.to_rust_string_lossy(scope)
+            };
+
+            match status.as_str() {
+                "done" => break,
+                "pending" => continue,
+                other => {
+                    return Err(anyhow::anyhow!("Unexpected RSC resolve status: {}", other));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Reload the server bundle (for dev mode hot reload)

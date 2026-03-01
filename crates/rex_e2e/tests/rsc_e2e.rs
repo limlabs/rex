@@ -784,4 +784,61 @@ mod rsc {
             "Body tag must appear before __rex div"
         );
     }
+
+    // -------------------------------------------------------
+    // Async server component tests
+    // -------------------------------------------------------
+
+    #[tokio::test]
+    #[ignore]
+    async fn rsc_async_server_component_renders() {
+        let url = format!("{}/data", base_url());
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .unwrap();
+        let resp = client.get(&url).send().await.unwrap();
+        assert_eq!(resp.status(), 200, "Async server component page should return 200");
+
+        let body = resp.text().await.unwrap();
+        assert!(
+            body.contains("Data Page"),
+            "Missing 'Data Page' heading in async server component output"
+        );
+        assert!(
+            body.contains("Hello from async server component"),
+            "Missing resolved async data in server component output"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn rsc_async_flight_has_resolved_content() {
+        // First get build ID from a page
+        let url = format!("{}/", base_url());
+        let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
+
+        if let Some(start) = body.find("\"build_id\":\"") {
+            let rest = &body[start + 12..];
+            let end = rest.find('"').unwrap();
+            let build_id = &rest[..end];
+
+            let rsc_url = format!("{}/_rex/rsc/{}/data", base_url(), build_id);
+            let resp = reqwest::get(&rsc_url).await.unwrap();
+            assert_eq!(resp.status(), 200);
+
+            let flight = resp.text().await.unwrap();
+            assert!(
+                flight.contains("Hello from async server component"),
+                "Flight data should contain resolved async content, got: {flight}"
+            );
+            // Should NOT contain the placeholder null
+            assert!(
+                !flight.contains("J:0:null") && !flight.contains("J:1:null"),
+                "Flight data should not contain unresolved placeholder nulls"
+            );
+        } else {
+            panic!("Could not extract build_id from page HTML");
+        }
+    }
 }
