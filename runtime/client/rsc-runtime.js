@@ -21,8 +21,9 @@
     return;
   }
 
-  // Module map: refId -> { chunk_url, export_name }
-  var moduleMap = window.__REX_RSC_MODULE_MAP__ || {};
+  // Module map: { entries: { refId -> { chunk_url, export_name } } }
+  var rawMap = window.__REX_RSC_MODULE_MAP__ || {};
+  var moduleMap = rawMap.entries || rawMap;
 
   // Cache of loaded client component modules
   var moduleCache = {};

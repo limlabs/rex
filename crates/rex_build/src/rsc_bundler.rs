@@ -300,21 +300,37 @@ async fn build_rsc_client_bundles(
 
     let hash = &build_id[..8.min(build_id.len())];
 
-    // Create entries for each client boundary module
-    let entries: Vec<rolldown::InputItem> = client_boundaries
-        .iter()
-        .map(|m| {
-            let rel_path = m
-                .path
-                .strip_prefix(&config.project_root)
-                .unwrap_or(&m.path);
-            let name = sanitize_filename(&rel_path.to_string_lossy());
-            rolldown::InputItem {
-                name: Some(name),
-                import: m.path.to_string_lossy().to_string(),
-            }
-        })
-        .collect();
+    // Create a hydration bootstrap entry that imports react + react-dom/client
+    // and sets window globals so rsc-runtime.js can access them.
+    // Rolldown will code-split React into shared chunks between this and component entries.
+    let entries_dir = output_dir.join("_rsc_client_entries");
+    fs::create_dir_all(&entries_dir)?;
+
+    let bootstrap_code = r#"import React from 'react';
+import * as ReactDOMClient from 'react-dom/client';
+window.React = React;
+window.ReactDOM = ReactDOMClient;
+"#;
+    let bootstrap_path = entries_dir.join("__rsc_bootstrap.js");
+    fs::write(&bootstrap_path, bootstrap_code)?;
+
+    // Create entries: bootstrap + each client boundary module
+    let mut entries: Vec<rolldown::InputItem> = vec![rolldown::InputItem {
+        name: Some("__rsc_bootstrap".to_string()),
+        import: bootstrap_path.to_string_lossy().to_string(),
+    }];
+
+    entries.extend(client_boundaries.iter().map(|m| {
+        let rel_path = m
+            .path
+            .strip_prefix(&config.project_root)
+            .unwrap_or(&m.path);
+        let name = sanitize_filename(&rel_path.to_string_lossy());
+        rolldown::InputItem {
+            name: Some(name),
+            import: m.path.to_string_lossy().to_string(),
+        }
+    }));
 
     // CSS → empty module
     let mut module_types = rustc_hash::FxHashMap::default();
@@ -359,49 +375,72 @@ async fn build_rsc_client_bundles(
         .await
         .map_err(|e| anyhow::anyhow!("RSC client bundle failed: {e:?}"))?;
 
-    // Collect output chunks and update the client manifest
-    let mut chunks = Vec::new();
+    // Clean up temporary entry files
+    let _ = fs::remove_dir_all(&entries_dir);
+
+    // Collect output chunks and update the client manifest.
+    // Prefix with "rsc/" because the output dir is client_build_dir/rsc/
+    // and the static file server mounts client_build_dir at /_rex/static/.
+    //
+    // The bootstrap chunk must come first so React/ReactDOM globals are set
+    // before component chunks (loaded as type="module") execute.
+    let mut bootstrap_chunks = Vec::new();
+    let mut component_chunks = Vec::new();
+
     for item in &output.assets {
         match item {
             rolldown_common::Output::Chunk(chunk) => {
                 let filename = chunk.filename.to_string();
-                chunks.push(filename.clone());
+                let prefixed = format!("rsc/{filename}");
 
-                // If this is an entry chunk, update manifest with chunk URL
                 if chunk.is_entry {
                     let name = chunk.name.to_string();
-                    // Find the matching client module and update its manifest entries
-                    for module in &client_boundaries {
-                        let rel_path = module
-                            .path
-                            .strip_prefix(&config.project_root)
-                            .unwrap_or(&module.path)
-                            .to_string_lossy()
-                            .replace('\\', "/");
-                        let module_name = sanitize_filename(&rel_path);
 
-                        if module_name == name {
-                            let chunk_url =
-                                format!("/_rex/static/rsc/{filename}");
+                    if name == "__rsc_bootstrap" {
+                        // Bootstrap entry — loads React/ReactDOM globals
+                        bootstrap_chunks.push(prefixed);
+                    } else {
+                        // Client component entry — update manifest
+                        component_chunks.push(prefixed);
+                        for module in &client_boundaries {
+                            let rel_path = module
+                                .path
+                                .strip_prefix(&config.project_root)
+                                .unwrap_or(&module.path)
+                                .to_string_lossy()
+                                .replace('\\', "/");
+                            let module_name = sanitize_filename(&rel_path);
 
-                            for export in &module.exports {
-                                let ref_id =
-                                    client_reference_id(&rel_path, export, build_id);
-                                client_manifest.add(
-                                    &ref_id,
-                                    chunk_url.clone(),
-                                    export.clone(),
-                                );
+                            if module_name == name {
+                                let chunk_url =
+                                    format!("/_rex/static/rsc/{filename}");
+
+                                for export in &module.exports {
+                                    let ref_id =
+                                        client_reference_id(&rel_path, export, build_id);
+                                    client_manifest.add(
+                                        &ref_id,
+                                        chunk_url.clone(),
+                                        export.clone(),
+                                    );
+                                }
                             }
                         }
                     }
+                } else {
+                    // Shared chunks (code-split React, etc.)
+                    component_chunks.push(prefixed);
                 }
             }
             rolldown_common::Output::Asset(asset) => {
-                chunks.push(asset.filename.to_string());
+                component_chunks.push(format!("rsc/{}", asset.filename));
             }
         }
     }
+
+    // Bootstrap first, then shared chunks, then component entries
+    let mut chunks = bootstrap_chunks;
+    chunks.extend(component_chunks);
 
     debug!(
         count = chunks.len(),

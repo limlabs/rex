@@ -387,4 +387,169 @@ mod rsc {
             assert!(!body.is_empty(), "Request {i} returned empty body");
         }
     }
+
+    // -------------------------------------------------------
+    // Client hydration pipeline tests
+    // -------------------------------------------------------
+
+    /// Extract all script src URLs from HTML
+    fn extract_script_srcs(html: &str) -> Vec<String> {
+        let mut srcs = vec![];
+        let mut search = html;
+        while let Some(start) = search.find("src=\"") {
+            let rest = &search[start + 5..];
+            if let Some(end) = rest.find('"') {
+                let src = &rest[..end];
+                if src.ends_with(".js") {
+                    srcs.push(src.to_string());
+                }
+            }
+            search = &search[start + 5..];
+        }
+        srcs
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn rsc_client_chunks_serve_200() {
+        // The settings page imports Counter ("use client") — its chunks must be serveable
+        let url = format!("{}/dashboard/settings", base_url());
+        let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
+
+        let script_srcs = extract_script_srcs(&body);
+        assert!(
+            !script_srcs.is_empty(),
+            "Page should have at least one <script> tag"
+        );
+
+        // Every script src that references a client chunk must return 200
+        for src in &script_srcs {
+            if src.contains("/_rex/static/") {
+                let chunk_url = format!("{}{}", base_url(), src);
+                let resp = reqwest::get(&chunk_url).await.unwrap();
+                assert_eq!(
+                    resp.status(),
+                    200,
+                    "Client chunk returned {} for URL: {}",
+                    resp.status(),
+                    chunk_url
+                );
+
+                let body = resp.text().await.unwrap();
+                assert!(
+                    !body.is_empty(),
+                    "Client chunk is empty: {chunk_url}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn rsc_client_chunk_contains_react_dom() {
+        // Client component chunks need react-dom for hydration to work.
+        // Without it, hydrateRoot/createRoot won't be available.
+        let url = format!("{}/dashboard/settings", base_url());
+        let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
+
+        let script_srcs = extract_script_srcs(&body);
+
+        // Collect all client JS content
+        let mut all_client_js = String::new();
+        for src in &script_srcs {
+            if src.contains("/_rex/static/") {
+                let chunk_url = format!("{}{}", base_url(), src);
+                let resp = reqwest::get(&chunk_url).await;
+                if let Ok(resp) = resp {
+                    if resp.status() == 200 {
+                        if let Ok(text) = resp.text().await {
+                            all_client_js.push_str(&text);
+                        }
+                    }
+                }
+            }
+        }
+
+        assert!(
+            !all_client_js.is_empty(),
+            "No client JS was loaded — chunks may be 404ing"
+        );
+
+        // React DOM must be present somewhere in the client bundles
+        // (either in the component chunk or as a shared chunk)
+        assert!(
+            all_client_js.contains("hydrateRoot") || all_client_js.contains("createRoot"),
+            "Client bundles must contain React DOM (hydrateRoot/createRoot) for hydration"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn rsc_html_loads_react_before_runtime() {
+        // The RSC runtime needs React + ReactDOM available.
+        // React must be loaded before rsc-runtime.js executes.
+        let url = format!("{}/dashboard/settings", base_url());
+        let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
+
+        // Either React is bundled in a client chunk that loads as type="module"
+        // (which runs before defer scripts), or React is set on window globals.
+        // At minimum, rsc-runtime.js must be present.
+        assert!(
+            body.contains("rsc-runtime.js"),
+            "Page must include rsc-runtime.js"
+        );
+
+        // The page should reference client component chunks
+        let has_client_chunk = body.contains("/_rex/static/");
+        assert!(
+            has_client_chunk,
+            "Settings page imports Counter (use client) — must have client chunk references"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn rsc_module_map_references_valid_chunks() {
+        // The module map embedded in HTML must point to chunk URLs that actually exist
+        let url = format!("{}/dashboard/settings", base_url());
+        let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
+
+        // Extract module map JSON
+        let marker = "window.__REX_RSC_MODULE_MAP__=";
+        let map_start = body.find(marker).expect("Missing module map in HTML");
+        let json_start = map_start + marker.len();
+        let rest = &body[json_start..];
+        // Find the end of the JSON (next </script>)
+        let json_end = rest.find("</script>").expect("Missing closing script tag");
+        let map_json = &rest[..json_end];
+
+        let map: serde_json::Value =
+            serde_json::from_str(map_json).expect("Module map is not valid JSON");
+
+        // Every chunk_url in the manifest must return 200
+        if let Some(entries) = map.get("entries").and_then(|e| e.as_object()) {
+            assert!(
+                !entries.is_empty(),
+                "Module map has no entries — Counter should have a reference"
+            );
+
+            for (ref_id, entry) in entries {
+                let chunk_url = entry
+                    .get("chunk_url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_else(|| panic!("No chunk_url for ref {ref_id}"));
+
+                let full_url = format!("{}{}", base_url(), chunk_url);
+                let resp = reqwest::get(&full_url).await.unwrap();
+                assert_eq!(
+                    resp.status(),
+                    200,
+                    "Module map chunk_url returned {} for ref {}: {}",
+                    resp.status(),
+                    ref_id,
+                    full_url,
+                );
+            }
+        }
+    }
 }
