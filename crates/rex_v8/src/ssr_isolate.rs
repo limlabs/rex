@@ -10,6 +10,15 @@ pub struct RenderResult {
     pub head: String,
 }
 
+/// Result of RSC two-pass rendering: HTML body + flight data for hydration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RscRenderResult {
+    pub body: String,
+    #[serde(default)]
+    pub head: String,
+    pub flight: String,
+}
+
 /// An SSR isolate that owns a V8 isolate and can render pages.
 /// Must be used on the same OS thread that created it (V8 isolates are !Send).
 pub struct SsrIsolate {
@@ -21,6 +30,10 @@ pub struct SsrIsolate {
     api_handler_fn: Option<v8::Global<v8::Function>>,
     document_fn: Option<v8::Global<v8::Function>>,
     middleware_fn: Option<v8::Global<v8::Function>>,
+    /// RSC flight data renderer (app/ routes only)
+    rsc_flight_fn: Option<v8::Global<v8::Function>>,
+    /// RSC two-pass renderer: flight + HTML (app/ routes only)
+    rsc_to_html_fn: Option<v8::Global<v8::Function>>,
     /// Last successfully loaded bundle, used to restore state on failed reload
     last_bundle: String,
 }
@@ -125,7 +138,17 @@ impl SsrIsolate {
     pub fn new(server_bundle_js: &str) -> Result<Self> {
         let mut isolate = v8::Isolate::new(v8::CreateParams::default());
 
-        let (context, render_fn, gssp_fn, gsp_fn, api_handler_fn, document_fn, middleware_fn) = {
+        let (
+            context,
+            render_fn,
+            gssp_fn,
+            gsp_fn,
+            api_handler_fn,
+            document_fn,
+            middleware_fn,
+            rsc_flight_fn,
+            rsc_to_html_fn,
+        ) = {
             v8::scope!(scope, &mut isolate);
 
             let context = v8::Context::new(scope, Default::default());
@@ -176,6 +199,15 @@ impl SsrIsolate {
                 let k = v8::String::new(scope, "globalThis")
                     .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
                 global.set(scope, k.into(), global.into());
+
+                // Install globalThis.fetch
+                let t = v8::FunctionTemplate::new(scope, crate::fetch::fetch_callback);
+                let f = t
+                    .get_function(scope)
+                    .ok_or_else(|| anyhow::anyhow!("Failed to create fetch"))?;
+                let k = v8::String::new(scope, "fetch")
+                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+                global.set(scope, k.into(), f.into());
             }
 
             // Evaluate the self-contained server bundle
@@ -199,6 +231,10 @@ impl SsrIsolate {
             // Middleware is optional — only present when middleware.ts exists
             let middleware_fn = v8_get_optional_fn!(scope, global, "__rex_run_middleware");
 
+            // RSC functions — only present when app/ routes exist
+            let rsc_flight_fn = v8_get_optional_fn!(scope, global, "__rex_render_flight");
+            let rsc_to_html_fn = v8_get_optional_fn!(scope, global, "__rex_render_rsc_to_html");
+
             (
                 v8::Global::new(scope, context),
                 v8::Global::new(scope, render_fn),
@@ -207,6 +243,8 @@ impl SsrIsolate {
                 api_handler_fn,
                 document_fn,
                 middleware_fn,
+                rsc_flight_fn,
+                rsc_to_html_fn,
             )
         };
 
@@ -219,6 +257,8 @@ impl SsrIsolate {
             api_handler_fn,
             document_fn,
             middleware_fn,
+            rsc_flight_fn,
+            rsc_to_html_fn,
             last_bundle: server_bundle_js.to_string(),
         })
     }
@@ -261,8 +301,9 @@ impl SsrIsolate {
         };
 
         if result_str == "__REX_ASYNC__" {
-            // GSSP returned a promise — pump V8's microtask queue to resolve it
-            self.isolate.perform_microtask_checkpoint();
+            // GSSP returned a promise — run the fetch loop to resolve any fetch()
+            // calls, then pump microtasks to settle the promise chain.
+            crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
 
             v8::scope_with_context!(scope, &mut self.isolate, &self.context);
             let resolve_result =
@@ -294,7 +335,7 @@ impl SsrIsolate {
         };
 
         if result_str == "__REX_GSP_ASYNC__" {
-            self.isolate.perform_microtask_checkpoint();
+            crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
 
             v8::scope_with_context!(scope, &mut self.isolate, &self.context);
             let resolve_result = v8_eval!(scope, "globalThis.__rex_resolve_gsp()", "<gsp-resolve>")
@@ -330,7 +371,7 @@ impl SsrIsolate {
         };
 
         if result_str == "__REX_API_ASYNC__" {
-            self.isolate.perform_microtask_checkpoint();
+            crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
 
             v8::scope_with_context!(scope, &mut self.isolate, &self.context);
             let resolve_result = v8_eval!(scope, "globalThis.__rex_resolve_api()", "<api-resolve>")
@@ -384,7 +425,7 @@ impl SsrIsolate {
         };
 
         if result_str == "__REX_MW_ASYNC__" {
-            self.isolate.perform_microtask_checkpoint();
+            crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
 
             v8::scope_with_context!(scope, &mut self.isolate, &self.context);
             let resolve_result = v8_eval!(
@@ -397,6 +438,72 @@ impl SsrIsolate {
         } else {
             Ok(Some(result_str))
         }
+    }
+
+    /// Render RSC flight data for a route (app/ routes only).
+    /// Returns the flight data string for client-side navigation.
+    pub fn render_rsc_flight(&mut self, route_key: &str, props_json: &str) -> Result<String> {
+        let rsc_fn = self
+            .rsc_flight_fn
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("RSC flight renderer not loaded"))?;
+
+        let result_str = {
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+            let func = v8::Local::new(scope, rsc_fn);
+            let undef = v8::undefined(scope);
+            let arg0 = v8::String::new(scope, route_key)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+            let arg1 = v8::String::new(scope, props_json)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+
+            let result = v8_call!(scope, func, undef.into(), &[arg0.into(), arg1.into()])
+                .map_err(|e| anyhow::anyhow!("RSC flight render error: {e}"))?;
+
+            result.to_rust_string_lossy(scope)
+        };
+
+        // Run fetch loop in case server components used fetch()
+        crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
+
+        Ok(result_str)
+    }
+
+    /// Two-pass RSC render: flight data + HTML (app/ routes only).
+    /// Returns RenderResult with body HTML, head, and flight data.
+    pub fn render_rsc_to_html(
+        &mut self,
+        route_key: &str,
+        props_json: &str,
+    ) -> Result<RscRenderResult> {
+        let rsc_fn = self
+            .rsc_to_html_fn
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("RSC HTML renderer not loaded"))?;
+
+        let result_str = {
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+            let func = v8::Local::new(scope, rsc_fn);
+            let undef = v8::undefined(scope);
+            let arg0 = v8::String::new(scope, route_key)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+            let arg1 = v8::String::new(scope, props_json)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+
+            let result = v8_call!(scope, func, undef.into(), &[arg0.into(), arg1.into()])
+                .map_err(|e| anyhow::anyhow!("RSC render error: {e}"))?;
+
+            result.to_rust_string_lossy(scope)
+        };
+
+        // Run fetch loop in case server components used fetch()
+        crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
+
+        let parsed: RscRenderResult =
+            serde_json::from_str(&result_str).context("Failed to parse RSC render result")?;
+        Ok(parsed)
     }
 
     /// Reload the server bundle (for dev mode hot reload)
@@ -433,6 +540,10 @@ impl SsrIsolate {
 
         // Re-lookup middleware (may be added/removed on reload)
         self.middleware_fn = v8_get_optional_fn!(scope, global, "__rex_run_middleware");
+
+        // Re-lookup RSC functions (may be added/removed on reload)
+        self.rsc_flight_fn = v8_get_optional_fn!(scope, global, "__rex_render_flight");
+        self.rsc_to_html_fn = v8_get_optional_fn!(scope, global, "__rex_render_rsc_to_html");
 
         self.last_bundle = server_bundle_js.to_string();
         debug!("SSR isolate reloaded");

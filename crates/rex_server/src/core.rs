@@ -1,7 +1,46 @@
-use rex_core::{DataStrategy, MiddlewareAction, MiddlewareResult, ProjectConfig, ServerSidePropsContext};
+use rex_core::{
+    DataStrategy, MiddlewareAction, MiddlewareResult, ProjectConfig, ServerSidePropsContext,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info};
+
+/// Extract session from auth state if configured.
+fn extract_session(
+    state: &Arc<AppState>,
+    headers: &HashMap<String, String>,
+) -> Option<serde_json::Value> {
+    state
+        .auth
+        .as_ref()
+        .and_then(|auth| auth.extract_session(headers))
+}
+
+/// Parse a `Cookie` header value into name-value pairs.
+fn parse_cookies(cookie_header: &str) -> HashMap<String, String> {
+    cookie_header
+        .split(';')
+        .filter_map(|pair| {
+            let pair = pair.trim();
+            let eq = pair.find('=')?;
+            let name = pair[..eq].trim();
+            let value = pair[eq + 1..].trim();
+            if name.is_empty() {
+                return None;
+            }
+            Some((name.to_string(), value.to_string()))
+        })
+        .collect()
+}
+
+/// Extract cookies from a headers map.
+fn cookies_from_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
+    if let Some(cookie_header) = headers.get("cookie").or_else(|| headers.get("Cookie")) {
+        parse_cookies(cookie_header)
+    } else {
+        HashMap::new()
+    }
+}
 
 use crate::document::{assemble_document, DocumentParams};
 use crate::handlers::{AppState, HotState};
@@ -373,12 +412,15 @@ async fn handle_page_inner(
         }
         DataStrategy::GetServerSideProps => {
             let query = req.query_params();
+            let cookies = cookies_from_headers(&req.headers);
+            let session = extract_session(state, &req.headers);
             let context = ServerSidePropsContext {
                 params,
                 query,
                 resolved_url: path.to_string(),
                 headers: req.headers.clone(),
-                cookies: HashMap::new(),
+                cookies,
+                session,
             };
             let context_json = serde_json::to_string(&context).expect("JSON serialization");
             state
@@ -667,12 +709,15 @@ pub async fn handle_data(
                 .await
         }
         DataStrategy::GetServerSideProps => {
+            let cookies = cookies_from_headers(&req.headers);
+            let session = extract_session(state, &req.headers);
             let context = ServerSidePropsContext {
                 params,
                 query: HashMap::new(),
                 resolved_url: path,
                 headers: req.headers.clone(),
-                cookies: HashMap::new(),
+                cookies,
+                session,
             };
             let context_json = serde_json::to_string(&context).expect("JSON serialization");
             state

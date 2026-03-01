@@ -10,3 +10,6 @@ workspace = true
 rex_core = { path = "../rex_core" }
 tracing = { workspace = true }
 anyhow = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

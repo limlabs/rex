@@ -49,34 +49,150 @@ pub async fn build_bundles(
     };
     let define = vec![("process.env.NODE_ENV".to_string(), node_env.to_string())];
 
-    // Build server and client bundles in parallel
-    let server_fut = build_server_bundle(
-        config,
-        scan,
-        &server_dir,
-        &css_modules.page_overrides,
-        &define,
-        project_config,
-    )
-    .instrument(info_span!("build_server_bundle"));
-    let client_fut = build_client_bundles(
-        config,
-        scan,
-        &client_dir,
-        &build_id,
-        &css_modules,
-        &define,
-        &tailwind_outputs,
-        project_config,
-    )
-    .instrument(info_span!("build_client_bundles"));
+    let has_pages = !scan.routes.is_empty() || scan.app.is_some();
 
-    let (server_bundle_path, mut manifest) = tokio::try_join!(server_fut, client_fut)?;
+    let (server_bundle_path, mut manifest) = if has_pages {
+        // Build server and client bundles in parallel
+        let server_fut = build_server_bundle(
+            config,
+            scan,
+            &server_dir,
+            &css_modules.page_overrides,
+            &define,
+            project_config,
+        )
+        .instrument(info_span!("build_server_bundle"));
+        let client_fut = build_client_bundles(
+            config,
+            scan,
+            &client_dir,
+            &build_id,
+            &css_modules,
+            &define,
+            &tailwind_outputs,
+            project_config,
+        )
+        .instrument(info_span!("build_client_bundles"));
+
+        tokio::try_join!(server_fut, client_fut)?
+    } else {
+        // App-only project: create a minimal server bundle with V8 polyfills + React + stubs
+        debug!("No pages/ routes — creating minimal server bundle");
+        let entry_dir = server_dir.join("_server_entry");
+        fs::create_dir_all(&entry_dir)?;
+
+        let entry = r#"import { createElement } from 'react';
+import { renderToString } from 'react-dom/server';
+globalThis.__rex_pages = {};
+var __rex_createElement = createElement;
+var __rex_renderToString = renderToString;
+
+// Stub render functions for V8 isolate compatibility (app-only project)
+globalThis.__rex_render_page = function() { return JSON.stringify({ body: '', head: '' }); };
+globalThis.__rex_get_server_side_props = function() { return JSON.stringify({ props: {} }); };
+globalThis.__rex_get_static_props = function() { return JSON.stringify({ props: {} }); };
+globalThis.__rex_render_document = function() { return JSON.stringify({ html: '', head: '' }); };
+"#;
+        let entry_path = entry_dir.join("server-entry.js");
+        fs::write(&entry_path, entry)?;
+
+        let runtime_dir = runtime_server_dir()?;
+        let mut module_types = rustc_hash::FxHashMap::default();
+        module_types.insert(".css".to_string(), rolldown::ModuleType::Empty);
+
+        let options = rolldown::BundlerOptions {
+            input: Some(vec![rolldown::InputItem {
+                name: Some("server-bundle".to_string()),
+                import: entry_path.to_string_lossy().to_string(),
+            }]),
+            cwd: Some(config.project_root.clone()),
+            format: Some(rolldown::OutputFormat::Iife),
+            dir: Some(server_dir.to_string_lossy().to_string()),
+            entry_filenames: Some("server-bundle.js".to_string().into()),
+            platform: Some(rolldown::Platform::Browser),
+            module_types: Some(module_types),
+            define: Some(define.iter().cloned().collect()),
+            banner: Some(rolldown::AddonOutputOption::String(Some(
+                V8_POLYFILLS.to_string(),
+            ))),
+            tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+            resolve: Some(rolldown::ResolveOptions {
+                extensions: Some(vec![
+                    ".tsx".to_string(),
+                    ".ts".to_string(),
+                    ".jsx".to_string(),
+                    ".js".to_string(),
+                ]),
+                modules: Some(vec![
+                    config.project_root.join("node_modules").to_string_lossy().to_string(),
+                    "node_modules".to_string(),
+                ]),
+                alias: Some(vec![
+                    ("rex/head".to_string(), vec![Some(runtime_dir.join("head.js").to_string_lossy().to_string())]),
+                    ("rex/link".to_string(), vec![Some(runtime_dir.join("link.js").to_string_lossy().to_string())]),
+                ]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let mut bundler = rolldown::Bundler::new(options)
+            .map_err(|e| anyhow::anyhow!("Failed to create server bundler: {e}"))?;
+        bundler
+            .write()
+            .await
+            .map_err(|e| anyhow::anyhow!("Server bundle failed: {e:?}"))?;
+
+        let _ = fs::remove_dir_all(&entry_dir);
+
+        let bundle_path = server_dir.join("server-bundle.js");
+        let manifest = AssetManifest::new(build_id.clone());
+        (bundle_path, manifest)
+    };
 
     // Set middleware matchers on manifest (if middleware exists)
     if let Some(mw_path) = &scan.middleware {
         let source = fs::read_to_string(mw_path)?;
         manifest.middleware_matchers = Some(extract_middleware_matchers(&source));
+    }
+
+    // Build RSC bundles if app/ scan is present
+    if let Some(app_scan) = &scan.app_scan {
+        let rsc_result = crate::rsc_bundler::build_rsc_bundles(
+            config,
+            app_scan,
+            &build_id,
+            &define,
+        )
+        .await?;
+
+        // Populate app_routes in manifest
+        for route in &app_scan.routes {
+            manifest.app_routes.insert(
+                route.pattern.clone(),
+                crate::manifest::AppRouteAssets {
+                    client_chunks: rsc_result.client_chunks.clone(),
+                    layout_chain: route
+                        .layout_chain
+                        .iter()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect(),
+                },
+            );
+        }
+
+        manifest.client_reference_manifest = Some(rsc_result.client_manifest);
+        manifest.rsc_server_bundle = Some(
+            rsc_result
+                .server_bundle_path
+                .to_string_lossy()
+                .to_string(),
+        );
+
+        debug!(
+            app_routes = manifest.app_routes.len(),
+            "RSC bundles built"
+        );
     }
 
     // Save manifest
@@ -95,7 +211,7 @@ pub async fn build_bundles(
 
 /// V8 polyfills for bare V8 environment (React 19 needs these).
 /// Injected as a rolldown banner so they run before any bundled code.
-const V8_POLYFILLS: &str = r#"
+pub(crate) const V8_POLYFILLS: &str = r#"
 if (typeof globalThis.process === 'undefined') {
     globalThis.process = { env: { NODE_ENV: 'production' } };
 }
@@ -1729,6 +1845,7 @@ mod tests {
             error: None,
             not_found: None,
             middleware: None,
+            app_scan: None,
         };
 
         (tmp, config, scan)
@@ -2132,6 +2249,7 @@ export function renderToString(el) { return renderEl(el); }
             error: None,
             not_found: None,
             middleware: None,
+            app_scan: None,
         };
 
         let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
@@ -2286,6 +2404,7 @@ export default function Home() {
             error: None,
             not_found: None,
             middleware: None,
+            app_scan: None,
         };
 
         let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
@@ -2561,6 +2680,7 @@ export default function Home() {
             error: None,
             not_found: None,
             middleware: None,
+            app_scan: None,
         };
 
         let (_result, pool) = build_and_load(&config, &scan).await;

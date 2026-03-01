@@ -7,6 +7,7 @@
 
   var buildId = manifest.build_id;
   var pages = manifest.pages;
+  var appRoutes = manifest.app_routes || {};
   var prefetchCache = {};
   var loadingChunks = {};
 
@@ -70,6 +71,21 @@
       }
     }
     return params;
+  }
+
+  // Match against app/ routes (RSC)
+  function matchAppRoute(pathname) {
+    if (appRoutes[pathname]) return { pattern: pathname, params: {} };
+    for (var pattern in appRoutes) {
+      if (pattern.indexOf(':') === -1) continue;
+      var params = matchDynamic(pattern, pathname);
+      if (params) return { pattern: pattern, params: params };
+    }
+    return null;
+  }
+
+  function isAppRoute(pathname) {
+    return matchAppRoute(pathname) !== null;
   }
 
   // --- Router state ---
@@ -155,6 +171,12 @@
     var pathname = a.pathname;
     var fullUrl = a.pathname + a.search;
 
+    // Check app routes (RSC) first, then pages routes
+    var appMatch = matchAppRoute(pathname);
+    if (appMatch && window.__REX_RSC_NAVIGATE) {
+      return navigateAppRoute(pathname, fullUrl, url, appMatch, opts);
+    }
+
     var match = matchRoute(pathname);
     if (!match) {
       window.location.href = url;
@@ -218,6 +240,37 @@
       events.emit('routeChangeComplete', fullUrl);
     }).catch(function(err) {
       console.error('Rex navigation failed:', err);
+      events.emit('routeChangeError', err, fullUrl);
+      window.location.href = url;
+    });
+  }
+
+  // Navigate to an app/ route using RSC flight data
+  function navigateAppRoute(pathname, fullUrl, url, match, opts) {
+    events.emit('routeChangeStart', fullUrl);
+
+    return window.__REX_RSC_NAVIGATE(pathname).then(function() {
+      // Update URL
+      if (!opts.popstate) {
+        events.emit('beforeHistoryChange', fullUrl);
+        if (opts.replace) {
+          history.replaceState({ __rex: pathname, __rsc: true }, '', url);
+        } else {
+          history.pushState({ __rex: pathname, __rsc: true }, '', url);
+        }
+      }
+
+      // Update router state
+      updateState(match, url);
+
+      // Scroll to top (unless back/forward)
+      if (!opts.popstate) {
+        window.scrollTo(0, 0);
+      }
+
+      events.emit('routeChangeComplete', fullUrl);
+    }).catch(function(err) {
+      console.error('Rex RSC navigation failed:', err);
       events.emit('routeChangeError', err, fullUrl);
       window.location.href = url;
     });

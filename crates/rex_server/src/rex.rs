@@ -5,7 +5,7 @@ use anyhow::Result;
 use axum::Router;
 use rex_build::AssetManifest;
 use rex_core::{DataStrategy, ProjectConfig, RexConfig, ServerSidePropsContext};
-use rex_router::{scan_project, ScanResult, RouteTrie};
+use rex_router::{scan_project, RouteTrie, ScanResult};
 use rex_v8::{init_v8, IsolatePool};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -139,7 +139,15 @@ impl Rex {
         debug!("Initializing V8...");
         init_v8();
 
-        let server_bundle = std::fs::read_to_string(&build_result.server_bundle_path)?;
+        let mut server_bundle = std::fs::read_to_string(&build_result.server_bundle_path)?;
+
+        // If RSC server bundle exists, append it so RSC functions are available in V8
+        if let Some(rsc_path) = &build_result.manifest.rsc_server_bundle {
+            let rsc_bundle = std::fs::read_to_string(rsc_path)?;
+            server_bundle.push_str("\n;\n");
+            server_bundle.push_str(&rsc_bundle);
+            debug!("RSC server bundle appended to V8 bundle");
+        }
 
         let pool_size = std::thread::available_parallelism()
             .map(|n| n.get())
@@ -181,7 +189,15 @@ impl Rex {
         // Initialize V8
         init_v8();
 
-        let server_bundle = std::fs::read_to_string(config.server_bundle_path())?;
+        let mut server_bundle = std::fs::read_to_string(config.server_bundle_path())?;
+
+        // If RSC server bundle exists, append it
+        if let Some(rsc_path) = &manifest.rsc_server_bundle {
+            if let Ok(rsc_bundle) = std::fs::read_to_string(rsc_path) {
+                server_bundle.push_str("\n;\n");
+                server_bundle.push_str(&rsc_bundle);
+            }
+        }
 
         let pool_size = std::thread::available_parallelism()
             .map(|n| n.get())
@@ -221,6 +237,13 @@ impl Rex {
         let trie = RouteTrie::from_routes(&scan.routes);
         let api_trie = RouteTrie::from_routes(&scan.api_routes);
         let manifest_json = HotState::compute_manifest_json(&build_id, &manifest);
+
+        // Build app route trie from app scan if present
+        let app_route_trie = scan.app_scan.as_ref().map(|app| {
+            let routes = app.to_routes();
+            debug!(app_routes = routes.len(), "Building app route trie");
+            RouteTrie::from_routes(&routes)
+        });
 
         // Compute document descriptor if custom _document exists
         let document_descriptor = if scan.document.is_some() {
@@ -282,6 +305,7 @@ impl Rex {
                 project_config,
                 manifest_json,
                 document_descriptor,
+                app_route_trie,
             })),
         });
 

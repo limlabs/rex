@@ -11,8 +11,30 @@ use std::sync::{Arc, RwLock};
 use tracing::{debug, error, info};
 
 use crate::document::{
-    assemble_body_tail, assemble_document, assemble_head_shell, DocumentDescriptor, DocumentParams,
+    assemble_body_tail, assemble_document, assemble_head_shell, assemble_rsc_body_tail,
+    assemble_rsc_head_shell, DocumentDescriptor, DocumentParams,
 };
+
+/// Parse cookies from a headers map.
+fn parse_cookies_from_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
+    if let Some(cookie_header) = headers.get("cookie").or_else(|| headers.get("Cookie")) {
+        cookie_header
+            .split(';')
+            .filter_map(|pair| {
+                let pair = pair.trim();
+                let eq = pair.find('=')?;
+                let name = pair[..eq].trim();
+                let value = pair[eq + 1..].trim();
+                if name.is_empty() {
+                    return None;
+                }
+                Some((name.to_string(), value.to_string()))
+            })
+            .collect()
+    } else {
+        HashMap::new()
+    }
+}
 
 /// State that can change during dev-mode rebuilds.
 #[derive(Clone)]
@@ -33,15 +55,22 @@ pub struct HotState {
     pub has_middleware: bool,
     /// Middleware matcher patterns (None = no middleware, Some(empty) = run on all).
     pub middleware_matchers: Option<Vec<String>>,
+    /// App route trie for app/ router (RSC). None if no app/ directory.
+    pub app_route_trie: Option<RouteTrie>,
 }
 
 impl HotState {
     /// Compute the manifest_json field from current state.
     pub fn compute_manifest_json(build_id: &str, manifest: &rex_build::AssetManifest) -> String {
-        serde_json::to_string(&serde_json::json!({
+        let mut json = serde_json::json!({
             "build_id": build_id,
             "pages": manifest.pages,
-        })).expect("JSON serialization")
+        });
+        if !manifest.app_routes.is_empty() {
+            json["app_routes"] = serde_json::to_value(&manifest.app_routes)
+                .unwrap_or_default();
+        }
+        serde_json::to_string(&json).expect("JSON serialization")
     }
 }
 
@@ -52,6 +81,7 @@ pub struct AppState {
     pub project_root: PathBuf,
     pub image_cache: rex_image::ImageCache,
     pub hot: RwLock<Arc<HotState>>,
+    pub auth: Option<Arc<rex_auth::AuthServer>>,
 }
 
 /// Snapshot the hot state (O(1) Arc clone, no lock held across await).
@@ -565,6 +595,91 @@ pub async fn page_handler(
     response
 }
 
+/// Render an app/ route using RSC with streaming (head shell + body tail).
+async fn render_app_route(
+    state: &Arc<AppState>,
+    hot: &Arc<HotState>,
+    route_match: &rex_core::RouteMatch,
+    _path: &str,
+) -> Response {
+    let route_key = route_match.route.pattern.clone();
+    let params = route_match.params.clone();
+    let props_json = serde_json::json!({ "params": params }).to_string();
+
+    // Look up client chunks for this app route
+    let app_assets = hot.manifest.app_routes.get(&route_key);
+    let client_chunks: Vec<String> = app_assets
+        .map(|a| a.client_chunks.clone())
+        .unwrap_or_default();
+
+    // Serialize client reference manifest
+    let client_manifest_json = hot
+        .manifest
+        .client_reference_manifest
+        .as_ref()
+        .and_then(|m| serde_json::to_string(m).ok())
+        .unwrap_or_else(|| "{}".to_string());
+
+    let is_dev = state.is_dev;
+    let manifest_json = hot.manifest_json.clone();
+
+    // Flush head shell immediately so browser starts fetching resources
+    let shell = assemble_rsc_head_shell(&client_chunks, &client_manifest_json);
+
+    let shell_chunk = stream::once(async { Ok::<_, std::convert::Infallible>(shell) });
+
+    let state_clone = state.clone();
+    let route_key_clone = route_key.clone();
+    let props_clone = props_json.clone();
+    let client_chunks_clone = client_chunks.clone();
+
+    let tail_chunk = stream::once(async move {
+        let rsc_result = state_clone
+            .isolate_pool
+            .execute(move |iso| iso.render_rsc_to_html(&route_key_clone, &props_clone))
+            .await;
+
+        let (body_html, head_html, flight_data) = match rsc_result {
+            Ok(Ok(r)) => (r.body, r.head, r.flight),
+            Ok(Err(e)) => {
+                error!("RSC render error: {e}");
+                let msg = e.to_string().replace('<', "&lt;").replace('>', "&gt;");
+                if is_dev {
+                    (
+                        format!("<pre style=\"padding:20px;color:#e63946;font-family:monospace\">RSC Error: {msg}</pre>"),
+                        String::new(),
+                        String::new(),
+                    )
+                } else {
+                    ("<h1>Internal Server Error</h1>".to_string(), String::new(), String::new())
+                }
+            }
+            Err(e) => {
+                error!("RSC pool error: {e}");
+                ("<h1>Internal Server Error</h1>".to_string(), String::new(), String::new())
+            }
+        };
+
+        let tail = assemble_rsc_body_tail(
+            &body_html,
+            &head_html,
+            &flight_data,
+            &client_chunks_clone,
+            is_dev,
+            Some(&manifest_json),
+        );
+
+        Ok::<_, std::convert::Infallible>(tail)
+    });
+
+    let body = Body::from_stream(shell_chunk.chain(tail_chunk));
+
+    Response::builder()
+        .header("content-type", "text/html; charset=utf-8")
+        .body(body)
+        .expect("response build")
+}
+
 async fn page_handler_inner(
     state: &Arc<AppState>,
     hot: &Arc<HotState>,
@@ -572,6 +687,13 @@ async fn page_handler_inner(
     uri: &Uri,
     headers: &HeaderMap,
 ) -> Response {
+
+    // Check app/ routes first (RSC)
+    if let Some(ref app_trie) = hot.app_route_trie {
+        if let Some(app_match) = app_trie.match_path(path) {
+            return render_app_route(state, hot, &app_match, path).await;
+        }
+    }
 
     // Try to match the route
     let route_match = match hot.route_trie.match_path(path) {
@@ -629,12 +751,15 @@ async fn page_handler_inner(
                 .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
                 .collect();
 
+            let cookies = parse_cookies_from_headers(&header_map);
+            let session = state.auth.as_ref().and_then(|auth| auth.extract_session(&header_map));
             let context = ServerSidePropsContext {
                 params,
                 query,
                 resolved_url: path.to_string(),
                 headers: header_map,
-                cookies: HashMap::new(),
+                cookies,
+                session,
             };
             let context_json = serde_json::to_string(&context).expect("JSON serialization");
 
@@ -828,15 +953,19 @@ pub async fn data_handler(
                 .await
         }
         DataStrategy::GetServerSideProps => {
+            let header_map: HashMap<String, String> = headers
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+                .collect();
+            let cookies = parse_cookies_from_headers(&header_map);
+            let session = state.auth.as_ref().and_then(|auth| auth.extract_session(&header_map));
             let context = ServerSidePropsContext {
                 params,
                 query: HashMap::new(),
                 resolved_url: path,
-                headers: headers
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-                    .collect(),
-                cookies: HashMap::new(),
+                headers: header_map,
+                cookies,
+                session,
             };
             let context_json = serde_json::to_string(&context).expect("JSON serialization");
             state
@@ -857,6 +986,58 @@ pub async fn data_handler(
         }
         Err(e) => {
             error!("Data endpoint pool error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+/// RSC flight data endpoint: GET /_rex/rsc/{buildId}/{path}
+/// Returns flight data as text/x-component for client-side RSC navigation.
+pub async fn rsc_handler(
+    State(state): State<Arc<AppState>>,
+    Path((build_id, page_path)): Path<(String, String)>,
+) -> Response {
+    let hot = snapshot(&state);
+
+    // Build ID mismatch = stale client
+    if build_id != hot.build_id {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let app_route_trie = match &hot.app_route_trie {
+        Some(trie) => trie,
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    let path = format!("/{page_path}");
+    let route_match = match app_route_trie.match_path(&path) {
+        Some(m) => m,
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    let route_key = &route_match.route.pattern;
+    let params = route_match.params.clone();
+
+    let props_json = serde_json::json!({ "params": params }).to_string();
+    let route_key_owned = route_key.to_string();
+
+    let result = state
+        .isolate_pool
+        .execute(move |iso| iso.render_rsc_flight(&route_key_owned, &props_json))
+        .await;
+
+    match result {
+        Ok(Ok(flight_data)) => Response::builder()
+            .header("Content-Type", "text/x-component")
+            .header("Cache-Control", "no-cache")
+            .body(Body::from(flight_data))
+            .expect("response build"),
+        Ok(Err(e)) => {
+            error!("RSC flight render error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+        Err(e) => {
+            error!("RSC pool error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -1177,6 +1358,7 @@ globalThis.__rex_resolve_gsp = function() {
             is_dev: false,
             project_root: PathBuf::from("/tmp/rex-test"),
             image_cache: rex_image::ImageCache::new(PathBuf::from("/tmp/rex-test-cache")),
+            auth: None,
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
                 api_route_trie: RouteTrie::from_routes(&[]),
@@ -1190,6 +1372,7 @@ globalThis.__rex_resolve_gsp = function() {
                 document_descriptor: None,
                 has_middleware: false,
                 middleware_matchers: None,
+                app_route_trie: None,
             })),
         });
 
@@ -1446,6 +1629,7 @@ globalThis.__rex_resolve_gsp = function() {
             is_dev: false,
             project_root: PathBuf::from("/tmp/rex-test"),
             image_cache: rex_image::ImageCache::new(PathBuf::from("/tmp/rex-test-cache")),
+            auth: None,
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
                 api_route_trie: RouteTrie::from_routes(&[]),
@@ -1459,6 +1643,7 @@ globalThis.__rex_resolve_gsp = function() {
                 document_descriptor: None,
                 has_middleware: false,
                 middleware_matchers: None,
+                app_route_trie: None,
             })),
         });
 
@@ -1659,6 +1844,7 @@ globalThis.__rex_resolve_gsp = function() {
             is_dev: false,
             project_root: PathBuf::from("/tmp/rex-test"),
             image_cache: rex_image::ImageCache::new(PathBuf::from("/tmp/rex-test-cache")),
+            auth: None,
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
                 api_route_trie: RouteTrie::from_routes(&[]),
@@ -1672,6 +1858,7 @@ globalThis.__rex_resolve_gsp = function() {
                 document_descriptor: None,
                 has_middleware: true,
                 middleware_matchers: Some(matchers),
+                app_route_trie: None,
             })),
         });
 

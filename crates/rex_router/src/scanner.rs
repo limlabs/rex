@@ -1,3 +1,4 @@
+use rex_core::app_route::AppScanResult;
 use rex_core::{DynamicSegment, PageType, Route};
 use std::path::Path;
 use tracing::debug;
@@ -13,6 +14,8 @@ pub struct ScanResult {
     pub not_found: Option<Route>,
     /// Path to middleware file at project root (middleware.ts/js/tsx/jsx)
     pub middleware: Option<std::path::PathBuf>,
+    /// App router scan result (if app/ directory exists)
+    pub app_scan: Option<AppScanResult>,
 }
 
 /// Scan the pages/ directory and produce routes
@@ -50,6 +53,7 @@ pub fn scan_pages(pages_dir: &Path) -> anyhow::Result<ScanResult> {
         error,
         not_found,
         middleware: None,
+        app_scan: None,
     })
 }
 
@@ -65,9 +69,33 @@ pub fn find_middleware(project_root: &Path) -> Option<std::path::PathBuf> {
 }
 
 /// Scan pages and detect middleware. Convenience wrapper for callers that have the project root.
+///
+/// Also scans app/ directory if present for RSC/App Router support.
 pub fn scan_project(project_root: &Path, pages_dir: &Path) -> anyhow::Result<ScanResult> {
-    let mut scan = scan_pages(pages_dir)?;
+    let mut scan = if pages_dir.exists() {
+        scan_pages(pages_dir)?
+    } else {
+        // No pages/ dir — return empty scan result (app-only project)
+        ScanResult {
+            routes: Vec::new(),
+            api_routes: Vec::new(),
+            app: None,
+            document: None,
+            error: None,
+            not_found: None,
+            middleware: None,
+            app_scan: None,
+        }
+    };
     scan.middleware = find_middleware(project_root);
+
+    // Scan app/ directory for RSC routes
+    let app_dir = project_root.join("app");
+    if let Some(app_scan) = crate::app_scanner::scan_app(&app_dir)? {
+        debug!(routes = app_scan.routes.len(), "App router routes scanned");
+        scan.app_scan = Some(app_scan);
+    }
+
     Ok(scan)
 }
 
