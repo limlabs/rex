@@ -55,9 +55,10 @@ jobs:
           fi
 
   test:
-    name: Test
-    needs: check
+    name: Test & Coverage
     runs-on: ubuntu-latest
+    env:
+      COVERAGE_THRESHOLD: 51
     steps:
       - uses: actions/checkout@v4
 
@@ -71,6 +72,9 @@ jobs:
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-test-
 
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -78,5 +82,12 @@ jobs:
       - name: Install fixture dependencies
         run: cd fixtures/basic && npm install
 
-      - name: cargo test
-        run: cargo test --all
+      - name: Run tests with coverage
+        run: |
+          cargo llvm-cov --all --json --output-path coverage.json
+          COVERAGE=$(jq '.data[0].totals.lines.percent' coverage.json | xargs printf '%.0f')
+          echo "Line coverage: ${COVERAGE}% (threshold: ${COVERAGE_THRESHOLD}%)"
+          if [ "$COVERAGE" -lt "$COVERAGE_THRESHOLD" ]; then
+            echo "::error::Coverage ${COVERAGE}% is below threshold ${COVERAGE_THRESHOLD}%"
+            exit 1
+          fi
