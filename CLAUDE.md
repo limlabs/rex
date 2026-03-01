@@ -2,12 +2,14 @@
 
 ## Git Identity
 
-At the start of every session, configure the bot identity for commits and pushes:
+At the start of every session, configure the bot identity for commits and pushes. The PAT is stored in 1Password and read via the `op` CLI:
 
 ```bash
 REX_PAT="$(op read 'op://claude/ClaudeLiminal-GitHub/pat')"
 git config --local credential.helper '!f() { echo "username=x-access-token"; echo "password='"$REX_PAT"'"; }; f'
 ```
+
+If `op` is not available or fails, warn the user and continue without bot identity. Do not commit or push until the identity is configured.
 
 When committing, always use the bot author:
 
