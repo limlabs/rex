@@ -4,7 +4,14 @@
 
 This project runs inside a [Docker sandbox](https://docs.docker.com/ai/sandboxes/) — an isolated microVM with its own filesystem, network, and Docker daemon. The project directory is mounted at the same absolute path, so file paths work identically inside and outside the sandbox.
 
-**On every session start**, run `.claude/scripts/sandbox-init.sh`. It is idempotent — first run installs dev tools (Rust, Node.js, gh CLI), subsequent runs exit immediately.
+Dev tools (Rust, Node.js, gh CLI, lefthook) are pre-installed via `Dockerfile.sandbox`. Build it once:
+
+```bash
+docker build -f Dockerfile.sandbox -t rex-sandbox .
+docker sandbox run --name rex -t rex-sandbox claude .
+```
+
+**On every session start**, run `.claude/scripts/sandbox-init.sh`. It is idempotent — first run fetches project dependencies (`cargo fetch`, `npm install`), subsequent runs exit immediately.
 
 ### Conventional Commits
 
