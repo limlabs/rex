@@ -1,14 +1,12 @@
 use napi::bindgen_prelude::*;
 use napi::{Env, JsFunction, JsObject, JsUnknown};
-use rex_core::{ProjectConfig, RexConfig};
-use rex_router::{scan_pages, RouteTrie};
-use rex_server::core::{self, RexBody, RexRequest, RexResponse, RouteMatchResult};
-use rex_server::handlers::{snapshot, AppState, HotState};
+use rex_server::core::{RexBody, RexRequest, RexResponse, RouteMatchResult};
+use rex_server::handlers::snapshot;
+use rex_server::Rex;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
-use tracing::debug;
+use std::sync::Arc;
 
 /// Options for creating a Rex instance.
 #[napi(object)]
@@ -68,8 +66,7 @@ pub struct JsHeaderPair {
 /// and request handling for Rex applications.
 #[napi]
 pub struct RexInstance {
-    state: Arc<AppState>,
-    _config: RexConfig,
+    rex: Rex,
     static_dir: PathBuf,
     closed: AtomicBool,
     // Keep the tokio runtime alive for async operations dispatched from sync NAPI calls
@@ -94,85 +91,17 @@ pub async fn create_rex(options: RexOptions) -> Result<RexInstance> {
         )
         .try_init();
 
-    let root = std::fs::canonicalize(&options.root)
-        .map_err(|e| Error::from_reason(format!("Invalid root path '{}': {e}", options.root)))?;
-
     let is_dev = options.dev.unwrap_or(false);
-    let config = RexConfig::new(root.clone()).with_dev(is_dev);
 
-    config
-        .validate()
-        .map_err(|e| Error::from_reason(e.to_string()))?;
+    let rex = Rex::new(rex_server::RexOptions {
+        root: options.root.into(),
+        dev: is_dev,
+        port: 0, // NAPI doesn't serve directly
+    })
+    .await
+    .map_err(|e| Error::from_reason(e.to_string()))?;
 
-    let project_config = ProjectConfig::load(&config.project_root)
-        .map_err(|e| Error::from_reason(e.to_string()))?;
-
-    // Scan pages
-    debug!("Scanning routes...");
-    let scan = scan_pages(&config.pages_dir)
-        .map_err(|e| Error::from_reason(format!("Failed to scan pages: {e}")))?;
-
-    // Build bundles
-    debug!("Building bundles...");
-    let build_result = rex_build::build_bundles(&config, &scan, &project_config)
-        .await
-        .map_err(|e| Error::from_reason(format!("Build failed: {e}")))?;
-
-    // Initialize V8
-    debug!("Initializing V8...");
-    rex_v8::init_v8();
-
-    let server_bundle = std::fs::read_to_string(&build_result.server_bundle_path)
-        .map_err(|e| Error::from_reason(format!("Failed to read server bundle: {e}")))?;
-
-    let pool_size = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(if is_dev { 4 } else { 8 });
-
-    debug!(pool_size, "Creating V8 isolate pool");
-    let pool = rex_v8::IsolatePool::new(pool_size, Arc::new(server_bundle))
-        .map_err(|e| Error::from_reason(format!("Failed to create V8 pool: {e}")))?;
-
-    // Build route tries
-    let trie = RouteTrie::from_routes(&scan.routes);
-    let api_trie = RouteTrie::from_routes(&scan.api_routes);
-
-    let build_id = build_result.build_id.clone();
-    let manifest = build_result.manifest;
-    let manifest_json = HotState::compute_manifest_json(&build_id, &manifest);
-
-    // Compute document descriptor if custom _document exists
-    let document_descriptor = if scan.document.is_some() {
-        rex_server::handlers::compute_document_descriptor(&pool).await
-    } else {
-        None
-    };
-
-    let image_cache = rex_image::ImageCache::new(
-        config.project_root.join(".rex").join("cache").join("images"),
-    );
-
-    let state = Arc::new(AppState {
-        isolate_pool: pool,
-        is_dev,
-        project_root: config.project_root.clone(),
-        image_cache,
-        hot: RwLock::new(Arc::new(HotState {
-            route_trie: trie,
-            api_route_trie: api_trie,
-            manifest,
-            build_id,
-            has_custom_404: scan.not_found.is_some(),
-            has_custom_error: scan.error.is_some(),
-            has_custom_document: scan.document.is_some(),
-            project_config,
-            manifest_json,
-            document_descriptor,
-        })),
-    });
-
-    let static_dir = config.client_build_dir();
+    let static_dir = rex.static_dir().clone();
 
     // Create a dedicated tokio runtime for sync->async bridging
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -182,8 +111,7 @@ pub async fn create_rex(options: RexOptions) -> Result<RexInstance> {
         .map_err(|e| Error::from_reason(format!("Failed to create tokio runtime: {e}")))?;
 
     Ok(RexInstance {
-        state,
-        _config: config,
+        rex,
         static_dir,
         closed: AtomicBool::new(false),
         _rt: rt,
@@ -195,20 +123,19 @@ impl RexInstance {
     /// Whether this instance is running in dev mode.
     #[napi(getter)]
     pub fn is_dev(&self) -> bool {
-        self.state.is_dev
+        self.rex.is_dev()
     }
 
     /// The current build ID.
     #[napi(getter)]
     pub fn build_id(&self) -> String {
-        let hot = snapshot(&self.state);
-        hot.build_id.clone()
+        self.rex.build_id()
     }
 
     /// The path to the static files directory (client JS/CSS bundles).
     #[napi(getter)]
     pub fn static_dir(&self) -> String {
-        self.static_dir.to_string_lossy().to_string()
+        self.rex.static_dir().to_string_lossy().to_string()
     }
 
     /// Match a URL path against the route trie.
@@ -221,65 +148,17 @@ impl RexInstance {
     #[napi]
     pub fn match_route(&self, path: String) -> Option<JsRouteMatch> {
         self.check_closed().ok()?;
-        let hot = snapshot(&self.state);
-        core::match_route(&hot, &path).map(JsRouteMatch::from)
+        self.rex.match_route(&path).map(JsRouteMatch::from)
     }
 
     /// Run getServerSideProps for a given path and return the result as JSON.
     #[napi]
     pub async fn get_server_side_props(&self, path: String) -> Result<serde_json::Value> {
         self.check_closed()?;
-        let hot = snapshot(&self.state);
-
-        let route_match = hot
-            .route_trie
-            .match_path(&path)
-            .ok_or_else(|| Error::from_reason(format!("No route matches path: {path}")))?;
-
-        let route_key = route_match.route.module_name();
-        let params = route_match.params.clone();
-
-        let strategy = hot
-            .manifest
-            .pages
-            .get(&route_match.route.pattern)
-            .map(|p| &p.data_strategy)
-            .cloned()
-            .unwrap_or_default();
-
-        let result = match strategy {
-            rex_core::DataStrategy::None => Ok(Ok(r#"{"props":{}}"#.to_string())),
-            rex_core::DataStrategy::GetStaticProps => {
-                let ctx_json = serde_json::json!({ "params": params }).to_string();
-                self.state
-                    .isolate_pool
-                    .execute(move |iso| iso.get_static_props(&route_key, &ctx_json))
-                    .await
-            }
-            rex_core::DataStrategy::GetServerSideProps => {
-                let context = rex_core::ServerSidePropsContext {
-                    params,
-                    query: HashMap::new(),
-                    resolved_url: path.clone(),
-                    headers: HashMap::new(),
-                    cookies: HashMap::new(),
-                };
-                let context_json = serde_json::to_string(&context).expect("JSON serialization");
-                self.state
-                    .isolate_pool
-                    .execute(move |iso| iso.get_server_side_props(&route_key, &context_json))
-                    .await
-            }
-        };
-
-        let json_str = match result {
-            Ok(Ok(json)) => json,
-            Ok(Err(e)) => return Err(Error::from_reason(format!("GSSP error: {e}"))),
-            Err(e) => return Err(Error::from_reason(format!("Pool error: {e}"))),
-        };
-
-        serde_json::from_str(&json_str)
-            .map_err(|e| Error::from_reason(format!("Failed to parse GSSP result: {e}")))
+        self.rex
+            .get_server_side_props(&path)
+            .await
+            .map_err(|e| Error::from_reason(e.to_string()))
     }
 
     /// Render a page to an HTML string with the given props.
@@ -290,48 +169,26 @@ impl RexInstance {
         props: serde_json::Value,
     ) -> Result<String> {
         self.check_closed()?;
-        let hot = snapshot(&self.state);
-
-        let route_match = hot
-            .route_trie
-            .match_path(&path)
-            .ok_or_else(|| Error::from_reason(format!("No route matches path: {path}")))?;
-
-        let route_key = route_match.route.module_name();
-        let props_json = serde_json::to_string(&props).expect("JSON serialization");
-
-        let result = self
-            .state
-            .isolate_pool
-            .execute(move |iso| iso.render_page(&route_key, &props_json))
-            .await;
-
-        match result {
-            Ok(Ok(r)) => Ok(r.body),
-            Ok(Err(e)) => Err(Error::from_reason(format!("SSR render error: {e}"))),
-            Err(e) => Err(Error::from_reason(format!("Pool error: {e}"))),
-        }
+        self.rex
+            .render_to_string(&path, &props)
+            .await
+            .map_err(|e| Error::from_reason(e.to_string()))
     }
 
     /// Render a full page (GSSP + SSR + document assembly). Returns HTML, status, and headers.
     #[napi]
     pub async fn render_page(&self, path: String) -> Result<JsPageResult> {
         self.check_closed()?;
-        let hot = snapshot(&self.state);
-        let req = RexRequest {
-            method: "GET".to_string(),
-            path: path.clone(),
-            query: None,
-            headers: HashMap::new(),
-            body: Vec::new(),
-        };
-
-        let resp = core::handle_page(&self.state, &hot, &req).await;
+        let result = self
+            .rex
+            .render_page(&path)
+            .await
+            .map_err(|e| Error::from_reason(e.to_string()))?;
 
         Ok(JsPageResult {
-            html: body_to_string(&resp.body),
-            status: resp.status as u32,
-            headers: resp
+            html: result.html,
+            status: result.status as u32,
+            headers: result
                 .headers
                 .into_iter()
                 .map(|(k, v)| JsHeaderPair { key: k, value: v })
@@ -351,7 +208,7 @@ impl RexInstance {
     #[napi(ts_return_type = "(req: Request) => Promise<Response>")]
     pub fn get_request_handler(&self, env: Env) -> Result<JsFunction> {
         self.check_closed()?;
-        let state = self.state.clone();
+        let state = self.rex.state();
         let static_dir = self.static_dir.clone();
 
         env.create_function_from_closure("rexHandler", move |ctx| {
@@ -397,9 +254,6 @@ impl RexInstance {
     #[napi]
     pub async fn close(&self) -> Result<()> {
         self.closed.store(true, Ordering::SeqCst);
-        // The IsolatePool's Drop impl will handle graceful shutdown
-        // when the Arc<AppState> reference count reaches 0.
-        // We just mark ourselves as closed so future calls fail fast.
         Ok(())
     }
 
@@ -457,8 +311,6 @@ fn split_path_query(path_and_query: &str) -> (String, Option<String>) {
 fn extract_headers(env: &Env, headers_obj: &JsObject) -> Result<HashMap<String, String>> {
     let mut headers = HashMap::new();
 
-    // Use headers.entries() iterator pattern
-    // But simpler: try common headers we care about
     let common_headers = [
         "accept",
         "accept-encoding",
@@ -474,7 +326,6 @@ fn extract_headers(env: &Env, headers_obj: &JsObject) -> Result<HashMap<String, 
         "authorization",
     ];
 
-    // Try headers.get(name) method
     let get_fn: JsFunction = headers_obj.get_named_property("get")?;
     for name in &common_headers {
         let js_name = env.create_string(name)?;
@@ -490,7 +341,7 @@ fn extract_headers(env: &Env, headers_obj: &JsObject) -> Result<HashMap<String, 
 
 /// Dispatch a request through the Rex core handler, including static file serving.
 async fn dispatch_request(
-    state: &Arc<AppState>,
+    state: &Arc<rex_server::handlers::AppState>,
     static_dir: &PathBuf,
     req: RexRequest,
 ) -> RexResponse {
@@ -503,7 +354,7 @@ async fn dispatch_request(
 
     // Delegate everything else to the core handler
     let hot = snapshot(state);
-    core::handle_request(state, &hot, &req).await
+    rex_server::core::handle_request(state, &hot, &req).await
 }
 
 /// Serve a static file from the build output directory.
@@ -555,13 +406,6 @@ fn guess_content_type(path: &str) -> &'static str {
         "image/jpeg"
     } else {
         "application/octet-stream"
-    }
-}
-
-fn body_to_string(body: &RexBody) -> String {
-    match body {
-        RexBody::Full(bytes) => String::from_utf8_lossy(bytes).to_string(),
-        RexBody::Empty => String::new(),
     }
 }
 

@@ -80,6 +80,21 @@ impl RexServer {
         }
     }
 
+    /// Create a `RexServer` from pre-existing state (used by `Rex` API).
+    pub fn from_state(
+        state: Arc<AppState>,
+        port: u16,
+        static_dir: PathBuf,
+        project_root: PathBuf,
+    ) -> Self {
+        Self {
+            state,
+            port,
+            static_dir,
+            project_root,
+        }
+    }
+
     pub fn state(&self) -> Arc<AppState> {
         self.state.clone()
     }

@@ -2,14 +2,11 @@ mod tui;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use rex_build::{build_bundles, AssetManifest};
+use rex_build::build_bundles;
 use rex_core::{ProjectConfig, RexConfig};
-use rex_router::{scan_pages, RouteTrie};
-use rex_server::{RexServer, ServerConfig};
-use rex_v8::{init_v8, IsolatePool};
+use rex_router::scan_pages;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Arc;
 use tracing::{debug, info};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -165,60 +162,27 @@ async fn cmd_dev(
     log_buffer: Option<LogBuffer>,
 ) -> Result<()> {
     let start = std::time::Instant::now();
-    let config = RexConfig::new(root).with_dev(true).with_port(port);
-    config.validate()?;
 
     if !tui_enabled {
         print_mascot_header(env!("CARGO_PKG_VERSION"), "");
     }
 
-    // Scan routes
-    debug!("Scanning routes...");
-    let scan = scan_pages(&config.pages_dir)?;
-    debug!(
-        routes = scan.routes.len(),
-        has_app = scan.app.is_some(),
-        has_404 = scan.not_found.is_some(),
-        has_error = scan.error.is_some(),
-        "Routes scanned"
-    );
+    let rex = rex_server::Rex::new(rex_server::RexOptions {
+        root: root.clone(),
+        dev: true,
+        port,
+    })
+    .await?;
 
-    // Load project config (redirects, rewrites, headers, build aliases)
-    let project_config = ProjectConfig::load(&config.project_root)?;
-
-    // Build
-    debug!("Building bundles...");
-    let build_result = build_bundles(&config, &scan, &project_config).await?;
-    debug!(build_id = %build_result.build_id, "Build complete");
+    let config = rex.config().clone();
+    let scan = rex.scan().clone();
+    let state = rex.state();
 
     // Start Tailwind CSS watch process (if Tailwind is detected)
     let _tailwind = rex_dev::TailwindProcess::start(&config, &scan)?;
     if !tui_enabled && _tailwind.is_some() {
         eprintln!("  {} {}", dim("◇"), dim("Tailwind CSS (watching)"));
     }
-
-    // Initialize V8
-    debug!("Initializing V8...");
-    init_v8();
-
-    // Load self-contained server bundle (includes React, polyfills, pages, SSR runtime)
-    let server_bundle = std::fs::read_to_string(&build_result.server_bundle_path)?;
-
-    // Create isolate pool
-    let pool_size = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(4); // Cap at 4 for dev
-
-    debug!(pool_size, "Creating V8 isolate pool");
-    let pool = IsolatePool::new(
-        pool_size,
-        Arc::new(server_bundle),
-    )?;
-
-    // Build route tries
-    let trie = RouteTrie::from_routes(&scan.routes);
-    let api_trie = RouteTrie::from_routes(&scan.api_routes);
 
     // Create HMR broadcast
     let hmr = rex_dev::HmrBroadcast::new();
@@ -252,25 +216,7 @@ async fn cmd_dev(
         .route("/_rex/hmr", hmr_route)
         .route("/_rex/hmr-client.js", axum::routing::get(hmr_client_handler));
 
-    let server = RexServer::new(ServerConfig {
-        route_trie: trie,
-        api_route_trie: api_trie,
-        isolate_pool: pool,
-        manifest: build_result.manifest,
-        build_id: build_result.build_id,
-        static_dir: config.client_build_dir(),
-        project_root: config.project_root.clone(),
-        port,
-        is_dev: true,
-        has_custom_404: scan.not_found.is_some(),
-        has_custom_error: scan.error.is_some(),
-        has_custom_document: scan.document.is_some(),
-        project_config,
-    })
-    .await;
-
-    let router = server.build_router_with_extra(extra_routes);
-    let state = server.state();
+    let router = rex.router_with_extra(extra_routes);
 
     // Spawn async rebuild handler: rebuild bundles + reload V8 isolates on file changes
     {
@@ -779,62 +725,33 @@ fn print_route_summary(routes: &[rex_core::Route], api_routes: &[rex_core::Route
 
 async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
     let start = std::time::Instant::now();
-    let root = std::fs::canonicalize(&root)?;
-    let config = RexConfig::new(root).with_port(port);
 
     print_mascot_header(env!("CARGO_PKG_VERSION"), "(production)");
 
-    // Load manifest
-    let manifest = AssetManifest::load(&config.manifest_path())?;
-
-    // Scan routes (for trie)
-    let scan = scan_pages(&config.pages_dir)?;
-    let trie = RouteTrie::from_routes(&scan.routes);
-    let api_trie = RouteTrie::from_routes(&scan.api_routes);
-
-    // Initialize V8
-    init_v8();
-
-    let server_bundle = std::fs::read_to_string(config.server_bundle_path())?;
-
-    let pool_size = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4);
-
-    let pool = IsolatePool::new(
-        pool_size,
-        Arc::new(server_bundle),
-    )?;
-
-    // Load project config (redirects, rewrites, headers)
-    let project_config = ProjectConfig::load(&config.project_root)?;
-
-    let server = RexServer::new(ServerConfig {
-        route_trie: trie,
-        api_route_trie: api_trie,
-        isolate_pool: pool,
-        manifest: manifest.clone(),
-        build_id: manifest.build_id.clone(),
-        static_dir: config.client_build_dir(),
-        project_root: config.project_root.clone(),
+    let rex = rex_server::Rex::from_build(rex_server::RexOptions {
+        root,
+        dev: false,
         port,
-        is_dev: false,
-        has_custom_404: scan.not_found.is_some(),
-        has_custom_error: scan.error.is_some(),
-        has_custom_document: scan.document.is_some(),
-        project_config,
     })
-    .await;
+    .await?;
 
     let elapsed = start.elapsed();
-    eprintln!("  {} {}", green_bold("✓ Ready in"), green_bold(&format_duration(elapsed)));
+    eprintln!(
+        "  {} {}",
+        green_bold("✓ Ready in"),
+        green_bold(&format_duration(elapsed))
+    );
     eprintln!();
-    eprintln!("  {} {}", dim("➜ Local:"), bold(&format!("http://localhost:{port}")));
+    eprintln!(
+        "  {} {}",
+        dim("➜ Local:"),
+        bold(&format!("http://localhost:{port}"))
+    );
     eprintln!();
-    print_route_summary(&scan.routes, &scan.api_routes);
+    print_route_summary(&rex.scan().routes, &rex.scan().api_routes);
     eprintln!();
 
-    server.serve().await
+    rex.serve().await
 }
 
 async fn hmr_client_handler() -> impl axum::response::IntoResponse {

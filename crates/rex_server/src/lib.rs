@@ -1,6 +1,8 @@
 pub mod core;
 pub mod document;
 pub mod handlers;
+pub mod rex;
 pub mod server;
 
+pub use rex::{PageResult, Rex, RexOptions};
 pub use server::{RexServer, ServerConfig};
