@@ -55,34 +55,7 @@ jobs:
           fi
 
   test:
-    name: Test
-    needs: check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Cache cargo registry & build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git/db
-            target/
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-test-
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install fixture dependencies
-        run: cd fixtures/basic && npm install
-
-      - name: cargo test
-        run: cargo test --all
-
-  coverage:
-    name: Coverage
+    name: Test & Coverage
     needs: check
     runs-on: ubuntu-latest
     env:
@@ -97,8 +70,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git/db
             target/
-          key: ${{ runner.os }}-cargo-cov-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-cov-
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-test-
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -110,7 +83,7 @@ jobs:
       - name: Install fixture dependencies
         run: cd fixtures/basic && npm install
 
-      - name: Run coverage
+      - name: Run tests with coverage
         run: |
           cargo llvm-cov --all --json --output-path coverage.json
           COVERAGE=$(jq '.data[0].totals.lines.percent' coverage.json | xargs printf '%.0f')
