@@ -74,9 +74,6 @@ pub struct ServerSidePropsContext {
     pub headers: HashMap<String, String>,
     #[serde(default)]
     pub cookies: HashMap<String, String>,
-    /// Session data from auth (populated when user is authenticated).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session: Option<serde_json::Value>,
 }
 
 /// Result from getServerSideProps
@@ -234,9 +231,6 @@ pub struct ProjectConfig {
     pub build: BuildConfig,
     #[serde(default)]
     pub dev: DevConfig,
-    /// Auth configuration (deserialized as raw Value to avoid circular deps).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auth: Option<serde_json::Value>,
 }
 
 impl ProjectConfig {

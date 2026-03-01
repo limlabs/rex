@@ -817,12 +817,6 @@ async fn build_server_bundle(
                     .to_string(),
             )],
         ),
-        (
-            "rex/auth".to_string(),
-            vec![Some(
-                runtime_dir.join("auth.js").to_string_lossy().to_string(),
-            )],
-        ),
         // Next.js compatibility shims
         (
             "next/head".to_string(),
@@ -1079,12 +1073,6 @@ if (!window.__REX_NAVIGATING__) {{
             "rex/image".to_string(),
             vec![Some(
                 runtime_dir.join("image.js").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "rex/auth".to_string(),
-            vec![Some(
-                runtime_dir.join("auth.js").to_string_lossy().to_string(),
             )],
         ),
         // Next.js compatibility shims

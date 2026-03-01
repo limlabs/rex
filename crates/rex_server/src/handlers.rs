@@ -16,7 +16,6 @@ use crate::document::{
     assemble_body_tail, assemble_document, assemble_head_shell, assemble_rsc_body_tail,
     assemble_rsc_head_shell, DocumentDescriptor, DocumentParams,
 };
-use rex_auth::cookies_from_headers;
 
 /// State that can change during dev-mode rebuilds.
 #[derive(Clone)]
@@ -64,7 +63,6 @@ pub struct AppState {
     pub project_root: PathBuf,
     pub image_cache: rex_image::ImageCache,
     pub hot: RwLock<Arc<HotState>>,
-    pub auth: Option<Arc<rex_auth::AuthServer>>,
 }
 
 /// Snapshot the hot state (O(1) Arc clone, no lock held across await).
@@ -762,18 +760,12 @@ async fn page_handler_inner(
                 .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
                 .collect();
 
-            let cookies = cookies_from_headers(&header_map);
-            let session = state
-                .auth
-                .as_ref()
-                .and_then(|auth| auth.extract_session(&header_map));
             let context = ServerSidePropsContext {
                 params,
                 query,
                 resolved_url: path.to_string(),
                 headers: header_map,
-                cookies,
-                session,
+                cookies: HashMap::new(),
             };
             let context_json = serde_json::to_string(&context).expect("JSON serialization");
 
@@ -1010,18 +1002,12 @@ pub async fn data_handler(
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
                 .collect();
-            let cookies = cookies_from_headers(&header_map);
-            let session = state
-                .auth
-                .as_ref()
-                .and_then(|auth| auth.extract_session(&header_map));
             let context = ServerSidePropsContext {
                 params,
                 query: HashMap::new(),
                 resolved_url: path,
                 headers: header_map,
-                cookies,
-                session,
+                cookies: HashMap::new(),
             };
             let context_json = serde_json::to_string(&context).expect("JSON serialization");
             state
@@ -1416,7 +1402,6 @@ globalThis.__rex_resolve_gsp = function() {
             is_dev: false,
             project_root: PathBuf::from("/tmp/rex-test"),
             image_cache: rex_image::ImageCache::new(PathBuf::from("/tmp/rex-test-cache")),
-            auth: None,
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
                 api_route_trie: RouteTrie::from_routes(&[]),
@@ -1688,7 +1673,6 @@ globalThis.__rex_resolve_gsp = function() {
             is_dev: false,
             project_root: PathBuf::from("/tmp/rex-test"),
             image_cache: rex_image::ImageCache::new(PathBuf::from("/tmp/rex-test-cache")),
-            auth: None,
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
                 api_route_trie: RouteTrie::from_routes(&[]),
@@ -1903,7 +1887,6 @@ globalThis.__rex_resolve_gsp = function() {
             is_dev: false,
             project_root: PathBuf::from("/tmp/rex-test"),
             image_cache: rex_image::ImageCache::new(PathBuf::from("/tmp/rex-test-cache")),
-            auth: None,
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
                 api_route_trie: RouteTrie::from_routes(&[]),

@@ -11,7 +11,6 @@ members = [
     "crates/rex_image",
     "crates/rex_e2e",
     "crates/rex_napi",
-    "crates/rex_auth",
 ]
 
 [workspace.dependencies]
@@ -58,9 +57,6 @@ rustc-hash = "2"
 
 # Async
 futures = "0.3"
-
-# Environment
-dotenvy = "0.15"
 
 # File hashing
 sha2 = "0.10"
