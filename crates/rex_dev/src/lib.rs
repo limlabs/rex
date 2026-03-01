@@ -5,4 +5,4 @@ pub mod watcher;
 
 pub use hmr::HmrBroadcast;
 pub use tailwind::TailwindProcess;
-pub use watcher::{FileEvent, FileEventKind, start_watcher};
+pub use watcher::{start_watcher, FileEvent, FileEventKind};

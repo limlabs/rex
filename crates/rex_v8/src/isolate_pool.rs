@@ -21,10 +21,7 @@ pub struct IsolatePool {
 impl IsolatePool {
     /// Create a new pool with `size` isolates.
     /// Each isolate is initialized with the self-contained server bundle JS.
-    pub fn new(
-        size: usize,
-        server_bundle_js: Arc<String>,
-    ) -> Result<Self> {
+    pub fn new(size: usize, server_bundle_js: Arc<String>) -> Result<Self> {
         let mut senders = Vec::with_capacity(size);
         let mut threads = Vec::with_capacity(size);
 
@@ -83,10 +80,7 @@ impl IsolatePool {
         });
 
         // Round-robin dispatch
-        let idx = self
-            .next
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            % self.size;
+        let idx = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % self.size;
 
         self.senders[idx]
             .as_ref()
@@ -127,7 +121,6 @@ impl IsolatePool {
         debug!("All V8 isolates reloaded");
         Ok(())
     }
-
 }
 
 impl Drop for IsolatePool {

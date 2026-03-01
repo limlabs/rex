@@ -5,7 +5,7 @@ use anyhow::Result;
 use axum::Router;
 use rex_build::AssetManifest;
 use rex_core::{DataStrategy, ProjectConfig, RexConfig, ServerSidePropsContext};
-use rex_router::{scan_project, ScanResult, RouteTrie};
+use rex_router::{scan_project, RouteTrie, ScanResult};
 use rex_v8::{init_v8, IsolatePool};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -207,7 +207,11 @@ impl Rex {
         };
 
         let image_cache = rex_image::ImageCache::new(
-            config.project_root.join(".rex").join("cache").join("images"),
+            config
+                .project_root
+                .join(".rex")
+                .join("cache")
+                .join("images"),
         );
 
         let state = Arc::new(AppState {
@@ -344,11 +348,7 @@ impl Rex {
     // --- Rendering ---
 
     /// Render a page to an HTML body string with the given props (SSR only, no GSSP).
-    pub async fn render_to_string(
-        &self,
-        path: &str,
-        props: &serde_json::Value,
-    ) -> Result<String> {
+    pub async fn render_to_string(&self, path: &str, props: &serde_json::Value) -> Result<String> {
         let hot = snapshot(&self.state);
 
         let route_match = hot

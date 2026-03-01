@@ -163,11 +163,7 @@ impl RexInstance {
 
     /// Render a page to an HTML string with the given props.
     #[napi]
-    pub async fn render_to_string(
-        &self,
-        path: String,
-        props: serde_json::Value,
-    ) -> Result<String> {
+    pub async fn render_to_string(&self, path: String, props: serde_json::Value) -> Result<String> {
         self.check_closed()?;
         self.rex
             .render_to_string(&path, &props)

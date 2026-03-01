@@ -1,12 +1,14 @@
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
-use std::path::PathBuf;
 use axum::response::{Html, IntoResponse, Response};
 use futures::stream::{self, StreamExt};
-use rex_core::{DataStrategy, MiddlewareAction, MiddlewareResult, ProjectConfig, ServerSidePropsContext};
+use rex_core::{
+    DataStrategy, MiddlewareAction, MiddlewareResult, ProjectConfig, ServerSidePropsContext,
+};
 use rex_router::RouteTrie;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tracing::{debug, error, info};
 
@@ -41,7 +43,8 @@ impl HotState {
         serde_json::to_string(&serde_json::json!({
             "build_id": build_id,
             "pages": manifest.pages,
-        })).expect("JSON serialization")
+        }))
+        .expect("JSON serialization")
     }
 }
 
@@ -68,7 +71,10 @@ fn dev_error_overlay(title: &str, message: &str, file: Option<&str>) -> String {
         .replace('>', "&gt;");
     let file_section = file
         .map(|f| {
-            let escaped = f.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+            let escaped = f
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;");
             format!(r#"<div class="file">{escaped}</div>"#)
         })
         .unwrap_or_default();
@@ -226,13 +232,9 @@ async fn render_error_page(
 /// Compute document descriptor from V8 _document rendering.
 /// Used to populate `HotState.document_descriptor` at build time and on rebuilds.
 pub async fn compute_document_descriptor(pool: &rex_v8::IsolatePool) -> Option<DocumentDescriptor> {
-    let result = pool
-        .execute(move |iso| iso.render_document())
-        .await;
+    let result = pool.execute(move |iso| iso.render_document()).await;
     match result {
-        Ok(Ok(Some(json))) => {
-            serde_json::from_str(&json).ok()
-        }
+        Ok(Ok(Some(json))) => serde_json::from_str(&json).ok(),
         _ => None,
     }
 }
@@ -271,7 +273,8 @@ pub async fn api_handler(
             Ok(Some(mw)) => match mw.action {
                 MiddlewareAction::Redirect => {
                     let url = mw.url.as_deref().unwrap_or("/");
-                    let status = StatusCode::from_u16(mw.status).unwrap_or(StatusCode::TEMPORARY_REDIRECT);
+                    let status =
+                        StatusCode::from_u16(mw.status).unwrap_or(StatusCode::TEMPORARY_REDIRECT);
                     return Response::builder()
                         .status(status)
                         .header("location", url)
@@ -285,7 +288,11 @@ pub async fn api_handler(
             Ok(None) => {}
             Err(e) => {
                 error!("Middleware error: {e}");
-                return (StatusCode::INTERNAL_SERVER_ERROR, format!("Middleware error: {e}")).into_response();
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Middleware error: {e}"),
+                )
+                    .into_response();
             }
         }
     }
@@ -354,7 +361,9 @@ pub async fn api_handler(
             for (k, v) in &api_res.headers {
                 builder = builder.header(k.as_str(), v.as_str());
             }
-            builder.body(Body::from(api_res.body)).expect("response build")
+            builder
+                .body(Body::from(api_res.body))
+                .expect("response build")
         }
         Ok(Err(e)) => {
             error!("API handler V8 error: {e}");
@@ -375,8 +384,7 @@ fn check_redirects(path: &str, config: &ProjectConfig) -> Option<Response> {
             let status = if rule.permanent {
                 StatusCode::PERMANENT_REDIRECT // 308
             } else {
-                StatusCode::from_u16(rule.status_code)
-                    .unwrap_or(StatusCode::TEMPORARY_REDIRECT)
+                StatusCode::from_u16(rule.status_code).unwrap_or(StatusCode::TEMPORARY_REDIRECT)
             };
             debug!(from = path, to = %dest, status = %status.as_u16(), "Redirect rule matched");
             return Some(
@@ -489,7 +497,8 @@ pub async fn page_handler(
             Ok(Some(mw)) => match mw.action {
                 MiddlewareAction::Redirect => {
                     let url = mw.url.as_deref().unwrap_or("/");
-                    let status = StatusCode::from_u16(mw.status).unwrap_or(StatusCode::TEMPORARY_REDIRECT);
+                    let status =
+                        StatusCode::from_u16(mw.status).unwrap_or(StatusCode::TEMPORARY_REDIRECT);
                     return Response::builder()
                         .status(status)
                         .header("location", url)
@@ -506,7 +515,8 @@ pub async fn page_handler(
                         };
                         mw_response_headers = mw.response_headers.into_iter().collect();
                         let custom_headers = collect_headers(&rewrite_path, &hot.project_config);
-                        let mut response = page_handler_inner(&state, &hot, &rewrite_path, &uri, &headers).await;
+                        let mut response =
+                            page_handler_inner(&state, &hot, &rewrite_path, &uri, &headers).await;
                         for (key, value) in custom_headers.into_iter().chain(mw_response_headers) {
                             if let (Ok(name), Ok(val)) = (
                                 axum::http::header::HeaderName::from_bytes(key.as_bytes()),
@@ -572,7 +582,6 @@ async fn page_handler_inner(
     uri: &Uri,
     headers: &HeaderMap,
 ) -> Response {
-
     // Try to match the route
     let route_match = match hot.route_trie.match_path(path) {
         Some(m) => m,
@@ -581,7 +590,11 @@ async fn page_handler_inner(
             if hot.has_custom_404 {
                 return render_error_page(state, hot, "404", StatusCode::NOT_FOUND, "{}").await;
             }
-            return (StatusCode::NOT_FOUND, Html("404 - Page Not Found".to_string())).into_response();
+            return (
+                StatusCode::NOT_FOUND,
+                Html("404 - Page Not Found".to_string()),
+            )
+                .into_response();
         }
     };
 
@@ -650,22 +663,50 @@ async fn page_handler_inner(
         Ok(Err(e)) => {
             error!("GSSP error: {e}");
             if state.is_dev {
-                return Html(dev_error_overlay("Server Props Error", &e.to_string(), None)).into_response();
+                return Html(dev_error_overlay(
+                    "Server Props Error",
+                    &e.to_string(),
+                    None,
+                ))
+                .into_response();
             } else if hot.has_custom_error {
                 let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
-                return render_error_page(state, hot, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
+                return render_error_page(
+                    state,
+                    hot,
+                    "_error",
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &err_props,
+                )
+                .await;
             }
-            return (StatusCode::INTERNAL_SERVER_ERROR, Html(format!("Server error: {e}"))).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Html(format!("Server error: {e}")),
+            )
+                .into_response();
         }
         Err(e) => {
             error!("Isolate pool error: {e}");
             if state.is_dev {
-                return Html(dev_error_overlay("Runtime Error", &e.to_string(), None)).into_response();
+                return Html(dev_error_overlay("Runtime Error", &e.to_string(), None))
+                    .into_response();
             } else if hot.has_custom_error {
                 let err_props = serde_json::json!({ "statusCode": 500 }).to_string();
-                return render_error_page(state, hot, "_error", StatusCode::INTERNAL_SERVER_ERROR, &err_props).await;
+                return render_error_page(
+                    state,
+                    hot,
+                    "_error",
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &err_props,
+                )
+                .await;
             }
-            return (StatusCode::INTERNAL_SERVER_ERROR, Html("Internal server error".to_string())).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Html("Internal server error".to_string()),
+            )
+                .into_response();
         }
     };
 
@@ -677,9 +718,18 @@ async fn page_handler_inner(
 
     // Check for redirect
     if let Some(redirect) = parsed.get("redirect") {
-        let destination = redirect.get("destination").and_then(|d| d.as_str()).unwrap_or("/");
-        let permanent = redirect.get("permanent").and_then(|p| p.as_bool()).unwrap_or(false);
-        let status_code = redirect.get("statusCode").and_then(|s| s.as_u64()).unwrap_or(307) as u16;
+        let destination = redirect
+            .get("destination")
+            .and_then(|d| d.as_str())
+            .unwrap_or("/");
+        let permanent = redirect
+            .get("permanent")
+            .and_then(|p| p.as_bool())
+            .unwrap_or(false);
+        let status_code = redirect
+            .get("statusCode")
+            .and_then(|s| s.as_u64())
+            .unwrap_or(307) as u16;
         let status = if permanent { 301 } else { status_code };
         debug!(destination, status, "Redirecting");
         return Response::builder()
@@ -690,7 +740,11 @@ async fn page_handler_inner(
     }
 
     // Check for notFound
-    if parsed.get("notFound").and_then(|n| n.as_bool()).unwrap_or(false) {
+    if parsed
+        .get("notFound")
+        .and_then(|n| n.as_bool())
+        .unwrap_or(false)
+    {
         if hot.has_custom_404 {
             return render_error_page(state, hot, "404", StatusCode::NOT_FOUND, "{}").await;
         }
@@ -817,9 +871,7 @@ pub async fn data_handler(
         .unwrap_or_default();
 
     let result = match strategy {
-        DataStrategy::None => {
-            Ok(Ok(r#"{"props":{}}"#.to_string()))
-        }
+        DataStrategy::None => Ok(Ok(r#"{"props":{}}"#.to_string())),
         DataStrategy::GetStaticProps => {
             let ctx_json = serde_json::json!({ "params": params }).to_string();
             state
@@ -1035,10 +1087,7 @@ mod tests {
             ));
             bundle.push_str(&format!("  exports.default = {};\n", component));
             if let Some(gssp_code) = gssp {
-                bundle.push_str(&format!(
-                    "  exports.getServerSideProps = {};\n",
-                    gssp_code
-                ));
+                bundle.push_str(&format!("  exports.getServerSideProps = {};\n", gssp_code));
             }
             bundle.push_str("  return exports;\n})();\n\n");
         }
@@ -1144,17 +1193,10 @@ globalThis.__rex_resolve_gsp = function() {
     }
 
     /// Build a test app with router, isolate pool, and routes wired up.
-    fn build_test_app(
-        routes: Vec<Route>,
-        pages: &[(&str, &str, Option<&str>)],
-    ) -> Router {
+    fn build_test_app(routes: Vec<Route>, pages: &[(&str, &str, Option<&str>)]) -> Router {
         rex_v8::init_v8();
         let bundle = format!("{}\n{}", MOCK_REACT_RUNTIME, make_server_bundle(pages));
-        let pool = rex_v8::IsolatePool::new(
-            1,
-            Arc::new(bundle),
-        )
-        .expect("failed to create pool");
+        let pool = rex_v8::IsolatePool::new(1, Arc::new(bundle)).expect("failed to create pool");
 
         let trie = RouteTrie::from_routes(&routes);
         let mut manifest = rex_build::AssetManifest::new("test-build-id".to_string());
@@ -1194,10 +1236,7 @@ globalThis.__rex_resolve_gsp = function() {
         });
 
         Router::new()
-            .route(
-                "/_rex/data/{build_id}/{*path}",
-                get(data_handler),
-            )
+            .route("/_rex/data/{build_id}/{*path}", get(data_handler))
             .fallback(page_handler)
             .with_state(state)
     }
@@ -1225,7 +1264,10 @@ globalThis.__rex_resolve_gsp = function() {
 
         assert_eq!(resp.status(), StatusCode::OK);
         let html = body_string(resp.into_body()).await;
-        assert!(html.contains("<h1>Home</h1>"), "missing SSR content: {html}");
+        assert!(
+            html.contains("<h1>Home</h1>"),
+            "missing SSR content: {html}"
+        );
         assert!(html.contains("<!DOCTYPE html>"), "missing doctype: {html}");
         assert!(html.contains("__REX_DATA__"), "missing data script: {html}");
     }
@@ -1542,11 +1584,7 @@ globalThis.__rex_resolve_gsp = function() {
             ..Default::default()
         };
 
-        let app = build_test_app_with_config(
-            vec![],
-            &[],
-            config,
-        );
+        let app = build_test_app_with_config(vec![], &[], config);
 
         let resp = app
             .oneshot(Request::get("/blog/hello").body(Body::empty()).unwrap())
@@ -1585,7 +1623,10 @@ globalThis.__rex_resolve_gsp = function() {
 
         assert_eq!(resp.status(), StatusCode::OK);
         let html = body_string(resp.into_body()).await;
-        assert!(html.contains("Home"), "rewrite should serve index page: {html}");
+        assert!(
+            html.contains("Home"),
+            "rewrite should serve index page: {html}"
+        );
     }
 
     #[tokio::test]
@@ -1713,16 +1754,29 @@ globalThis.__rex_resolve_gsp = function() {
                 make_route("/protected", "protected.tsx", vec![]),
             ],
             &[
-                ("index", "function Index() { return React.createElement('div', null, 'Home'); }", None),
-                ("login", "function Login() { return React.createElement('div', null, 'Login'); }", None),
-                ("protected", "function Protected() { return React.createElement('div', null, 'Secret'); }", None),
+                (
+                    "index",
+                    "function Index() { return React.createElement('div', null, 'Home'); }",
+                    None,
+                ),
+                (
+                    "login",
+                    "function Login() { return React.createElement('div', null, 'Login'); }",
+                    None,
+                ),
+                (
+                    "protected",
+                    "function Protected() { return React.createElement('div', null, 'Secret'); }",
+                    None,
+                ),
             ],
             TEST_MIDDLEWARE_REDIRECT,
             vec!["/protected".to_string()],
         );
 
         // /protected should redirect to /login
-        let resp = app.clone()
+        let resp = app
+            .clone()
             .oneshot(Request::get("/protected").body(Body::empty()).unwrap())
             .await
             .unwrap();
@@ -1741,7 +1795,11 @@ globalThis.__rex_resolve_gsp = function() {
     async fn test_middleware_next_passthrough() {
         let app = build_test_app_with_middleware(
             vec![make_route("/", "index.tsx", vec![])],
-            &[("index", "function Index() { return React.createElement('div', null, 'Home'); }", None)],
+            &[(
+                "index",
+                "function Index() { return React.createElement('div', null, 'Home'); }",
+                None,
+            )],
             TEST_MIDDLEWARE_REDIRECT,
             vec!["/".to_string()],
         );
@@ -1752,7 +1810,9 @@ globalThis.__rex_resolve_gsp = function() {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let html = String::from_utf8_lossy(&body);
         assert!(html.contains("Home"), "should render the page: {html}");
     }

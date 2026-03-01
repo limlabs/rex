@@ -55,9 +55,9 @@ impl RouteTrie {
                 return;
             } else if let Some(param_name) = segment.strip_prefix(':') {
                 // Dynamic parameter
-                let (_, child) = node.param_child.get_or_insert_with(|| {
-                    (param_name.to_string(), Box::new(TrieNode::new()))
-                });
+                let (_, child) = node
+                    .param_child
+                    .get_or_insert_with(|| (param_name.to_string(), Box::new(TrieNode::new())));
                 node = child.as_mut();
             } else {
                 // Static segment

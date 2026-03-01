@@ -19,7 +19,9 @@ pub async fn handle_file_event(
     debug!(path = %event.path.display(), kind = ?event.kind, "Processing file change");
 
     match event.kind {
-        FileEventKind::PageModified | FileEventKind::CssModified | FileEventKind::MiddlewareModified => {
+        FileEventKind::PageModified
+        | FileEventKind::CssModified
+        | FileEventKind::MiddlewareModified => {
             let t0 = Instant::now();
 
             // Rescan, rebuild, reload isolates, update hot state
@@ -28,7 +30,10 @@ pub async fn handle_file_event(
 
             // Get project_config from current hot state for build aliases
             let project_config = {
-                let guard = state.hot.read().map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
+                let guard = state
+                    .hot
+                    .read()
+                    .map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
                 guard.project_config.clone()
             };
 
@@ -59,7 +64,10 @@ pub async fn handle_file_event(
 
             // Snapshot the old hot state (Arc clone, cheap)
             let old_hot = {
-                let guard = state.hot.read().map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
+                let guard = state
+                    .hot
+                    .read()
+                    .map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
                 Arc::clone(&guard)
             };
 
@@ -71,8 +79,12 @@ pub async fn handle_file_event(
             };
 
             // Update hot state atomically with new Arc
-            let manifest_json = HotState::compute_manifest_json(&build_result.build_id, &build_result.manifest);
-            let mut hot_guard = state.hot.write().map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
+            let manifest_json =
+                HotState::compute_manifest_json(&build_result.build_id, &build_result.manifest);
+            let mut hot_guard = state
+                .hot
+                .write()
+                .map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
             *hot_guard = Arc::new(HotState {
                 has_middleware: scan.middleware.is_some(),
                 middleware_matchers: build_result.manifest.middleware_matchers.clone(),
@@ -104,7 +116,10 @@ pub async fn handle_file_event(
 
             // Get project_config from current hot state for build aliases
             let project_config = {
-                let guard = state.hot.read().map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
+                let guard = state
+                    .hot
+                    .read()
+                    .map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
                 guard.project_config.clone()
             };
 
@@ -117,7 +132,10 @@ pub async fn handle_file_event(
 
             // Snapshot old state for project_config
             let old_hot = {
-                let guard = state.hot.read().map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
+                let guard = state
+                    .hot
+                    .read()
+                    .map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
                 Arc::clone(&guard)
             };
 
@@ -128,10 +146,14 @@ pub async fn handle_file_event(
                 None
             };
 
-            let manifest_json = HotState::compute_manifest_json(&build_result.build_id, &build_result.manifest);
+            let manifest_json =
+                HotState::compute_manifest_json(&build_result.build_id, &build_result.manifest);
 
             // Update all hot state atomically with new Arc
-            let mut hot_guard = state.hot.write().map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
+            let mut hot_guard = state
+                .hot
+                .write()
+                .map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
             *hot_guard = Arc::new(HotState {
                 route_trie: RouteTrie::from_routes(&scan.routes),
                 api_route_trie: RouteTrie::from_routes(&scan.api_routes),
