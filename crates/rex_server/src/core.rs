@@ -1,9 +1,21 @@
+use rex_auth::cookies_from_headers;
 use rex_core::{
     DataStrategy, MiddlewareAction, MiddlewareResult, ProjectConfig, ServerSidePropsContext,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info};
+
+/// Extract session from auth state if configured.
+pub(crate) fn extract_session(
+    state: &Arc<AppState>,
+    headers: &HashMap<String, String>,
+) -> Option<serde_json::Value> {
+    state
+        .auth
+        .as_ref()
+        .and_then(|auth| auth.extract_session(headers))
+}
 
 use crate::document::{assemble_document, DocumentParams};
 use crate::handlers::{AppState, HotState};
@@ -376,12 +388,15 @@ async fn handle_page_inner(
         }
         DataStrategy::GetServerSideProps => {
             let query = req.query_params();
+            let cookies = cookies_from_headers(&req.headers);
+            let session = extract_session(state, &req.headers);
             let context = ServerSidePropsContext {
                 params,
                 query,
                 resolved_url: path.to_string(),
                 headers: req.headers.clone(),
-                cookies: HashMap::new(),
+                cookies,
+                session,
             };
             let context_json = serde_json::to_string(&context).expect("JSON serialization");
             state
@@ -674,12 +689,15 @@ pub async fn handle_data(
                 .await
         }
         DataStrategy::GetServerSideProps => {
+            let cookies = cookies_from_headers(&req.headers);
+            let session = extract_session(state, &req.headers);
             let context = ServerSidePropsContext {
                 params,
                 query: HashMap::new(),
                 resolved_url: path,
                 headers: req.headers.clone(),
-                cookies: HashMap::new(),
+                cookies,
+                session,
             };
             let context_json = serde_json::to_string(&context).expect("JSON serialization");
             state

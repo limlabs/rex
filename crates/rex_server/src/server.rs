@@ -65,6 +65,7 @@ impl RexServer {
             is_dev: config.is_dev,
             project_root: config.project_root.clone(),
             image_cache,
+            auth: None,
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: config.route_trie,
                 api_route_trie: config.api_route_trie,
@@ -120,7 +121,7 @@ impl RexServer {
         let public_dir = self.project_root.join("public");
         let public_service = ServeDir::new(&public_dir).append_index_html_on_directories(false);
 
-        Router::new()
+        let mut router = Router::new()
             // Data endpoint
             .route("/_rex/data/{build_id}/{*path}", get(handlers::data_handler))
             // Image optimization endpoint
@@ -128,8 +129,16 @@ impl RexServer {
             // MCP endpoint (JSON-RPC 2.0 over POST)
             .route("/mcp", post(crate::mcp::mcp_handler))
             // Client-side router script
-            .route("/_rex/router.js", get(router_js_handler))
-            // Merge any extra routes (e.g., HMR websocket)
+            .route("/_rex/router.js", get(router_js_handler));
+
+        // Mount auth routes if configured
+        if let Some(ref auth) = self.state.auth {
+            let auth_routes = auth.routes().with_state(auth.clone());
+            router = router.merge(auth_routes);
+        }
+
+        // Merge any extra routes (e.g., HMR websocket)
+        router
             .merge(extra_routes)
             // Static file serving
             .nest_service("/_rex/static", static_service)

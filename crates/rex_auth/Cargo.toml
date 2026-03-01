@@ -1,0 +1,45 @@
+[package]
+name = "rex_auth"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Session encryption
+aes-gcm = "0.10"
+rand = "0.8"
+
+# JWT
+jsonwebtoken = "9"
+
+# IDs
+uuid = { version = "1", features = ["v4"] }
+
+# URL handling
+url = "2"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# HTTP
+reqwest = { workspace = true, features = ["json"] }
+axum = { workspace = true }
+tokio = { workspace = true }
+
+# Crypto
+sha2 = { workspace = true }
+base64 = { workspace = true }
+hex = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

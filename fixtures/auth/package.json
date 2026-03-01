@@ -1,0 +1,20 @@
+{
+  "name": "auth-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev": "rex dev",
+    "build": "rex build",
+    "start": "rex start"
+  },
+  "dependencies": {
+    "@limlabs/rex": "file:../../packages/rex",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3"
+  }
+}
