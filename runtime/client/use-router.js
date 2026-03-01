@@ -1,6 +1,6 @@
 // Rex useRouter() hook — client-side implementation.
 // Subscribes to window.__REX_ROUTER events for reactive updates.
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 
 function getSnapshot() {
   var r = window.__REX_ROUTER;

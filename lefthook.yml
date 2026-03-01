@@ -11,7 +11,7 @@ pre-commit:
       run: cargo clippy --all-targets -- -D warnings
       fail_text: "Fix clippy warnings before committing"
     oxlint:
-      run: npx oxlint runtime/ packages/rex/src/
+      run: npx oxlint --deny-warnings runtime/ packages/rex/src/
       fail_text: "Fix oxlint warnings before committing"
     test:
       run: cargo test
