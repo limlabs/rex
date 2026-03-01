@@ -1,5 +1,26 @@
 # Rex — Development Guide for Claude
 
+## Git Identity
+
+At the start of every session, configure the bot identity for commits and pushes:
+
+```bash
+REX_PAT="$(op read 'op://claude/ClaudeLiminal-GitHub/pat')"
+git config --local credential.helper '!f() { echo "username=x-access-token"; echo "password='"$REX_PAT"'"; }; f'
+```
+
+When committing, always use the bot author:
+
+```bash
+git commit --author="claude-liminal <264858718+claude-liminal@users.noreply.github.com>"
+```
+
+When using `gh` CLI (PRs, issues), pass `GH_TOKEN`:
+
+```bash
+GH_TOKEN="$REX_PAT" gh pr create ...
+```
+
 ## Conventional Commits
 
 All commits must use [Conventional Commits](https://www.conventionalcommits.org/) — enforced by a `commit-msg` hook and required by release-please for changelog/version bumps:
