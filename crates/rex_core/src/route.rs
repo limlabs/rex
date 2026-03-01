@@ -176,6 +176,13 @@ impl BuildConfig {
     }
 }
 
+/// Dev server configuration from rex.config.json
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DevConfig {
+    #[serde(default)]
+    pub no_tui: bool,
+}
+
 /// Top-level project configuration from rex.config.json
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectConfig {
@@ -187,6 +194,8 @@ pub struct ProjectConfig {
     pub headers: Vec<HeaderRule>,
     #[serde(default)]
     pub build: BuildConfig,
+    #[serde(default)]
+    pub dev: DevConfig,
 }
 
 impl ProjectConfig {

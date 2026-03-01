@@ -1,3 +1,5 @@
+mod tui;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use rex_build::{build_bundles, AssetManifest};
@@ -9,6 +11,9 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 use tracing::{debug, info};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tui::log_layer::{LogBuffer, TuiLogLayer};
 
 #[derive(Parser)]
 #[command(name = "rex", about = "Rex - Next.js Pages Router in Rust")]
@@ -28,6 +33,10 @@ enum Commands {
         /// Project root directory
         #[arg(long, default_value = ".")]
         root: PathBuf,
+
+        /// Disable TUI (use plain log output)
+        #[arg(long)]
+        no_tui: bool,
     },
 
     /// Create a production build
@@ -81,34 +90,87 @@ enum Commands {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn init_plain_tracing() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "rex=info".into()),
         )
         .init();
+}
 
+fn init_tui_tracing() -> LogBuffer {
+    let buffer = LogBuffer::new(1000);
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "rex=info".into());
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(TuiLogLayer::new(buffer.clone()))
+        .init();
+
+    buffer
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Dev { port, root } => cmd_dev(root, port).await,
-        Commands::Build { root } => cmd_build(root).await,
-        Commands::Start { port, root } => cmd_start(root, port).await,
-        Commands::Lint { root, fix, args } => cmd_lint(root, fix, args),
-        Commands::Typecheck { root, args } => cmd_typecheck(root, args),
-        Commands::Init { name } => cmd_init(name),
+        Commands::Dev {
+            port,
+            root,
+            no_tui,
+        } => {
+            let root = std::fs::canonicalize(&root)?;
+            let project_config = ProjectConfig::load(&root)?;
+            let is_terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
+            let tui_enabled = !no_tui && !project_config.dev.no_tui && is_terminal;
+
+            if tui_enabled {
+                let log_buffer = init_tui_tracing();
+                cmd_dev(root, port, true, Some(log_buffer)).await
+            } else {
+                init_plain_tracing();
+                cmd_dev(root, port, false, None).await
+            }
+        }
+        Commands::Build { root } => {
+            init_plain_tracing();
+            cmd_build(root).await
+        }
+        Commands::Start { port, root } => {
+            init_plain_tracing();
+            cmd_start(root, port).await
+        }
+        Commands::Lint { root, fix, args } => {
+            init_plain_tracing();
+            cmd_lint(root, fix, args)
+        }
+        Commands::Typecheck { root, args } => {
+            init_plain_tracing();
+            cmd_typecheck(root, args)
+        }
+        Commands::Init { name } => {
+            init_plain_tracing();
+            cmd_init(name)
+        }
     }
 }
 
-async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
+async fn cmd_dev(
+    root: PathBuf,
+    port: u16,
+    tui_enabled: bool,
+    log_buffer: Option<LogBuffer>,
+) -> Result<()> {
     let start = std::time::Instant::now();
-    let root = std::fs::canonicalize(&root)?;
     let config = RexConfig::new(root).with_dev(true).with_port(port);
     config.validate()?;
 
-    print_mascot_header(env!("CARGO_PKG_VERSION"), "");
+    if !tui_enabled {
+        print_mascot_header(env!("CARGO_PKG_VERSION"), "");
+    }
 
     // Scan routes
     debug!("Scanning routes...");
@@ -131,7 +193,7 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
 
     // Start Tailwind CSS watch process (if Tailwind is detected)
     let _tailwind = rex_dev::TailwindProcess::start(&config, &scan)?;
-    if _tailwind.is_some() {
+    if !tui_enabled && _tailwind.is_some() {
         eprintln!("  {} {}", dim("◇"), dim("Tailwind CSS (watching)"));
     }
 
@@ -163,7 +225,7 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
 
     // Start tsc watch process (if TypeScript is detected)
     let _tsc = rex_dev::typecheck::spawn_tsc_watcher(&config.project_root, hmr.clone());
-    if _tsc.is_some() {
+    if !tui_enabled && _tsc.is_some() {
         eprintln!("  {} {}", dim("◇"), dim("TypeScript (watching)"));
     }
 
@@ -237,16 +299,49 @@ async fn cmd_dev(root: PathBuf, port: u16) -> Result<()> {
     }
 
     let elapsed = start.elapsed();
-    eprintln!("  {} {}", green_bold("✓ Ready in"), green_bold(&format_duration(elapsed)));
-    eprintln!();
-    eprintln!("  {} {}", dim("➜ Local:"), bold(&format!("http://localhost:{port}")));
-    eprintln!();
-    print_route_summary(&scan.routes, &scan.api_routes);
-    eprintln!();
 
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, router).await?;
+
+    if tui_enabled {
+        // Spawn the HTTP server as a background task
+        tokio::spawn(async move {
+            if let Err(e) = axum::serve(listener, router).await {
+                tracing::error!("Server error: {e}");
+            }
+        });
+
+        let startup_info = tui::StartupInfo {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            ready_ms: elapsed.as_millis() as u64,
+            url: format!("http://localhost:{port}"),
+            page_count: scan.routes.len(),
+            api_count: scan.api_routes.len(),
+            has_tailwind: _tailwind.is_some(),
+            has_typescript: _tsc.is_some(),
+        };
+
+        if let Some(buf) = log_buffer {
+            tui::run_tui(buf, startup_info).await?;
+        }
+    } else {
+        eprintln!(
+            "  {} {}",
+            green_bold("✓ Ready in"),
+            green_bold(&format_duration(elapsed))
+        );
+        eprintln!();
+        eprintln!(
+            "  {} {}",
+            dim("➜ Local:"),
+            bold(&format!("http://localhost:{port}"))
+        );
+        eprintln!();
+        print_route_summary(&scan.routes, &scan.api_routes);
+        eprintln!();
+
+        axum::serve(listener, router).await?;
+    }
 
     Ok(())
 }

@@ -10,6 +10,7 @@ members = [
     "crates/rex_dev",
     "crates/rex_image",
     "crates/rex_e2e",
+    "crates/rex_napi",
 ]
 
 [workspace.dependencies]
@@ -64,6 +65,10 @@ hex = "0.4"
 # Image processing
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 base64 = "0.22"
+
+# TUI
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
 
 [workspace.lints.clippy]
 unwrap_used = "warn"
