@@ -98,8 +98,8 @@ fn init_plain_tracing() {
 
 fn init_tui_tracing() -> LogBuffer {
     let buffer = LogBuffer::new(1000);
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "rex=info".into());
+    let env_filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "rex=info".into());
 
     tracing_subscriber::registry()
         .with(env_filter)
@@ -114,11 +114,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Dev {
-            port,
-            root,
-            no_tui,
-        } => {
+        Commands::Dev { port, root, no_tui } => {
             let root = std::fs::canonicalize(&root)?;
             let project_config = ProjectConfig::load(&root)?;
             let is_terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
@@ -212,9 +208,10 @@ async fn cmd_dev(
         }
     });
 
-    let extra_routes = axum::Router::new()
-        .route("/_rex/hmr", hmr_route)
-        .route("/_rex/hmr-client.js", axum::routing::get(hmr_client_handler));
+    let extra_routes = axum::Router::new().route("/_rex/hmr", hmr_route).route(
+        "/_rex/hmr-client.js",
+        axum::routing::get(hmr_client_handler),
+    );
 
     let router = rex.router_with_extra(extra_routes);
 
@@ -314,7 +311,11 @@ async fn cmd_build(root: PathBuf) -> Result<()> {
     let build_result = build_bundles(&config, &scan, &project_config).await?;
     let elapsed = start.elapsed();
 
-    eprintln!("  {} {}", green_bold("✓ Built in"), green_bold(&format_duration(elapsed)));
+    eprintln!(
+        "  {} {}",
+        green_bold("✓ Built in"),
+        green_bold(&format_duration(elapsed))
+    );
     eprintln!();
 
     // Server bundle size
@@ -334,7 +335,10 @@ async fn cmd_build(root: PathBuf) -> Result<()> {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "js") {
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
                 total_client += size;
                 if name.starts_with("chunk-") {
                     chunk_sizes.push((name, size));
@@ -351,13 +355,21 @@ async fn cmd_build(root: PathBuf) -> Result<()> {
     // Show page entry chunks
     page_sizes.sort_by(|a, b| a.0.cmp(&b.0));
     for (name, size) in &page_sizes {
-        eprintln!("    {}  {}", dim(&format!("{:<38}", name)), dim(&format_size(*size)));
+        eprintln!(
+            "    {}  {}",
+            dim(&format!("{:<38}", name)),
+            dim(&format_size(*size))
+        );
     }
 
     // Show shared chunks
     chunk_sizes.sort_by(|a, b| b.1.cmp(&a.1)); // largest first
     for (name, size) in &chunk_sizes {
-        eprintln!("    {}  {}", dim(&format!("{:<38}", name)), dim(&format_size(*size)));
+        eprintln!(
+            "    {}  {}",
+            dim(&format!("{:<38}", name)),
+            dim(&format_size(*size))
+        );
     }
 
     eprintln!();
@@ -524,7 +536,11 @@ fn cmd_lint(root: PathBuf, fix: bool, extra_args: Vec<String>) -> Result<()> {
     // Write default config if none exists
     let config_path = root.join(".oxlintrc.json");
     if !config_path.exists() {
-        eprintln!("  {} {}", dim("Creating"), dim(".oxlintrc.json with Rex defaults"));
+        eprintln!(
+            "  {} {}",
+            dim("Creating"),
+            dim(".oxlintrc.json with Rex defaults")
+        );
         std::fs::write(&config_path, default_oxlintrc())?;
     }
 

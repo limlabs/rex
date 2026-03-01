@@ -94,7 +94,8 @@ pub async fn handle_hmr_socket(mut socket: WebSocket, hmr: HmrBroadcast) {
     info!("HMR client connected");
 
     // Send connected message
-    let connected = serde_json::to_string(&HmrMessage::Connected).expect("HmrMessage serialization");
+    let connected =
+        serde_json::to_string(&HmrMessage::Connected).expect("HmrMessage serialization");
     if socket.send(Message::Text(connected.into())).await.is_err() {
         return;
     }

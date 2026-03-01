@@ -74,7 +74,10 @@ impl RexResponse {
     pub fn html(status: u16, html: String) -> Self {
         Self {
             status,
-            headers: vec![("content-type".to_string(), "text/html; charset=utf-8".to_string())],
+            headers: vec![(
+                "content-type".to_string(),
+                "text/html; charset=utf-8".to_string(),
+            )],
             body: RexBody::Full(html.into_bytes()),
         }
     }
@@ -316,7 +319,8 @@ pub async fn handle_page(
                             url.clone()
                         };
                         mw_response_headers = mw.response_headers.into_iter().collect();
-                        let custom_headers = collect_custom_headers(&rewrite_path, &hot.project_config);
+                        let custom_headers =
+                            collect_custom_headers(&rewrite_path, &hot.project_config);
                         let mut response = handle_page_inner(state, hot, &rewrite_path, req).await;
                         for (key, value) in custom_headers.into_iter().chain(mw_response_headers) {
                             response.headers.push((key, value));
@@ -332,10 +336,7 @@ pub async fn handle_page(
             Err(e) => {
                 error!("Middleware error: {e}");
                 if state.is_dev {
-                    return RexResponse::html(
-                        500,
-                        dev_error_overlay("Middleware Error", &e, None),
-                    );
+                    return RexResponse::html(500, dev_error_overlay("Middleware Error", &e, None));
                 }
                 return RexResponse::internal_error();
             }
@@ -565,7 +566,11 @@ pub async fn handle_api(
     req: &RexRequest,
 ) -> RexResponse {
     let path = &req.path;
-    info!(path = path.as_str(), method = req.method.as_str(), "Handling API request (core)");
+    info!(
+        path = path.as_str(),
+        method = req.method.as_str(),
+        "Handling API request (core)"
+    );
 
     // Run middleware before route matching
     if should_run_middleware(path, hot) {
@@ -643,12 +648,12 @@ pub async fn handle_api(
                     return RexResponse::internal_error();
                 }
             };
-            let mut headers: Vec<(String, String)> = api_res
-                .headers
-                .into_iter()
-                .collect();
+            let mut headers: Vec<(String, String)> = api_res.headers.into_iter().collect();
             // Ensure content-type is present
-            if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
+            if !headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+            {
                 headers.push(("content-type".to_string(), "application/json".to_string()));
             }
             RexResponse {
@@ -752,13 +757,10 @@ pub async fn handle_image(state: &Arc<AppState>, req: &RexRequest) -> RexRespons
         Some(w) => w,
         None => return RexResponse::text(400, "missing or invalid w param".to_string()),
     };
-    let q: u8 = query
-        .get("q")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(75);
+    let q: u8 = query.get("q").and_then(|v| v.parse().ok()).unwrap_or(75);
     let f = query.get("f").cloned();
 
-    if w < 16 || w > 4096 {
+    if !(16..=4096).contains(&w) {
         return RexResponse::text(400, "width must be 16-4096".to_string());
     }
 
@@ -784,7 +786,10 @@ pub async fn handle_image(state: &Arc<AppState>, req: &RexRequest) -> RexRespons
         return RexResponse {
             status: 200,
             headers: vec![
-                ("content-type".to_string(), format.content_type().to_string()),
+                (
+                    "content-type".to_string(),
+                    format.content_type().to_string(),
+                ),
                 (
                     "cache-control".to_string(),
                     "public, max-age=31536000, immutable".to_string(),
@@ -827,7 +832,10 @@ pub async fn handle_image(state: &Arc<AppState>, req: &RexRequest) -> RexRespons
             RexResponse {
                 status: 200,
                 headers: vec![
-                    ("content-type".to_string(), format.content_type().to_string()),
+                    (
+                        "content-type".to_string(),
+                        format.content_type().to_string(),
+                    ),
                     (
                         "cache-control".to_string(),
                         "public, max-age=31536000, immutable".to_string(),

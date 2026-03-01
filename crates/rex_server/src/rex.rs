@@ -224,6 +224,7 @@ impl Rex {
 
     /// Shared initialization logic: builds route tries, computes document descriptor,
     /// creates AppState and HotState.
+    #[allow(clippy::too_many_arguments)]
     async fn init_from_parts(
         config: RexConfig,
         scan: ScanResult,
@@ -253,7 +254,11 @@ impl Rex {
         };
 
         let image_cache = rex_image::ImageCache::new(
-            config.project_root.join(".rex").join("cache").join("images"),
+            config
+                .project_root
+                .join(".rex")
+                .join("cache")
+                .join("images"),
         );
 
         // Initialize auth if configured
@@ -423,11 +428,7 @@ impl Rex {
     // --- Rendering ---
 
     /// Render a page to an HTML body string with the given props (SSR only, no GSSP).
-    pub async fn render_to_string(
-        &self,
-        path: &str,
-        props: &serde_json::Value,
-    ) -> Result<String> {
+    pub async fn render_to_string(&self, path: &str, props: &serde_json::Value) -> Result<String> {
         let hot = snapshot(&self.state);
 
         let route_match = hot

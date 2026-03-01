@@ -85,9 +85,7 @@ mod tests {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
-                .unwrap_or_else(|e| {
-                    panic!("Failed to start rex: {e}\nBinary: {}", bin.display())
-                });
+                .unwrap_or_else(|e| panic!("Failed to start rex: {e}\nBinary: {}", bin.display()));
 
             // Wait for server to be ready (TCP connect)
             let deadline = Instant::now() + Duration::from_secs(30);
@@ -96,11 +94,8 @@ mod tests {
                 if Instant::now() > deadline {
                     panic!("[e2e] Server failed to start within 30s on port {port}");
                 }
-                if TcpStream::connect_timeout(
-                    &addr.parse().unwrap(),
-                    Duration::from_millis(100),
-                )
-                .is_ok()
+                if TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(100))
+                    .is_ok()
                 {
                     break;
                 }
@@ -187,10 +182,16 @@ mod tests {
             .to_str()
             .unwrap()
             .to_string();
-        assert!(ct.contains("application/json"), "Expected JSON content-type, got: {ct}");
+        assert!(
+            ct.contains("application/json"),
+            "Expected JSON content-type, got: {ct}"
+        );
 
         let json: serde_json::Value = resp.json().await.unwrap();
-        assert!(json.get("message").is_some(), "Missing 'message' in API response");
+        assert!(
+            json.get("message").is_some(),
+            "Missing 'message' in API response"
+        );
     }
 
     #[tokio::test]
@@ -208,7 +209,11 @@ mod tests {
 
             let asset_url = format!("{}{}", base_url(), script_path);
             let resp = reqwest::get(&asset_url).await.unwrap();
-            assert_eq!(resp.status(), 200, "Static asset {script_path} should return 200");
+            assert_eq!(
+                resp.status(),
+                200,
+                "Static asset {script_path} should return 200"
+            );
 
             let ct = resp
                 .headers()
@@ -259,14 +264,25 @@ mod tests {
         let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
 
         // Check basic HTML structure
-        assert!(body.contains("<!DOCTYPE html>") || body.contains("<!doctype html>"),
-            "Missing DOCTYPE");
+        assert!(
+            body.contains("<!DOCTYPE html>") || body.contains("<!doctype html>"),
+            "Missing DOCTYPE"
+        );
         assert!(body.contains("<html"), "Missing <html> tag");
-        assert!(body.contains("<head>") || body.contains("<head "), "Missing <head> tag");
+        assert!(
+            body.contains("<head>") || body.contains("<head "),
+            "Missing <head> tag"
+        );
         assert!(body.contains("<body"), "Missing <body> tag");
-        assert!(body.contains("<div id=\"__rex\">"), "Missing __rex root div");
+        assert!(
+            body.contains("<div id=\"__rex\">"),
+            "Missing __rex root div"
+        );
         assert!(body.contains("__REX_DATA__"), "Missing __REX_DATA__ script");
-        assert!(body.contains("__REX_MANIFEST__"), "Missing __REX_MANIFEST__ script");
+        assert!(
+            body.contains("__REX_MANIFEST__"),
+            "Missing __REX_MANIFEST__ script"
+        );
     }
 
     #[tokio::test]
@@ -277,7 +293,10 @@ mod tests {
         let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
 
         // __REX_DATA__ should contain the GSSP props
-        assert!(body.contains("message"), "GSSP props should include 'message'");
+        assert!(
+            body.contains("message"),
+            "GSSP props should include 'message'"
+        );
         assert!(
             body.contains("Hello from Rex!"),
             "GSSP message should be 'Hello from Rex!'"
@@ -306,10 +325,7 @@ mod tests {
 
         for (i, handle) in handles.into_iter().enumerate() {
             let body = handle.await.unwrap();
-            assert!(
-                !body.is_empty(),
-                "Request {i} returned empty body"
-            );
+            assert!(!body.is_empty(), "Request {i} returned empty body");
         }
     }
 
@@ -387,7 +403,9 @@ mod tests {
 
         // Verify we got an update/reload message
         let msg = msg.expect("Timed out waiting for HMR message");
-        let msg = msg.expect("WebSocket stream ended").expect("WebSocket error");
+        let msg = msg
+            .expect("WebSocket stream ended")
+            .expect("WebSocket error");
         let text = msg.to_text().unwrap_or("");
         assert!(
             text.contains("update") || text.contains("reload"),
@@ -466,11 +484,8 @@ mod tests {
                 child.kill().ok();
                 panic!("Shutdown test: server failed to start");
             }
-            if TcpStream::connect_timeout(
-                &addr.parse().unwrap(),
-                Duration::from_millis(100),
-            )
-            .is_ok()
+            if TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(100))
+                .is_ok()
             {
                 break;
             }
@@ -511,11 +526,8 @@ mod tests {
 
         // Verify the port is no longer accepting connections
         assert!(
-            TcpStream::connect_timeout(
-                &addr.parse().unwrap(),
-                Duration::from_millis(500),
-            )
-            .is_err(),
+            TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(500),)
+                .is_err(),
             "Port should be closed after shutdown"
         );
     }

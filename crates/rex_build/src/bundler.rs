@@ -478,8 +478,8 @@ fn extract_middleware_matchers(source: &str) -> Vec<String> {
                     }
                     in_matcher = true;
                 }
-                brace_depth = trimmed.matches('{').count() as i32
-                    - trimmed.matches('}').count() as i32;
+                brace_depth =
+                    trimmed.matches('{').count() as i32 - trimmed.matches('}').count() as i32;
                 if brace_depth <= 0 && trimmed.contains('}') {
                     in_config = false;
                 }
@@ -603,9 +603,7 @@ async fn build_server_bundle(
 
     // _app
     if let Some(app) = &scan.app {
-        let effective_app = page_overrides
-            .get(&app.abs_path)
-            .unwrap_or(&app.abs_path);
+        let effective_app = page_overrides.get(&app.abs_path).unwrap_or(&app.abs_path);
         let app_path = effective_app.to_string_lossy().replace('\\', "/");
         entry.push_str(&format!("\nimport * as __app from '{app_path}';\n"));
         entry.push_str("globalThis.__rex_app = __app;\n");
@@ -796,6 +794,7 @@ async fn build_server_bundle(
 /// Rolldown handles the full pipeline: parsing TSX/JSX, resolving imports from
 /// node_modules (including React), transforming, and code-splitting shared
 /// dependencies into separate chunks. Output is ESM.
+#[allow(clippy::too_many_arguments)]
 async fn build_client_bundles(
     config: &RexConfig,
     scan: &ScanResult,
@@ -841,9 +840,7 @@ async fn build_client_bundles(
             .get(&app.abs_path)
             .unwrap_or(&app.abs_path);
         let page_path = effective_app.to_string_lossy().replace('\\', "/");
-        let entry_code = format!(
-            "import App from '{page_path}';\nwindow.__REX_APP__ = App;\n"
-        );
+        let entry_code = format!("import App from '{page_path}';\nwindow.__REX_APP__ = App;\n");
         let entry_path = entries_dir.join("_app.js");
         fs::write(&entry_path, &entry_code)?;
         inputs.push(rolldown::InputItem {
@@ -1056,12 +1053,7 @@ if (!window.__REX_NAVIGATING__) {{
                 let strategy = detect_data_strategy(&route.abs_path)?;
                 // Check if this route has CSS module files to include
                 if let Some(css_files) = css_modules.route_css.get(&route.pattern) {
-                    manifest.add_page_with_css(
-                        &route.pattern,
-                        &filename,
-                        css_files,
-                        strategy,
-                    );
+                    manifest.add_page_with_css(&route.pattern, &filename, css_files, strategy);
                 } else {
                     manifest.add_page(&route.pattern, &filename, strategy);
                 }
@@ -1113,9 +1105,7 @@ fn apply_dce_to_page(
 
 fn route_to_chunk_name(route: &rex_core::Route) -> String {
     let module_name = route.module_name();
-    let cn = module_name
-        .replace('/', "-")
-        .replace(['[', ']'], "_");
+    let cn = module_name.replace('/', "-").replace(['[', ']'], "_");
     if cn.is_empty() {
         "index".to_string()
     } else {
@@ -1211,7 +1201,8 @@ fn extract_css_imports(source_path: &Path) -> Result<Vec<PathBuf>> {
     for line in source.lines() {
         let trimmed = line.trim();
         // Match: import 'path.css' or import "path.css"
-        if trimmed.starts_with("import ") || trimmed.starts_with("import'")
+        if trimmed.starts_with("import ")
+            || trimmed.starts_with("import'")
             || trimmed.starts_with("import\"")
         {
             if let Some(path) = extract_string_literal(trimmed) {
@@ -1236,8 +1227,7 @@ fn detect_data_strategy(source_path: &Path) -> Result<DataStrategy> {
 fn detect_data_strategy_from_source(source: &str) -> Result<DataStrategy> {
     let has_gssp = source.lines().any(|l| {
         let t = l.trim();
-        t.contains("getServerSideProps")
-            && (t.starts_with("export ") || t.starts_with("export{"))
+        t.contains("getServerSideProps") && (t.starts_with("export ") || t.starts_with("export{"))
     });
     let has_gsp = source.lines().any(|l| {
         let t = l.trim();
@@ -1386,8 +1376,10 @@ fn process_css_modules(
                 let css_filename = format!("{stem}.module-{hash_prefix}.css");
                 fs::write(output_dir.join(&css_filename), &scoped_css)?;
 
-                processed_css
-                    .insert(css_abs_path.clone(), (css_filename.clone(), class_map.clone()));
+                processed_css.insert(
+                    css_abs_path.clone(),
+                    (css_filename.clone(), class_map.clone()),
+                );
                 (css_filename, class_map)
             };
 
@@ -1420,11 +1412,7 @@ fn process_css_modules(
             .to_string_lossy()
             .to_string();
         // Use a unique name to avoid collisions between pages in different dirs
-        let unique_name = format!(
-            "{}_{}",
-            css_module_hash(source_path),
-            modified_name
-        );
+        let unique_name = format!("{}_{}", css_module_hash(source_path), modified_name);
         let modified_path = temp_dir.join(&unique_name);
         fs::write(&modified_path, &source_content)?;
 
@@ -1506,9 +1494,7 @@ fn parse_css_classes(css: &str) -> Vec<String> {
 
         if bytes[i] == b'.' {
             let start = i + 1;
-            if start < bytes.len()
-                && (bytes[start].is_ascii_alphabetic() || bytes[start] == b'_')
-            {
+            if start < bytes.len() && (bytes[start].is_ascii_alphabetic() || bytes[start] == b'_') {
                 let mut end = start;
                 while end < bytes.len()
                     && (bytes[end].is_ascii_alphanumeric()
@@ -1590,9 +1576,7 @@ fn absolutize_relative_imports(source: &str, source_dir: &Path) -> String {
                 let after_from = &trimmed[from_pos + 5..];
                 let after_from_trimmed = after_from.trim();
                 if let Some(quote_char) = after_from_trimmed.chars().next() {
-                    if (quote_char == '\'' || quote_char == '"')
-                        && after_from_trimmed.len() > 1
-                    {
+                    if (quote_char == '\'' || quote_char == '"') && after_from_trimmed.len() > 1 {
                         let inner = &after_from_trimmed[1..];
                         if let Some(end) = inner.find(quote_char) {
                             let specifier = &inner[..end];
@@ -1727,10 +1711,7 @@ pub fn process_tailwind_css(
             )
         })?;
 
-        let stem = css_path
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy();
+        let stem = css_path.file_stem().unwrap_or_default().to_string_lossy();
         let tw_output = output_dir.join(format!("{stem}.tailwind.css"));
         info!(input = %css_path.display(), "Processing Tailwind CSS");
         run_tailwind(bin, css_path, &tw_output, &config.project_root)?;
@@ -1864,12 +1845,20 @@ mod tests {
             )],
             None,
         );
-        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default())
+            .await
+            .unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         // V8 polyfills (injected as banner)
-        assert!(bundle.contains("globalThis.process"), "should have process polyfill");
-        assert!(bundle.contains("MessageChannel"), "should have MessageChannel polyfill");
+        assert!(
+            bundle.contains("globalThis.process"),
+            "should have process polyfill"
+        );
+        assert!(
+            bundle.contains("MessageChannel"),
+            "should have MessageChannel polyfill"
+        );
 
         // Page registry
         assert!(bundle.contains("__rex_pages"), "should init page registry");
@@ -1910,7 +1899,9 @@ mod tests {
             )],
             None,
         );
-        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default())
+            .await
+            .unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         // Should be IIFE format — no raw ESM import/export at top level
@@ -1949,7 +1940,9 @@ mod tests {
             ],
             None,
         );
-        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default())
+            .await
+            .unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         assert!(
@@ -1961,7 +1954,8 @@ mod tests {
             "should have about page"
         );
         assert!(
-            bundle.contains("__rex_pages[\"blog/[slug]\"]") || bundle.contains("__rex_pages['blog/[slug]']"),
+            bundle.contains("__rex_pages[\"blog/[slug]\"]")
+                || bundle.contains("__rex_pages['blog/[slug]']"),
             "should have dynamic page"
         );
     }
@@ -1981,13 +1975,12 @@ mod tests {
                 "#,
             ),
         );
-        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default())
+            .await
+            .unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
-        assert!(
-            bundle.contains("__rex_app"),
-            "should register _app"
-        );
+        assert!(bundle.contains("__rex_app"), "should register _app");
     }
 
     #[tokio::test]
@@ -2005,7 +1998,9 @@ mod tests {
             ],
             None,
         );
-        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default())
+            .await
+            .unwrap();
         let client_dir = config.client_build_dir();
         let build_hash = &result.build_id[..8];
 
@@ -2048,7 +2043,9 @@ mod tests {
             ],
             None,
         );
-        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default())
+            .await
+            .unwrap();
 
         // Manifest should track both pages
         assert!(
@@ -2186,7 +2183,9 @@ export function renderToString(el) { return renderEl(el); }
                 "#,
             ),
         );
-        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default())
+            .await
+            .unwrap();
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
 
         assert!(
@@ -2252,7 +2251,9 @@ export function renderToString(el) { return renderEl(el); }
             app_scan: None,
         };
 
-        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default())
+            .await
+            .unwrap();
 
         // Manifest should have global CSS
         assert_eq!(
@@ -2299,7 +2300,9 @@ export function renderToString(el) { return renderEl(el); }
                 "#,
             ),
         );
-        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default())
+            .await
+            .unwrap();
 
         // _app client chunk should exist
         assert!(
@@ -2314,10 +2317,8 @@ export function renderToString(el) { return renderEl(el); }
 
         // Client page chunk should have _app wrapping logic
         let client_dir = config.client_build_dir();
-        let index_js = fs::read_to_string(
-            client_dir.join(result.manifest.pages["/"].js.clone()),
-        )
-        .unwrap();
+        let index_js =
+            fs::read_to_string(client_dir.join(result.manifest.pages["/"].js.clone())).unwrap();
         assert!(
             index_js.contains("__REX_APP__"),
             "page hydration should check for __REX_APP__"
@@ -2341,7 +2342,9 @@ export function renderToString(el) { return renderEl(el); }
         );
 
         // Should build without errors — next/* aliases resolve to rex runtime stubs
-        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default())
+            .await
+            .unwrap();
 
         // Server bundle should contain the page
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
@@ -2407,7 +2410,9 @@ export default function Home() {
             app_scan: None,
         };
 
-        let result = build_bundles(&config, &scan, &ProjectConfig::default()).await.unwrap();
+        let result = build_bundles(&config, &scan, &ProjectConfig::default())
+            .await
+            .unwrap();
 
         // Server bundle should contain the CSS module class mapping
         let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
@@ -2425,11 +2430,7 @@ export default function Home() {
         let css_files: Vec<_> = fs::read_dir(&client_dir)
             .unwrap()
             .flatten()
-            .filter(|e| {
-                e.path()
-                    .to_string_lossy()
-                    .contains("Home.module-")
-            })
+            .filter(|e| e.path().to_string_lossy().contains("Home.module-"))
             .collect();
         assert_eq!(css_files.len(), 1, "should have 1 scoped CSS module file");
 
@@ -2507,11 +2508,12 @@ export default function Home() {
         config: &RexConfig,
         scan: &ScanResult,
     ) -> (BuildResult, rex_v8::IsolatePool) {
-        let result = build_bundles(config, scan, &ProjectConfig::default()).await.expect("build failed");
+        let result = build_bundles(config, scan, &ProjectConfig::default())
+            .await
+            .expect("build failed");
         let bundle = fs::read_to_string(&result.server_bundle_path).expect("read bundle");
         rex_v8::init_v8();
-        let pool = rex_v8::IsolatePool::new(1, std::sync::Arc::new(bundle))
-            .expect("create pool");
+        let pool = rex_v8::IsolatePool::new(1, std::sync::Arc::new(bundle)).expect("create pool");
         (result, pool)
     }
 
@@ -2537,9 +2539,21 @@ export default function Home() {
             .expect("pool execute")
             .expect("render_page");
 
-        assert!(render.body.contains("Hello Rex"), "SSR should render heading: {}", render.body);
-        assert!(render.body.contains("Welcome"), "SSR should render paragraph: {}", render.body);
-        assert!(render.body.contains("<div>"), "SSR should produce HTML tags: {}", render.body);
+        assert!(
+            render.body.contains("Hello Rex"),
+            "SSR should render heading: {}",
+            render.body
+        );
+        assert!(
+            render.body.contains("Welcome"),
+            "SSR should render paragraph: {}",
+            render.body
+        );
+        assert!(
+            render.body.contains("<div>"),
+            "SSR should produce HTML tags: {}",
+            render.body
+        );
     }
 
     #[tokio::test]
@@ -2563,9 +2577,7 @@ export default function Home() {
 
         // Test GSSP
         let gssp_json = pool
-            .execute(|iso| {
-                iso.get_server_side_props("index", "{\"params\":{},\"query\":{}}")
-            })
+            .execute(|iso| iso.get_server_side_props("index", "{\"params\":{},\"query\":{}}"))
             .await
             .expect("pool execute")
             .expect("gssp");
@@ -2579,16 +2591,15 @@ export default function Home() {
 
         // Test SSR with those props
         let render = pool
-            .execute(|iso| {
-                iso.render_page("index", "{\"message\":\"Dynamic content\"}")
-            })
+            .execute(|iso| iso.render_page("index", "{\"message\":\"Dynamic content\"}"))
             .await
             .expect("pool execute")
             .expect("render_page");
 
         assert!(
             render.body.contains("Dynamic content"),
-            "SSR should render GSSP props: {}", render.body
+            "SSR should render GSSP props: {}",
+            render.body
         );
     }
 
@@ -2691,15 +2702,21 @@ export default function Home() {
             .unwrap()
             .unwrap();
 
-        assert!(render.body.contains("Styled"), "should render page content: {}", render.body);
+        assert!(
+            render.body.contains("Styled"),
+            "should render page content: {}",
+            render.body
+        );
         // Scoped class names should appear in the HTML
         assert!(
             render.body.contains("Home_wrapper_"),
-            "should have scoped class name for wrapper: {}", render.body
+            "should have scoped class name for wrapper: {}",
+            render.body
         );
         assert!(
             render.body.contains("Home_heading_"),
-            "should have scoped class name for heading: {}", render.body
+            "should have scoped class name for heading: {}",
+            render.body
         );
     }
 
@@ -2802,7 +2819,8 @@ export default function Home() {
         "#;
         let err = detect_data_strategy_from_source(source).unwrap_err();
         assert!(
-            err.to_string().contains("both getStaticProps and getServerSideProps"),
+            err.to_string()
+                .contains("both getStaticProps and getServerSideProps"),
             "expected dual-export error, got: {err}"
         );
     }
@@ -2830,7 +2848,9 @@ export default function Home() {
 
     #[test]
     fn test_needs_tailwind_v3() {
-        assert!(needs_tailwind("@tailwind base;\n@tailwind components;\n@tailwind utilities;\n"));
+        assert!(needs_tailwind(
+            "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n"
+        ));
         assert!(needs_tailwind("  @tailwind utilities;\n"));
     }
 
@@ -2853,11 +2873,7 @@ export default function Home() {
         fs::create_dir_all(&styles_dir).unwrap();
 
         // Write a Tailwind CSS file
-        fs::write(
-            styles_dir.join("globals.css"),
-            "@import \"tailwindcss\";\n",
-        )
-        .unwrap();
+        fs::write(styles_dir.join("globals.css"), "@import \"tailwindcss\";\n").unwrap();
 
         // Create pages with CSS import
         let pages_dir = root.join("pages");
@@ -2886,13 +2902,19 @@ export default function Home() {
         fs::create_dir_all(&output_dir).unwrap();
 
         let mappings = process_tailwind_css(&config, &scan, &output_dir).unwrap();
-        assert!(!mappings.is_empty(), "should have processed at least one Tailwind file");
+        assert!(
+            !mappings.is_empty(),
+            "should have processed at least one Tailwind file"
+        );
 
         // The output file should exist and contain actual CSS (not just the directive)
-        for (_input, output) in &mappings {
+        for output in mappings.values() {
             assert!(output.exists(), "Tailwind output file should exist");
             let content = fs::read_to_string(output).unwrap();
-            assert!(!content.contains("@import \"tailwindcss\""), "should be compiled");
+            assert!(
+                !content.contains("@import \"tailwindcss\""),
+                "should be compiled"
+            );
             assert!(!content.is_empty(), "compiled CSS should not be empty");
         }
     }
@@ -2941,4 +2963,3 @@ export const config = { runtime: 'edge' }
         assert!(matchers.is_empty());
     }
 }
-

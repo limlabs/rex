@@ -14,3 +14,4 @@ benchmarks/results*.json
 .env
 .env*
 .claude/
+dist/

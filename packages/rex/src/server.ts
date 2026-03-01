@@ -1,3 +1,8 @@
+import { createRequire } from 'node:module';
+import { arch, platform } from 'node:process';
+
+// --- Public types ---
+
 export interface RexApiRequest {
   /** HTTP method (e.g. "GET", "POST"). */
   method: string;
@@ -92,14 +97,6 @@ export interface RexInstance {
   /**
    * Get a request handler function compatible with the Web Fetch API.
    * Returns `(req: Request) => Promise<Response>`.
-   *
-   * Works with Bun.serve, Deno.serve, and Node.js 18+.
-   *
-   * @example
-   * ```js
-   * const handler = rex.getRequestHandler()
-   * Bun.serve({ fetch: handler })
-   * ```
    */
   getRequestHandler(): (req: Request) => Promise<Response>;
 
@@ -109,6 +106,44 @@ export interface RexInstance {
   close(): Promise<void>;
 }
 
+interface NativeBinding {
+  createRex(options: RexOptions): Promise<RexInstance>;
+}
+
+function loadNativeBinding(): NativeBinding {
+  const require = createRequire(import.meta.url);
+  const platformPackage = `@limlabs/rex-${platform}-${arch}`;
+
+  // Try platform-specific package first (for published npm packages)
+  try {
+    return require(platformPackage) as NativeBinding;
+  } catch {
+    // Fall through to local .node file (development)
+  }
+
+  // Try local .node file (built with napi build)
+  try {
+    return require('../rex-napi.node') as NativeBinding;
+  } catch {
+    // Fall through
+  }
+
+  // Try the build output from cargo
+  try {
+    return require('../../crates/rex_napi/rex-napi.node') as NativeBinding;
+  } catch {
+    // Fall through
+  }
+
+  throw new Error(
+    `Failed to load Rex native binding. ` +
+    `Tried: ${platformPackage}, ../rex-napi.node, ../../crates/rex_napi/rex-napi.node. ` +
+    `Make sure the native module is built (cd crates/rex_napi && npm run build-debug).`
+  );
+}
+
+const binding = loadNativeBinding();
+
 /**
  * Create a new Rex application instance.
  *
@@ -116,7 +151,7 @@ export interface RexInstance {
  * and returns a ready-to-use RexInstance.
  *
  * @example
- * ```js
+ * ```ts
  * import { createRex } from '@limlabs/rex/server'
  *
  * const rex = await createRex({ root: './my-app' })
@@ -125,4 +160,4 @@ export interface RexInstance {
  * Bun.serve({ fetch: handle })
  * ```
  */
-export function createRex(options: RexOptions): Promise<RexInstance>;
+export const createRex = binding.createRex;

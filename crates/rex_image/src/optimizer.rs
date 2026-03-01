@@ -173,9 +173,9 @@ mod tests {
         assert!(!result.is_empty());
         let decoded = ImageReader::new(Cursor::new(&result))
             .with_guessed_format()
-            .unwrap()
+            .expect("guessed format")
             .decode()
-            .unwrap();
+            .expect("decoded image");
         assert_eq!(decoded.width(), 400);
         assert_eq!(decoded.height(), 300);
     }
@@ -278,9 +278,9 @@ mod tests {
         .expect("no upscale");
         let decoded = ImageReader::new(Cursor::new(&result))
             .with_guessed_format()
-            .unwrap()
+            .expect("guessed format")
             .decode()
-            .unwrap();
+            .expect("decoded image");
         // Should stay at original 200px, not upscale to 800
         assert_eq!(decoded.width(), 200);
     }

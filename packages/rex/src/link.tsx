@@ -1,16 +1,16 @@
 import React from 'react';
 import { navigateTo } from './router.js';
 
+interface LinkProps extends React.AnchorHTMLAttributes<HTMLAnchorElement> {
+  href: string;
+}
+
 /**
- * rex/link - Client-side navigation link
+ * rex/link - Client-side navigation link.
  * Renders an <a> tag that intercepts clicks for SPA navigation.
  */
-export default function Link({ href, children, target, rel, className, style, ...rest }) {
-  function handleClick(e) {
-    // Don't intercept if:
-    // - modifier key is held (user wants new tab)
-    // - target is set (external link behavior)
-    // - href is external
+export default function Link({ href, children, target, ...rest }: LinkProps): React.ReactElement {
+  function handleClick(e: React.MouseEvent<HTMLAnchorElement>): void {
     if (
       e.metaKey ||
       e.ctrlKey ||
@@ -29,12 +29,9 @@ export default function Link({ href, children, target, rel, className, style, ..
   return React.createElement(
     'a',
     {
-      href: href,
+      href,
       onClick: handleClick,
-      target: target,
-      rel: rel,
-      className: className,
-      style: style,
+      target,
       ...rest,
     },
     children

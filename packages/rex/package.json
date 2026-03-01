@@ -2,24 +2,45 @@
   "name": "@limlabs/rex",
   "version": "0.0.1-test.1",
   "description": "Rex - Next.js Pages Router reimplemented in Rust",
-  "main": "src/index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "exports": {
-    ".": "./src/index.js",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
     "./server": {
-      "types": "./src/server.d.ts",
-      "import": "./src/server.js"
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
     },
-    "./document": "./src/document.js",
-    "./link": "./src/link.js",
+    "./document": {
+      "types": "./dist/document.d.ts",
+      "import": "./dist/document.js"
+    },
+    "./link": {
+      "types": "./dist/link.d.ts",
+      "import": "./dist/link.js"
+    },
     "./router": {
-      "types": "./src/router.d.ts",
-      "import": "./src/router.js"
+      "types": "./dist/router.d.ts",
+      "import": "./dist/router.js"
     },
-    "./image": "./src/image.js",
+    "./image": {
+      "types": "./dist/image.d.ts",
+      "import": "./dist/image.js"
+    },
     "./middleware": {
       "types": "./src/middleware.d.ts",
       "import": "../../runtime/server/middleware.js"
     }
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "typescript": "^5.7.0"
   },
   "dependencies": {
     "oxlint": "^1.0.0"

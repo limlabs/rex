@@ -54,7 +54,11 @@ impl RexServer {
         };
 
         let image_cache = rex_image::ImageCache::new(
-            config.project_root.join(".rex").join("cache").join("images"),
+            config
+                .project_root
+                .join(".rex")
+                .join("cache")
+                .join("images"),
         );
 
         let state = Arc::new(AppState {
@@ -120,10 +124,7 @@ impl RexServer {
 
         let mut router = Router::new()
             // Data endpoint
-            .route(
-                "/_rex/data/{build_id}/{*path}",
-                get(handlers::data_handler),
-            )
+            .route("/_rex/data/{build_id}/{*path}", get(handlers::data_handler))
             // Image optimization endpoint
             .route("/_rex/image", get(handlers::image_handler))
             // RSC flight data endpoint (app/ router client navigation)
@@ -151,8 +152,7 @@ impl RexServer {
             .route("/api/{*path}", any(handlers::api_handler))
             // Public directory fallback (before SSR)
             .fallback_service(
-                public_service
-                    .fallback(handlers::page_handler.with_state(self.state.clone())),
+                public_service.fallback(handlers::page_handler.with_state(self.state.clone())),
             )
             .with_state(self.state.clone())
             .layer(CompressionLayer::new().gzip(true))

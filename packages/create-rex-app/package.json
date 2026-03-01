@@ -3,11 +3,19 @@
   "version": "0.0.1-test.1",
   "description": "Create a new Rex project",
   "bin": {
-    "create-rex": "./index.js"
+    "create-rex": "./dist/index.js"
   },
   "files": [
-    "index.js"
+    "dist"
   ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  },
   "keywords": [
     "rex",
     "react",

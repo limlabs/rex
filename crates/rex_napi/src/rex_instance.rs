@@ -4,7 +4,7 @@ use rex_server::core::{RexBody, RexRequest, RexResponse, RouteMatchResult};
 use rex_server::handlers::snapshot;
 use rex_server::Rex;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -163,11 +163,7 @@ impl RexInstance {
 
     /// Render a page to an HTML string with the given props.
     #[napi]
-    pub async fn render_to_string(
-        &self,
-        path: String,
-        props: serde_json::Value,
-    ) -> Result<String> {
+    pub async fn render_to_string(&self, path: String, props: serde_json::Value) -> Result<String> {
         self.check_closed()?;
         self.rex
             .render_to_string(&path, &props)
@@ -226,7 +222,7 @@ impl RexInstance {
 
             // Extract headers from the JS Request
             let headers_obj: JsObject = request.get_named_property("headers")?;
-            let headers = extract_headers(&env, &headers_obj)?;
+            let headers = extract_headers(env, &headers_obj)?;
 
             // Build the RexRequest
             let rex_req = RexRequest {
@@ -342,7 +338,7 @@ fn extract_headers(env: &Env, headers_obj: &JsObject) -> Result<HashMap<String, 
 /// Dispatch a request through the Rex core handler, including static file serving.
 async fn dispatch_request(
     state: &Arc<rex_server::handlers::AppState>,
-    static_dir: &PathBuf,
+    static_dir: &Path,
     req: RexRequest,
 ) -> RexResponse {
     let path = &req.path;
@@ -358,7 +354,7 @@ async fn dispatch_request(
 }
 
 /// Serve a static file from the build output directory.
-fn serve_static_file(static_dir: &PathBuf, rel_path: &str) -> RexResponse {
+fn serve_static_file(static_dir: &Path, rel_path: &str) -> RexResponse {
     let file_path = static_dir.join(rel_path);
 
     // Prevent path traversal

@@ -123,7 +123,7 @@ impl TuiApp {
         let chunks = Layout::vertical([
             Constraint::Length(2), // top padding
             Constraint::Length(7), // mascot + info + last log
-            Constraint::Min(0),   // spacer
+            Constraint::Min(0),    // spacer
             Constraint::Length(1), // footer
         ])
         .split(area);
@@ -184,14 +184,22 @@ impl TuiApp {
             route_parts.push(format!(
                 "{} {}",
                 info.page_count,
-                if info.page_count == 1 { "page" } else { "pages" }
+                if info.page_count == 1 {
+                    "page"
+                } else {
+                    "pages"
+                }
             ));
         }
         if info.api_count > 0 {
             route_parts.push(format!(
                 "{} API {}",
                 info.api_count,
-                if info.api_count == 1 { "route" } else { "routes" }
+                if info.api_count == 1 {
+                    "route"
+                } else {
+                    "routes"
+                }
             ));
         }
         let route_summary = route_parts.join(" · ");
@@ -212,12 +220,17 @@ impl TuiApp {
 
         let mut lines = vec![
             Line::from(vec![
-                Span::styled("rex ", Style::default().fg(EMERALD).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "rex ",
+                    Style::default().fg(EMERALD).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(&info.version, Style::default().fg(Color::DarkGray)),
             ]),
             Line::from(vec![Span::styled(
                 format!("✓ Ready in {}ms", info.ready_ms),
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
             )]),
             Line::from(vec![
                 Span::styled("➜ Local: ", Style::default().fg(Color::DarkGray)),
@@ -278,7 +291,7 @@ impl TuiApp {
 
         let chunks = Layout::vertical([
             Constraint::Length(1), // filter bar
-            Constraint::Min(1),   // log list
+            Constraint::Min(1),    // log list
             Constraint::Length(1), // search bar / footer
         ])
         .split(area);
@@ -316,10 +329,7 @@ impl TuiApp {
             } else {
                 Style::default().fg(Color::DarkGray)
             };
-            spans.push(Span::styled(
-                format!(" [{key}]{} ", filter.label()),
-                style,
-            ));
+            spans.push(Span::styled(format!(" [{key}]{} ", filter.label()), style));
         }
 
         if !self.search_query.is_empty() {
@@ -342,7 +352,8 @@ impl TuiApp {
         let scroll = if self.auto_scroll {
             entries.len().saturating_sub(visible_height)
         } else {
-            self.log_scroll.min(entries.len().saturating_sub(visible_height))
+            self.log_scroll
+                .min(entries.len().saturating_sub(visible_height))
         };
 
         let items: Vec<ListItem<'_>> = entries
@@ -351,12 +362,10 @@ impl TuiApp {
             .take(visible_height)
             .map(|entry| {
                 let color = level_color(&entry.level);
-                let mut spans = vec![
-                    Span::styled(
-                        format!(" {} ", level_symbol(&entry.level)),
-                        Style::default().fg(color),
-                    ),
-                ];
+                let mut spans = vec![Span::styled(
+                    format!(" {} ", level_symbol(&entry.level)),
+                    Style::default().fg(color),
+                )];
 
                 // Highlight search matches
                 if !self.search_query.is_empty() {
@@ -399,7 +408,12 @@ impl TuiApp {
 
     fn render_search_bar(&self, f: &mut Frame<'_>, area: Rect) {
         let line = Line::from(vec![
-            Span::styled(" /", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " /",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(&self.search_query),
             Span::styled("█", Style::default().fg(Color::DarkGray)),
         ]);
@@ -439,9 +453,7 @@ impl TuiApp {
         snapshot
             .into_iter()
             .filter(|e| self.log_filter.matches(&e.level))
-            .filter(|e| {
-                query_lower.is_empty() || e.message.to_lowercase().contains(&query_lower)
-            })
+            .filter(|e| query_lower.is_empty() || e.message.to_lowercase().contains(&query_lower))
             .collect()
     }
 
