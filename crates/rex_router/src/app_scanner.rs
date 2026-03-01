@@ -421,6 +421,104 @@ mod tests {
     }
 
     #[test]
+    fn error_boundary_in_chain() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app_dir = tmp.path().join("app");
+        fs::create_dir_all(app_dir.join("protected")).unwrap();
+
+        fs::write(app_dir.join("layout.tsx"), "// root layout").unwrap();
+        fs::write(app_dir.join("page.tsx"), "// root page").unwrap();
+        // Error/loading chains are parallel to layout chain — a layout is needed
+        // at the protected segment for the error boundary to appear in the chain.
+        fs::write(app_dir.join("protected/layout.tsx"), "// protected layout").unwrap();
+        fs::write(app_dir.join("protected/page.tsx"), "// protected page").unwrap();
+        fs::write(app_dir.join("protected/error.tsx"), "// error boundary").unwrap();
+
+        let result = scan_app(&app_dir).unwrap().unwrap();
+        let protected = result
+            .routes
+            .iter()
+            .find(|r| r.pattern == "/protected")
+            .expect("should have /protected route");
+
+        // Error chain should have entries parallel to layout chain
+        assert_eq!(protected.error_chain.len(), protected.layout_chain.len());
+        // The protected segment has error.tsx + layout, so the second entry should be Some
+        assert!(
+            protected.error_chain.iter().any(|e| e.is_some()),
+            "error chain should contain the error boundary"
+        );
+        // Verify the error boundary path
+        let error_path = protected
+            .error_chain
+            .iter()
+            .find_map(|e| e.as_ref())
+            .unwrap();
+        assert!(error_path.to_string_lossy().contains("error.tsx"));
+    }
+
+    #[test]
+    fn catch_all_route() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app_dir = tmp.path().join("app");
+        fs::create_dir_all(app_dir.join("docs/[...slug]")).unwrap();
+
+        fs::write(app_dir.join("layout.tsx"), "// root layout").unwrap();
+        fs::write(app_dir.join("page.tsx"), "// root page").unwrap();
+        fs::write(app_dir.join("docs/[...slug]/page.tsx"), "// catch-all page").unwrap();
+
+        let result = scan_app(&app_dir).unwrap().unwrap();
+        let catch_all = result
+            .routes
+            .iter()
+            .find(|r| {
+                r.dynamic_segments
+                    .iter()
+                    .any(|d| matches!(d, DynamicSegment::CatchAll(_)))
+            })
+            .expect("should have a catch-all route");
+
+        assert!(catch_all.pattern.contains("*slug"));
+        assert_eq!(catch_all.dynamic_segments.len(), 1);
+        assert!(matches!(
+            &catch_all.dynamic_segments[0],
+            DynamicSegment::CatchAll(n) if n == "slug"
+        ));
+    }
+
+    #[test]
+    fn optional_catch_all_route() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app_dir = tmp.path().join("app");
+        fs::create_dir_all(app_dir.join("help/[[...path]]")).unwrap();
+
+        fs::write(app_dir.join("layout.tsx"), "// root layout").unwrap();
+        fs::write(app_dir.join("page.tsx"), "// root page").unwrap();
+        fs::write(
+            app_dir.join("help/[[...path]]/page.tsx"),
+            "// optional catch-all",
+        )
+        .unwrap();
+
+        let result = scan_app(&app_dir).unwrap().unwrap();
+        let opt_catch_all = result
+            .routes
+            .iter()
+            .find(|r| {
+                r.dynamic_segments
+                    .iter()
+                    .any(|d| matches!(d, DynamicSegment::OptionalCatchAll(_)))
+            })
+            .expect("should have an optional catch-all route");
+
+        assert_eq!(opt_catch_all.dynamic_segments.len(), 1);
+        assert!(matches!(
+            &opt_catch_all.dynamic_segments[0],
+            DynamicSegment::OptionalCatchAll(n) if n == "path"
+        ));
+    }
+
+    #[test]
     fn specificity_ordering() {
         let tmp = tempfile::tempdir().unwrap();
         let app_dir = tmp.path().join("app");

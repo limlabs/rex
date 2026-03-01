@@ -37,6 +37,15 @@ pub async fn build_rsc_bundles(
     build_id: &str,
     define: &[(String, String)],
 ) -> Result<RscBuildResult> {
+    let project_root = config.project_root.canonicalize().unwrap_or_else(|e| {
+        debug!(
+            path = %config.project_root.display(),
+            error = %e,
+            "Failed to canonicalize project root, using original path"
+        );
+        config.project_root.clone()
+    });
+
     let server_dir = config.server_build_dir().join("rsc");
     let client_dir = config.client_build_dir().join("rsc");
     fs::create_dir_all(&server_dir)?;
@@ -66,7 +75,7 @@ pub async fn build_rsc_bundles(
     for module in &client_boundaries {
         let rel_path = module
             .path
-            .strip_prefix(&config.project_root)
+            .strip_prefix(&project_root)
             .unwrap_or(&module.path)
             .to_string_lossy()
             .replace('\\', "/");
@@ -378,6 +387,21 @@ window.ReactDOM = ReactDOMClient;
     let mut bootstrap_chunks = Vec::new();
     let mut component_chunks = Vec::new();
 
+    // Pre-compute boundary lookup: sanitized_name → (rel_path, &exports)
+    let boundary_lookup: std::collections::HashMap<String, (String, &[String])> = client_boundaries
+        .iter()
+        .map(|module| {
+            let rel_path = module
+                .path
+                .strip_prefix(&config.project_root)
+                .unwrap_or(&module.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let module_name = sanitize_filename(&rel_path);
+            (module_name, (rel_path, module.exports.as_slice()))
+        })
+        .collect();
+
     for item in &output.assets {
         match item {
             rolldown_common::Output::Chunk(chunk) => {
@@ -391,24 +415,13 @@ window.ReactDOM = ReactDOMClient;
                         // Bootstrap entry — loads React/ReactDOM globals
                         bootstrap_chunks.push(prefixed);
                     } else {
-                        // Client component entry — update manifest
+                        // Client component entry — update manifest via O(1) lookup
                         component_chunks.push(prefixed);
-                        for module in &client_boundaries {
-                            let rel_path = module
-                                .path
-                                .strip_prefix(&config.project_root)
-                                .unwrap_or(&module.path)
-                                .to_string_lossy()
-                                .replace('\\', "/");
-                            let module_name = sanitize_filename(&rel_path);
-
-                            if module_name == name {
-                                let chunk_url = format!("/_rex/static/rsc/{filename}");
-
-                                for export in &module.exports {
-                                    let ref_id = client_reference_id(&rel_path, export, build_id);
-                                    client_manifest.add(&ref_id, chunk_url.clone(), export.clone());
-                                }
+                        if let Some((rel_path, exports)) = boundary_lookup.get(&name) {
+                            let chunk_url = format!("/_rex/static/rsc/{filename}");
+                            for export in *exports {
+                                let ref_id = client_reference_id(rel_path, export, build_id);
+                                client_manifest.add(&ref_id, chunk_url.clone(), export.clone());
                             }
                         }
                     }
@@ -445,8 +458,145 @@ fn sanitize_filename(path: &str) -> String {
 // The RSC runtime is now loaded from `runtime/rsc/flight.js` via `include_str!`.
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use rex_core::app_route::{AppRoute, AppScanResult, AppSegment};
+
+    fn setup_rsc_mock_node_modules(root: &Path) {
+        let nm = root.join("node_modules");
+
+        // react
+        let react_dir = nm.join("react");
+        fs::create_dir_all(&react_dir).unwrap();
+        fs::write(
+            react_dir.join("package.json"),
+            r#"{"name":"react","version":"19.0.0","main":"index.js"}"#,
+        )
+        .unwrap();
+        fs::write(
+            react_dir.join("index.js"),
+            "export function createElement(type, props, ...children) { return { type, props, children }; }\nexport default { createElement };\n",
+        )
+        .unwrap();
+        fs::write(
+            react_dir.join("jsx-runtime.js"),
+            "export function jsx(type, props) { return { type, props }; }\nexport function jsxs(type, props) { return { type, props }; }\nexport const Fragment = 'Fragment';\n",
+        )
+        .unwrap();
+        fs::write(
+            react_dir.join("jsx-dev-runtime.js"),
+            "export function jsxDEV(type, props) { return { type, props }; }\nexport const Fragment = 'Fragment';\n",
+        )
+        .unwrap();
+
+        // react-dom
+        let react_dom_dir = nm.join("react-dom");
+        fs::create_dir_all(&react_dom_dir).unwrap();
+        fs::write(
+            react_dom_dir.join("package.json"),
+            r#"{"name":"react-dom","version":"19.0.0","main":"index.js","exports":{".":{"default":"./index.js"},"./client":{"default":"./client.js"},"./server":{"default":"./server.js"}}}"#,
+        )
+        .unwrap();
+        fs::write(react_dom_dir.join("index.js"), "export default {};\n").unwrap();
+        fs::write(
+            react_dom_dir.join("client.js"),
+            "export function hydrateRoot() {}\nexport function createRoot() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            react_dom_dir.join("server.js"),
+            "export function renderToString(el) { return '<div></div>'; }\n",
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_rsc_build_produces_bundles() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        setup_rsc_mock_node_modules(&root);
+
+        // Create app directory with layout + page
+        let app_dir = root.join("app");
+        fs::create_dir_all(&app_dir).unwrap();
+
+        let layout_path = app_dir.join("layout.tsx");
+        fs::write(
+            &layout_path,
+            "export default function RootLayout({ children }) { return children; }\n",
+        )
+        .unwrap();
+
+        let page_path = app_dir.join("page.tsx");
+        fs::write(
+            &page_path,
+            "export default function Home() { return 'Hello'; }\n",
+        )
+        .unwrap();
+
+        // Create a "use client" component
+        let comp_dir = root.join("components");
+        fs::create_dir_all(&comp_dir).unwrap();
+        let counter_path = comp_dir.join("Counter.tsx");
+        fs::write(
+            &counter_path,
+            "\"use client\";\nexport default function Counter() { return 'count'; }\n",
+        )
+        .unwrap();
+
+        let config = rex_core::RexConfig::new(root.clone()).with_dev(true);
+
+        let app_scan = AppScanResult {
+            root: AppSegment {
+                segment: String::new(),
+                layout: Some(layout_path.clone()),
+                page: Some(page_path.clone()),
+                loading: None,
+                error_boundary: None,
+                not_found: None,
+                children: vec![],
+            },
+            routes: vec![AppRoute {
+                pattern: "/".to_string(),
+                page_path: page_path.clone(),
+                layout_chain: vec![layout_path.clone()],
+                loading_chain: vec![None],
+                error_chain: vec![None],
+                dynamic_segments: vec![],
+                specificity: 10,
+            }],
+            root_layout: layout_path,
+        };
+
+        let define = vec![(
+            "process.env.NODE_ENV".to_string(),
+            "\"development\"".to_string(),
+        )];
+
+        let result = build_rsc_bundles(&config, &app_scan, "test-build-id", &define)
+            .await
+            .expect("build_rsc_bundles should succeed");
+
+        // Server bundle file exists
+        assert!(
+            result.server_bundle_path.exists(),
+            "Server bundle should exist at {:?}",
+            result.server_bundle_path
+        );
+
+        // Server bundle is non-empty
+        let server_content = fs::read_to_string(&result.server_bundle_path).unwrap();
+        assert!(
+            !server_content.is_empty(),
+            "Server bundle should not be empty"
+        );
+
+        // Client manifest was created (may be empty if no "use client" modules in entries)
+        // Verify the manifest struct exists and is accessible
+        let _ = &result.client_manifest.entries;
+    }
 
     #[test]
     fn generate_stub_default_export() {

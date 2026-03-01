@@ -133,6 +133,8 @@ pub fn assemble_document(params: &DocumentParams<'_>) -> String {
 fn escape_script_content(s: &str) -> String {
     s.replace("</script", "<\\/script")
         .replace("<!--", "<\\!--")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
 }
 
 /// Escape a string for use as an HTML attribute value.
@@ -462,4 +464,108 @@ pub fn assemble_rsc_body_tail(
 
     html.push_str("</body>\n</html>");
     html
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escape_script_content_script_tag() {
+        let input = r#"var x = "</script>";"#;
+        let result = escape_script_content(input);
+        assert!(result.contains(r"<\/script"));
+        assert!(!result.contains("</script"));
+    }
+
+    #[test]
+    fn escape_script_content_html_comment() {
+        let input = "<!-- comment -->";
+        let result = escape_script_content(input);
+        assert!(result.contains(r"<\!--"));
+        assert!(!result.contains("<!--"));
+    }
+
+    #[test]
+    fn escape_script_content_line_separators() {
+        let input = "a\u{2028}b\u{2029}c";
+        let result = escape_script_content(input);
+        assert!(result.contains("\\u2028"));
+        assert!(result.contains("\\u2029"));
+        assert!(!result.contains('\u{2028}'));
+        assert!(!result.contains('\u{2029}'));
+    }
+
+    #[test]
+    fn escape_script_content_passthrough() {
+        let input = r#"{"key": "value", "num": 42}"#;
+        let result = escape_script_content(input);
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn rsc_head_shell_contains_modulepreload() {
+        let chunks = vec!["rsc/chunk-react-abc123.js".to_string()];
+        let manifest = r#"{"refs":{}}"#;
+        let html = assemble_rsc_head_shell(&chunks, manifest);
+
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains(
+            r#"<link rel="modulepreload" href="/_rex/static/rsc/chunk-react-abc123.js""#
+        ));
+        assert!(html.contains("__REX_RSC_MODULE_MAP__"));
+        assert!(html.contains(r#"{"refs":{}}"#));
+    }
+
+    #[test]
+    fn rsc_head_shell_empty_chunks() {
+        let html = assemble_rsc_head_shell(&[], "{}");
+        assert!(html.contains("<head>"));
+        assert!(html.contains("<body>"));
+        assert!(!html.contains("modulepreload"));
+    }
+
+    #[test]
+    fn rsc_body_tail_contains_flight_data() {
+        let html = assemble_rsc_body_tail(
+            "<div>Hello</div>",
+            "",
+            "J:0:{}\nR:0",
+            &["rsc/component-abc.js".to_string()],
+            false,
+            None,
+        );
+
+        assert!(html.contains(r#"<div id="__rex"><div>Hello</div></div>"#));
+        assert!(html.contains(r#"id="__REX_RSC_DATA__""#));
+        assert!(html.contains("J:0:{}"));
+        assert!(html.contains(r#"<script type="module" src="/_rex/static/rsc/component-abc.js">"#));
+        assert!(html.contains("rsc-runtime.js"));
+        assert!(html.contains("</body>"));
+    }
+
+    #[test]
+    fn rsc_body_tail_script_ordering() {
+        let html = assemble_rsc_body_tail(
+            "<p>test</p>",
+            "",
+            "J:0:{}",
+            &["rsc/comp.js".to_string()],
+            true,
+            Some(r#"{"routes":{}}"#),
+        );
+
+        // Flight data should come before component scripts
+        let flight_pos = html.find("__REX_RSC_DATA__").unwrap();
+        let comp_pos = html.find("rsc/comp.js").unwrap();
+        let runtime_pos = html.find("rsc-runtime.js").unwrap();
+        let router_pos = html.find("router.js").unwrap();
+        let hmr_pos = html.find("hmr-client.js").unwrap();
+
+        assert!(flight_pos < comp_pos);
+        assert!(comp_pos < runtime_pos);
+        assert!(runtime_pos < router_pos);
+        assert!(router_pos < hmr_pos);
+    }
 }

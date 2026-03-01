@@ -43,6 +43,16 @@ macro_rules! set_v8_prop {
 
 /// The `fetch(url, init?)` callback. Queues a request and returns a Promise.
 ///
+/// # Security: SSRF risk
+///
+/// This function makes HTTP requests to **arbitrary URLs** from the server.
+/// There is currently **no filtering** of private/internal addresses (RFC 1918,
+/// link-local, cloud metadata endpoints like `169.254.169.254`). Server
+/// components can reach internal services that are not exposed publicly.
+///
+/// **TODO:** Add an allowlist/blocklist or deny private IP ranges by default
+/// before deploying to production environments with sensitive internal services.
+///
 /// Register on a global object with:
 /// ```ignore
 /// let t = v8::FunctionTemplate::new(scope, crate::fetch::fetch_callback);
@@ -520,6 +530,58 @@ mod tests {
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].url, "http://example.com");
         assert_eq!(pending[0].method, "GET");
+    }
+
+    /// Integration test: verifies that `run_fetch_loop` can resolve a fetch promise
+    /// end-to-end. Requires a real HTTP server, so marked `#[ignore]` for CI.
+    /// Run manually with: `cargo test --package rex_v8 test_run_fetch_loop -- --ignored`
+    #[test]
+    #[ignore]
+    fn test_run_fetch_loop_resolves_promise() {
+        init_v8();
+        let mut isolate = v8::Isolate::new(v8::CreateParams::default());
+
+        let context = {
+            v8::scope!(scope, &mut isolate);
+            let context = v8::Context::new(scope, Default::default());
+            let scope = &mut v8::ContextScope::new(scope, context);
+            let global = context.global(scope);
+
+            // Install fetch
+            let t = v8::FunctionTemplate::new(scope, fetch_callback);
+            let f = t.get_function(scope).expect("fetch fn");
+            let k = v8::String::new(scope, "fetch").expect("fetch key");
+            global.set(scope, k.into(), f.into());
+
+            // Evaluate: fetch a public URL, store result in globalThis._result
+            let code = r#"
+                var _result = null;
+                fetch('https://httpbin.org/get')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) { _result = data.url; });
+            "#;
+            let source = v8::String::new(scope, code).unwrap();
+            let script = v8::Script::compile(scope, source, None).unwrap();
+            script.run(scope);
+
+            v8::Global::new(scope, context)
+        };
+
+        // Run the fetch loop to resolve all pending promises
+        run_fetch_loop(&mut isolate, &context);
+
+        // Check the result
+        {
+            v8::scope_with_context!(scope, &mut isolate, &context);
+            let global = context.open(scope).global(scope);
+            let key = v8::String::new(scope, "_result").unwrap();
+            let val = global.get(scope, key.into()).unwrap();
+            let result_str = val.to_rust_string_lossy(scope);
+            assert!(
+                result_str.contains("httpbin.org"),
+                "Expected resolved URL to contain httpbin.org, got: {result_str}"
+            );
+        }
     }
 
     #[test]

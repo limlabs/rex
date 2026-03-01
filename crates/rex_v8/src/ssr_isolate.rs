@@ -36,8 +36,9 @@ pub struct SsrIsolate {
     rsc_to_html_fn: Option<v8::Global<v8::Function>>,
     mcp_call_fn: Option<v8::Global<v8::Function>>,
     mcp_list_fn: Option<v8::Global<v8::Function>>,
-    /// Last successfully loaded bundle, used to restore state on failed reload
-    last_bundle: String,
+    /// Last successfully loaded bundle, used to restore state on failed reload.
+    /// Uses `Arc<String>` to share memory across pool isolates instead of cloning.
+    last_bundle: std::sync::Arc<String>,
 }
 
 /// Evaluate a script in the given scope, using TryCatch for error handling.
@@ -271,7 +272,7 @@ impl SsrIsolate {
             rsc_to_html_fn,
             mcp_call_fn,
             mcp_list_fn,
-            last_bundle: server_bundle_js.to_string(),
+            last_bundle: std::sync::Arc::new(server_bundle_js.to_string()),
         })
     }
 
@@ -687,7 +688,7 @@ impl SsrIsolate {
         self.mcp_call_fn = v8_get_optional_fn!(scope, global, "__rex_call_mcp_tool");
         self.mcp_list_fn = v8_get_optional_fn!(scope, global, "__rex_list_mcp_tools");
 
-        self.last_bundle = server_bundle_js.to_string();
+        self.last_bundle = std::sync::Arc::new(server_bundle_js.to_string());
         debug!("SSR isolate reloaded");
         Ok(())
     }

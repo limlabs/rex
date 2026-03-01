@@ -148,26 +148,51 @@ function _serializeProps(props, rows) {
 // fetch loop + microtask checkpoint. Returns "done" or "pending".
 globalThis.__rex_resolve_rsc_pending = function() {
     var stillPending = false;
+    var rscRows = globalThis.__rex_rsc_rows;
+
+    // Build index map: placeholder string → row index for O(1) lookup.
+    // Placeholders are exactly "J:<id>:null" — we match by checking the
+    // substring after the second colon is literally "null" (not JSON ending in :null).
+    var rowIndexMap = {};
+    for (var ri = 0; ri < rscRows.length; ri++) {
+        var row = rscRows[ri];
+        if (row.indexOf('J:') === 0) {
+            var secondColon = row.indexOf(':', 2);
+            if (secondColon !== -1 && row.substring(secondColon + 1) === 'null') {
+                rowIndexMap[row] = ri;
+            }
+        }
+    }
+
     for (var i = 0; i < _pendingSlots.length; i++) {
         var slot = _pendingSlots[i];
         if (slot.resolved) {
             // Re-serialize the resolved value, replacing the placeholder row
             var newRows = [];
-            var ref = _serialize(slot.value, newRows);
+            var refValue = _serialize(slot.value, newRows);
             // Find and replace the placeholder row for this slot
             var placeholder = 'J:' + slot.id + ':null';
-            var rscRows = globalThis.__rex_rsc_rows;
-            for (var j = 0; j < rscRows.length; j++) {
-                if (rscRows[j] === placeholder) {
-                    // Replace with the resolved rows + a final row for this slot
-                    rscRows.splice(j, 1);
-                    // Insert new rows at the same position
-                    for (var k = 0; k < newRows.length; k++) {
-                        rscRows.splice(j + k, 0, newRows[k]);
+            var j = rowIndexMap[placeholder];
+            if (j !== undefined) {
+                // Replace with the resolved rows + a final row for this slot
+                rscRows.splice(j, 1);
+                // Insert new rows at the same position
+                for (var k = 0; k < newRows.length; k++) {
+                    rscRows.splice(j + k, 0, newRows[k]);
+                }
+                // Add the resolved reference row
+                rscRows.splice(j + newRows.length, 0, 'J:' + slot.id + ':' + JSON.stringify(refValue));
+
+                // Rebuild index map after splice (indices shifted)
+                rowIndexMap = {};
+                for (var ri2 = 0; ri2 < rscRows.length; ri2++) {
+                    var row2 = rscRows[ri2];
+                    if (row2.indexOf('J:') === 0) {
+                        var sc2 = row2.indexOf(':', 2);
+                        if (sc2 !== -1 && row2.substring(sc2 + 1) === 'null') {
+                            rowIndexMap[row2] = ri2;
+                        }
                     }
-                    // Add the resolved reference row
-                    rscRows.splice(j + newRows.length, 0, 'J:' + slot.id + ':' + JSON.stringify(ref));
-                    break;
                 }
             }
             // Mark as fully handled
@@ -175,32 +200,32 @@ globalThis.__rex_resolve_rsc_pending = function() {
             slot.value = undefined;
             slot.promise = null;
         } else if (slot.rejected) {
-            var rscRows2 = globalThis.__rex_rsc_rows;
             var placeholder2 = 'J:' + slot.id + ':null';
-            for (var j2 = 0; j2 < rscRows2.length; j2++) {
-                if (rscRows2[j2] === placeholder2) {
-                    rscRows2[j2] = 'E:' + slot.id + ':' + JSON.stringify({
-                        message: String(slot.error),
-                        stack: slot.error && slot.error.stack ? slot.error.stack : ''
-                    });
-                    break;
-                }
+            var j2 = rowIndexMap[placeholder2];
+            if (j2 !== undefined) {
+                rscRows[j2] = 'E:' + slot.id + ':' + JSON.stringify({
+                    message: String(slot.error),
+                    stack: slot.error && slot.error.stack ? slot.error.stack : ''
+                });
+                delete rowIndexMap[placeholder2];
             }
             slot.rejected = false;
             slot.error = undefined;
             slot.promise = null;
         }
     }
-    // Check if re-serialization discovered new pending slots (async components
-    // that were nested inside the resolved value of another async component)
-    _hasPending = false;
+    // Remove fully-handled slots and check if any are still active.
+    // This prevents unbounded accumulation of inert slots in deeply nested async trees.
+    var activeSlots = [];
     for (var n = 0; n < _pendingSlots.length; n++) {
         var s = _pendingSlots[n];
         if (s.promise !== null) {
-            _hasPending = true;
+            activeSlots.push(s);
             stillPending = true;
         }
     }
+    _pendingSlots = activeSlots;
+    _hasPending = stillPending;
     return stillPending ? 'pending' : 'done';
 };
 
@@ -245,7 +270,20 @@ function _flightToHtml(rows) {
         }
     }
 
-    if (rootId === null) return '';
+    if (rootId === null) {
+        for (var ei = 0; ei < rows.length; ei++) {
+            if (rows[ei].indexOf('E:') === 0) {
+                var colonPos = rows[ei].indexOf(':', 2);
+                var errJson = rows[ei].substring(colonPos + 1);
+                try {
+                    var err = JSON.parse(errJson);
+                    return '<div style="color:red;font-family:monospace;padding:20px">RSC Error: ' +
+                        (err.message || 'Unknown error').replace(/</g, '&lt;') + '</div>';
+                } catch (e) {}
+            }
+        }
+        return '';
+    }
     return _renderFlightNode(nodes[rootId], nodes);
 }
 
@@ -290,7 +328,12 @@ function _renderFlightNode(value, nodes) {
             // Client component reference: "$M<id>"
             if (typeof tag === 'string' && tag.charAt(0) === '$' && tag.charAt(1) === 'M') {
                 var clientModId = tag.substring(2);
-                return '<div data-client-component="' + (nodes['M' + clientModId] ? nodes['M' + clientModId].id : '') + '"></div>';
+                var refId = nodes['M' + clientModId] ? nodes['M' + clientModId].id : '';
+                return '<div data-client-component="' + _escapeAttr(String(refId)) + '"></div>';
+            }
+            // Sanitize tag name: only allow alphanumeric and hyphens
+            if (typeof tag !== 'string' || !/^[a-zA-Z][a-zA-Z0-9-]*$/.test(tag)) {
+                return '';
             }
             var attrs = '';
             var childrenHtml = '';
@@ -303,6 +346,9 @@ function _renderFlightNode(value, nodes) {
                     attrs += ' class="' + _escapeAttr(String(props[key])) + '"';
                 } else if (key === 'htmlFor') {
                     attrs += ' for="' + _escapeAttr(String(props[key])) + '"';
+                } else if (!/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(key)) {
+                    // Skip attribute names that could inject HTML
+                    continue;
                 } else if (typeof props[key] === 'string') {
                     attrs += ' ' + key + '="' + _escapeAttr(props[key]) + '"';
                 } else if (typeof props[key] === 'number') {
@@ -418,26 +464,11 @@ globalThis.__rex_render_rsc_to_html = function(routeKey, propsJson) {
     }
 
     var flightData = rows.join('\n');
+    var html = _flightToHtml(rows);
 
-    // Pass 2: Render to HTML (re-create the element since server components
-    // are functions that may have side effects)
-    var element2 = __rex_createElement(Page, props);
-    for (var i = layouts.length - 1; i >= 0; i--) {
-        element2 = __rex_createElement(layouts[i], { children: element2 });
-    }
-
-    try {
-        var html = __rex_renderToString(element2);
-        return JSON.stringify({
-            body: html,
-            head: '',
-            flight: flightData
-        });
-    } catch (e) {
-        return JSON.stringify({
-            body: '<div>Render error: ' + String(e) + '</div>',
-            head: '',
-            flight: flightData
-        });
-    }
+    return JSON.stringify({
+        body: html,
+        head: '',
+        flight: flightData
+    });
 };

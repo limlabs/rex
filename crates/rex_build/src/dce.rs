@@ -81,11 +81,14 @@ fn analyze<'a>(program: &'a Program<'a>, _source: &str) -> Vec<Span> {
     let mut dead_symbols: HashSet<SymbolId> = server_symbols.clone();
     let mut dead_spans: Vec<Span> = server_stmt_spans.clone();
 
+    // Build a sorted index of all identifier references for binary-search lookups.
+    let ref_index = IdentRefIndex::build(nodes, scoping);
+
     loop {
         // Collect all symbols referenced from within any dead span.
         let mut candidates: HashSet<SymbolId> = HashSet::new();
         for span in &dead_spans {
-            collect_refs_in_span(nodes, scoping, *span, &mut candidates);
+            ref_index.collect_in_span(*span, &mut candidates);
         }
         // Remove already-known dead symbols from candidates.
         for &sym_id in &dead_symbols {
@@ -249,25 +252,41 @@ fn find_top_level_stmt_span(nodes: &AstNodes, node_id: NodeId) -> Option<Span> {
     None
 }
 
-/// Collect all resolved symbol references within a given span.
-fn collect_refs_in_span(
-    nodes: &AstNodes,
-    scoping: &oxc_semantic::Scoping,
-    container_span: Span,
-    out: &mut HashSet<SymbolId>,
-) {
-    for node in nodes.iter() {
-        let node_span = node.kind().span();
-        if node_span.start < container_span.start || node_span.end > container_span.end {
-            continue;
-        }
-        if let AstKind::IdentifierReference(ident_ref) = node.kind() {
-            if let Some(ref_id) = ident_ref.reference_id.get() {
-                let reference = scoping.get_reference(ref_id);
-                if let Some(sym_id) = reference.symbol_id() {
-                    out.insert(sym_id);
+/// All identifier references in the AST, sorted by start position.
+/// Built once and reused for binary-search lookups per dead span.
+struct IdentRefIndex {
+    /// (start, symbol_id) sorted by start position.
+    entries: Vec<(u32, SymbolId)>,
+}
+
+impl IdentRefIndex {
+    fn build(nodes: &AstNodes, scoping: &oxc_semantic::Scoping) -> Self {
+        let mut entries = Vec::new();
+        for node in nodes.iter() {
+            if let AstKind::IdentifierReference(ident_ref) = node.kind() {
+                if let Some(ref_id) = ident_ref.reference_id.get() {
+                    let reference = scoping.get_reference(ref_id);
+                    if let Some(sym_id) = reference.symbol_id() {
+                        entries.push((node.kind().span().start, sym_id));
+                    }
                 }
             }
+        }
+        entries.sort_unstable_by_key(|&(start, _)| start);
+        Self { entries }
+    }
+
+    /// Collect all symbol references within `container_span` into `out`.
+    /// Uses binary search to find the start, then scans forward — O(log N + matches).
+    fn collect_in_span(&self, container_span: Span, out: &mut HashSet<SymbolId>) {
+        let start_idx = self
+            .entries
+            .partition_point(|&(pos, _)| pos < container_span.start);
+        for &(pos, sym_id) in &self.entries[start_idx..] {
+            if pos >= container_span.end {
+                break;
+            }
+            out.insert(sym_id);
         }
     }
 }
@@ -463,6 +482,26 @@ export default function Page({ data }) {
 "#;
         let result = strip(source);
         assert_eq!(result, source);
+    }
+
+    #[test]
+    fn preserves_partially_dead_import() {
+        let source = r#"import { serverFn, sharedFn } from './utils';
+
+export async function getServerSideProps() {
+    const data = serverFn();
+    return { props: { data } };
+}
+
+export default function Page({ data }) {
+    return <div>{sharedFn(data)}</div>;
+}
+"#;
+        let result = strip(source);
+        assert!(!result.contains("getServerSideProps"));
+        // The import must be preserved because sharedFn is still used.
+        assert!(result.contains("import { serverFn, sharedFn } from './utils'"));
+        assert!(result.contains("sharedFn"));
     }
 
     #[test]
