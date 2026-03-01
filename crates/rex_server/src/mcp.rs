@@ -142,11 +142,7 @@ pub async fn mcp_handler(
     let request: JsonRpcRequest = match serde_json::from_slice(&body) {
         Ok(req) => req,
         Err(e) => {
-            let resp = json_rpc_error(
-                serde_json::Value::Null,
-                -32700,
-                format!("Parse error: {e}"),
-            );
+            let resp = json_rpc_error(serde_json::Value::Null, -32700, format!("Parse error: {e}"));
             return (
                 StatusCode::OK,
                 [("content-type", "application/json")],
@@ -199,10 +195,7 @@ pub async fn mcp_handler(
         "ping" => json_rpc_response(id, serde_json::json!({})),
 
         "tools/list" => {
-            let tools_json = state
-                .isolate_pool
-                .execute(|iso| iso.list_mcp_tools())
-                .await;
+            let tools_json = state.isolate_pool.execute(|iso| iso.list_mcp_tools()).await;
 
             match tools_json {
                 Ok(Ok(Some(json_str))) => {
