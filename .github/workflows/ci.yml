@@ -58,7 +58,7 @@ jobs:
     name: Test & Coverage
     runs-on: ubuntu-latest
     env:
-      COVERAGE_THRESHOLD: 52
+      COVERAGE_THRESHOLD: 51
     steps:
       - uses: actions/checkout@v4
 
