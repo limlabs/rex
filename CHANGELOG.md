@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/limlabs/rex/compare/v0.2.1...v0.3.0) (2026-03-01)
+
+
+### Features
+
+* add Linux ARM64 release build ([21d4a89](https://github.com/limlabs/rex/commit/21d4a8935c797e5553c950495e241093c91d4e54))
+
+
+### Bug Fixes
+
+* remove nonexistent rex_auth crate from Dockerfile ([e0f4706](https://github.com/limlabs/rex/commit/e0f47063a6e9d088538d64501b53d0351d583948))
+
 ## [0.2.1](https://github.com/limlabs/rex/compare/v0.2.0...v0.2.1) (2026-03-01)
 
 
