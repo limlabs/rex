@@ -11,3 +11,4 @@ __pycache__/
 __marimo__/
 benchmarks/results*.json
 .tanstack
+fixtures/auth/.env
