@@ -13,3 +13,4 @@ benchmarks/results*.json
 .tanstack
 .env
 .claude/
+dist/
