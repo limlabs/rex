@@ -72,8 +72,9 @@ impl KeyManager {
             let key = generate_rsa_keypair()?;
             let data = serde_json::to_string_pretty(&key)
                 .map_err(|e| AuthError::Key(format!("failed to serialize key: {e}")))?;
-            std::fs::write(&active_path, data)
+            std::fs::write(&active_path, &data)
                 .map_err(|e| AuthError::Key(format!("failed to write active key: {e}")))?;
+            set_restrictive_permissions(&active_path)?;
             key
         };
 
@@ -146,6 +147,7 @@ impl KeyManager {
             .map_err(|e| AuthError::Key(format!("failed to serialize key: {e}")))?;
         std::fs::write(&prev_path, &active_data)
             .map_err(|e| AuthError::Key(format!("failed to write previous key: {e}")))?;
+        set_restrictive_permissions(&prev_path)?;
         self.previous = Some(self.active.clone());
 
         // Generate new active
@@ -155,6 +157,7 @@ impl KeyManager {
         let active_path = self.keys_dir.join("active.json");
         std::fs::write(&active_path, new_data)
             .map_err(|e| AuthError::Key(format!("failed to write active key: {e}")))?;
+        set_restrictive_permissions(&active_path)?;
         self.active = new_key;
 
         Ok(())
@@ -166,76 +169,54 @@ impl KeyManager {
     }
 }
 
-/// Generate a new RSA 2048-bit key pair.
+/// Set restrictive file permissions (0o600) on sensitive files.
 ///
-/// Uses the `openssl` CLI to generate a PKCS#8 private key and extract
-/// the public key. This avoids pulling in the heavy `rsa` crate while
-/// still producing standards-compliant keys.
-///
-/// If `openssl` is not available, returns an error with instructions.
-fn generate_rsa_keypair() -> Result<StoredKeyPair, AuthError> {
-    // Generate private key in PKCS#8 PEM format
-    let output = std::process::Command::new("openssl")
-        .args([
-            "genpkey",
-            "-algorithm",
-            "RSA",
-            "-pkeyopt",
-            "rsa_keygen_bits:2048",
-        ])
-        .output()
-        .map_err(|e| {
+/// On non-Unix platforms this is a no-op.
+fn set_restrictive_permissions(path: &Path) -> Result<(), AuthError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| {
             AuthError::Key(format!(
-                "failed to run openssl for key generation: {e}. \
-                 Ensure openssl is installed and available in PATH."
+                "failed to set permissions on {}: {e}",
+                path.display()
             ))
         })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AuthError::Key(format!(
-            "openssl key generation failed: {stderr}"
-        )));
     }
-
-    let private_key_pem = String::from_utf8(output.stdout)
-        .map_err(|e| AuthError::Key(format!("invalid UTF-8 in private key: {e}")))?;
-
-    // Extract public key from private key
-    let output = std::process::Command::new("openssl")
-        .args(["pkey", "-pubout"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write;
-            child
-                .stdin
-                .as_mut()
-                .expect("stdin piped")
-                .write_all(private_key_pem.as_bytes())?;
-            child.wait_with_output()
-        })
-        .map_err(|e| AuthError::Key(format!("failed to extract public key: {e}")))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AuthError::Key(format!(
-            "openssl public key extraction failed: {stderr}"
-        )));
+    #[cfg(not(unix))]
+    {
+        let _ = path;
     }
+    Ok(())
+}
 
-    let public_key_pem = String::from_utf8(output.stdout)
-        .map_err(|e| AuthError::Key(format!("invalid UTF-8 in public key: {e}")))?;
+/// Generate a new RSA 2048-bit key pair using the `rsa` crate (pure Rust).
+fn generate_rsa_keypair() -> Result<StoredKeyPair, AuthError> {
+    use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
+    use rsa::traits::PublicKeyParts;
+    use rsa::RsaPrivateKey;
 
-    // Extract RSA modulus (n) and exponent (e) for JWK
-    let (n, e) = extract_rsa_components(&private_key_pem)?;
+    let mut rng = rand::thread_rng();
+    let private_key = RsaPrivateKey::new(&mut rng, 2048)
+        .map_err(|e| AuthError::Key(format!("RSA key generation failed: {e}")))?;
+    let public_key = private_key.to_public_key();
+
+    let private_key_pem = private_key
+        .to_pkcs8_pem(LineEnding::LF)
+        .map_err(|e| AuthError::Key(format!("failed to encode private key PEM: {e}")))?
+        .to_string();
+
+    let public_key_pem = public_key
+        .to_public_key_pem(LineEnding::LF)
+        .map_err(|e| AuthError::Key(format!("failed to encode public key PEM: {e}")))?;
+
+    // Extract modulus (n) and exponent (e) for JWK
+    let n_bytes = public_key.n().to_bytes_be();
+    let e_bytes = public_key.e().to_bytes_be();
+    let n = URL_SAFE_NO_PAD.encode(&n_bytes);
+    let e = URL_SAFE_NO_PAD.encode(&e_bytes);
 
     // Compute kid: first 8 hex chars of SHA-256 of the modulus bytes
-    let n_bytes = URL_SAFE_NO_PAD
-        .decode(&n)
-        .map_err(|e| AuthError::Key(format!("failed to decode modulus: {e}")))?;
     let kid_hash = Sha256::digest(&n_bytes);
     let kid = hex::encode(&kid_hash[..4]); // 4 bytes = 8 hex chars
 
@@ -252,126 +233,6 @@ fn generate_rsa_keypair() -> Result<StoredKeyPair, AuthError> {
         e,
         created_at,
     })
-}
-
-/// Extract RSA modulus (n) and exponent (e) from a PEM private key using openssl.
-fn extract_rsa_components(private_key_pem: &str) -> Result<(String, String), AuthError> {
-    // Use openssl to output the RSA key components in text form
-    let output = std::process::Command::new("openssl")
-        .args(["pkey", "-text", "-noout"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write;
-            child
-                .stdin
-                .as_mut()
-                .expect("stdin piped")
-                .write_all(private_key_pem.as_bytes())?;
-            child.wait_with_output()
-        })
-        .map_err(|e| AuthError::Key(format!("failed to extract RSA components: {e}")))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AuthError::Key(format!(
-            "openssl RSA component extraction failed: {stderr}"
-        )));
-    }
-
-    let text = String::from_utf8(output.stdout)
-        .map_err(|e| AuthError::Key(format!("invalid UTF-8 in key text: {e}")))?;
-
-    let n = parse_openssl_bignum(&text, "modulus:")
-        .ok_or_else(|| AuthError::Key("failed to parse modulus from openssl output".into()))?;
-    let e = parse_openssl_exponent(&text)
-        .ok_or_else(|| AuthError::Key("failed to parse exponent from openssl output".into()))?;
-
-    Ok((n, e))
-}
-
-/// Parse a big number field (like modulus) from openssl text output.
-///
-/// The openssl output format is:
-/// ```text
-/// modulus:
-///     00:ab:cd:ef:...
-///     12:34:...
-/// ```
-fn parse_openssl_bignum(text: &str, field: &str) -> Option<String> {
-    let mut lines = text.lines();
-    // Find the field line
-    loop {
-        let line = lines.next()?;
-        if line.trim().starts_with(field) {
-            break;
-        }
-    }
-
-    // Collect hex bytes from subsequent indented lines
-    let mut hex_bytes = Vec::new();
-    for line in lines {
-        let trimmed = line.trim();
-        // Stop when we hit a non-hex line (next field)
-        if trimmed.is_empty() || (!trimmed.contains(':') && !trimmed.ends_with(':')) {
-            // Check if it's a continuation of hex
-            if trimmed.chars().all(|c| c.is_ascii_hexdigit() || c == ':') && !trimmed.is_empty() {
-                for part in trimmed.split(':') {
-                    let part = part.trim();
-                    if !part.is_empty() {
-                        if let Ok(byte) = u8::from_str_radix(part, 16) {
-                            hex_bytes.push(byte);
-                        }
-                    }
-                }
-                continue;
-            }
-            break;
-        }
-        for part in trimmed.split(':') {
-            let part = part.trim();
-            if !part.is_empty() {
-                if let Ok(byte) = u8::from_str_radix(part, 16) {
-                    hex_bytes.push(byte);
-                }
-            }
-        }
-    }
-
-    // Strip leading zero byte (ASN.1 sign byte)
-    if hex_bytes.first() == Some(&0) && hex_bytes.len() > 1 {
-        hex_bytes.remove(0);
-    }
-
-    if hex_bytes.is_empty() {
-        return None;
-    }
-
-    Some(URL_SAFE_NO_PAD.encode(&hex_bytes))
-}
-
-/// Parse the public exponent from openssl text output.
-///
-/// Format: `publicExponent: 65537 (0x10001)`
-fn parse_openssl_exponent(text: &str) -> Option<String> {
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("publicExponent:") || trimmed.starts_with("Exponent:") {
-            // Extract the decimal number
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            if parts.len() >= 2 {
-                if let Ok(exp) = parts[1].parse::<u64>() {
-                    // Encode as big-endian bytes, stripping leading zeros
-                    let bytes = exp.to_be_bytes();
-                    let start = bytes.iter().position(|&b| b != 0).unwrap_or(7);
-                    return Some(URL_SAFE_NO_PAD.encode(&bytes[start..]));
-                }
-            }
-        }
-    }
-    None
 }
 
 /// Convert a `StoredKeyPair` into a public JWK.
@@ -412,20 +273,19 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_openssl_exponent() {
-        let text = "publicExponent: 65537 (0x10001)\n";
-        let e = parse_openssl_exponent(text).unwrap();
-        // 65537 = 0x010001, base64url of [1, 0, 1] = "AQAB"
-        assert_eq!(e, "AQAB");
-    }
+    fn test_generate_rsa_keypair() {
+        let key = generate_rsa_keypair().expect("key generation failed");
+        assert!(!key.private_key_pem.is_empty());
+        assert!(!key.public_key_pem.is_empty());
+        assert!(!key.n.is_empty());
+        assert!(!key.e.is_empty());
+        assert_eq!(key.kid.len(), 8);
 
-    #[test]
-    fn test_parse_openssl_bignum() {
-        let text = "modulus:\n    00:ab:cd:ef:01:23\n";
-        let n = parse_openssl_bignum(text, "modulus:").unwrap();
-        // After stripping leading 00: bytes are [0xab, 0xcd, 0xef, 0x01, 0x23]
-        let decoded = URL_SAFE_NO_PAD.decode(&n).unwrap();
-        assert_eq!(decoded, vec![0xab, 0xcd, 0xef, 0x01, 0x23]);
+        // Verify the PEM keys work with jsonwebtoken
+        jsonwebtoken::EncodingKey::from_rsa_pem(key.private_key_pem.as_bytes())
+            .expect("encoding key from generated PEM");
+        jsonwebtoken::DecodingKey::from_rsa_pem(key.public_key_pem.as_bytes())
+            .expect("decoding key from generated PEM");
     }
 
     #[test]

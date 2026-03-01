@@ -1,14 +1,16 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 /// Verify a PKCE S256 code challenge against a code verifier.
 ///
-/// Computes `BASE64URL(SHA256(code_verifier))` and compares to `code_challenge`.
+/// Computes `BASE64URL(SHA256(code_verifier))` and compares to `code_challenge`
+/// using constant-time comparison to prevent timing side-channel attacks.
 pub fn verify_pkce_s256(code_verifier: &str, code_challenge: &str) -> bool {
     let hash = Sha256::digest(code_verifier.as_bytes());
     let computed = URL_SAFE_NO_PAD.encode(hash);
-    computed == code_challenge
+    computed.as_bytes().ct_eq(code_challenge.as_bytes()).into()
 }
 
 /// Generate a PKCE S256 code challenge from a verifier.

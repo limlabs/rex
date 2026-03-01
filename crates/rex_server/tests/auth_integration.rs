@@ -142,8 +142,9 @@ async fn test_session_route_reachable() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 200, "/_rex/auth/session must return 200");
-    let body = resp.text().await.unwrap();
-    assert_eq!(body, "{}"); // no session
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["user"], serde_json::Value::Null);
+    assert_eq!(body["status"], "unauthenticated");
 }
 
 #[tokio::test]

@@ -169,6 +169,14 @@ pub async fn authorize_get_handler(
         })
         .collect();
 
+    // Generate a CSRF token for the consent form (double-submit cookie pattern)
+    let consent_csrf = crate::csrf::generate_state();
+    let csrf_cookie = format!(
+        "__rex_consent_csrf={}; HttpOnly; SameSite=Strict; Path=/_rex/auth/authorize; Max-Age=600{}",
+        consent_csrf,
+        if auth.is_dev { "" } else { "; Secure" }
+    );
+
     let html = crate::authz_server::consent::render_consent_page(
         &client.client_name,
         &client_id,
@@ -178,11 +186,13 @@ pub async fn authorize_get_handler(
         &code_challenge,
         &scope,
         &state,
+        &consent_csrf,
     );
 
     Response::builder()
         .status(200)
         .header("Content-Type", "text/html; charset=utf-8")
+        .header("Set-Cookie", csrf_cookie)
         .body(axum::body::Body::from(html))
         .unwrap_or_else(|_| error_response(500, "server_error", "Render failed"))
 }
@@ -193,6 +203,22 @@ pub async fn authorize_post_handler(
     headers: axum::http::HeaderMap,
     axum::Form(form): axum::Form<HashMap<String, String>>,
 ) -> Response {
+    // Validate consent CSRF token (double-submit cookie pattern)
+    let cookies = cookies_from_header_map(&headers);
+    let csrf_cookie = cookies.get("__rex_consent_csrf");
+    let csrf_form = form.get("csrf_token");
+
+    match (csrf_cookie, csrf_form) {
+        (Some(cookie_val), Some(form_val)) => {
+            if !crate::csrf::validate_state(form_val, cookie_val) {
+                return error_response(403, "invalid_request", "CSRF validation failed");
+            }
+        }
+        _ => {
+            return error_response(403, "invalid_request", "Missing CSRF token");
+        }
+    }
+
     let action = form.get("action").map(|s| s.as_str()).unwrap_or("deny");
 
     let client_id = match form.get("client_id") {
@@ -214,8 +240,10 @@ pub async fn authorize_post_handler(
     let state = form.get("state").cloned().unwrap_or_default();
 
     if action == "deny" {
+        let encoded_state: String =
+            url::form_urlencoded::byte_serialize(state.as_bytes()).collect();
         let redirect = format!(
-            "{redirect_uri}?error=access_denied&error_description=User%20denied%20consent&state={state}"
+            "{redirect_uri}?error=access_denied&error_description=User%20denied%20consent&state={encoded_state}"
         );
         return Response::builder()
             .status(302)
@@ -224,9 +252,7 @@ pub async fn authorize_post_handler(
             .unwrap_or_else(|_| error_response(500, "server_error", "Redirect failed"));
     }
 
-    // Get user subject from session
-    let cookies = cookies_from_header_map(&headers);
-
+    // Get user subject from session (reuse cookies parsed above for CSRF)
     let subject = cookies
         .get(&auth.config.session.cookie_name)
         .and_then(|encrypted| session::decrypt_session(encrypted, &auth.session_key))
@@ -283,9 +309,12 @@ async fn issue_auth_code(
         }
     };
 
-    let mut redirect = format!("{redirect_uri}?code={code}");
+    let encoded_code: String = url::form_urlencoded::byte_serialize(code.as_bytes()).collect();
+    let mut redirect = format!("{redirect_uri}?code={encoded_code}");
     if !state.is_empty() {
-        redirect.push_str(&format!("&state={state}"));
+        let encoded_state: String =
+            url::form_urlencoded::byte_serialize(state.as_bytes()).collect();
+        redirect.push_str(&format!("&state={encoded_state}"));
     }
 
     Response::builder()

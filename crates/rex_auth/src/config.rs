@@ -172,16 +172,13 @@ fn default_refresh_token_ttl() -> u64 {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ClientsConfig {
     /// Whether dynamic client registration (RFC 7591) is allowed.
-    #[serde(rename = "allowDynamic", default = "default_true")]
+    /// Defaults to `false` for security-by-default; set to `true` to enable.
+    #[serde(rename = "allowDynamic", default)]
     pub allow_dynamic: bool,
 
     /// Pre-registered static clients.
     #[serde(rename = "static", default)]
     pub static_clients: Vec<StaticClient>,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 /// A pre-registered OAuth client.
@@ -248,12 +245,17 @@ pub fn parse_auth_config(value: &serde_json::Value) -> Result<AuthConfig, crate:
     Ok(config)
 }
 
-/// Derive the 32-byte encryption key from the auth secret using SHA-256.
+/// Derive the 32-byte encryption key from the auth secret using HKDF-SHA256.
+///
+/// Uses domain separation ("rex-auth-session-v1" salt, "session-encryption" info)
+/// so the same secret used for different purposes yields different keys.
 pub fn derive_key(secret: &str) -> [u8; 32] {
-    use sha2::{Digest, Sha256};
-    let hash = Sha256::digest(secret.as_bytes());
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+    let hk = Hkdf::<Sha256>::new(Some(b"rex-auth-session-v1"), secret.as_bytes());
     let mut key = [0u8; 32];
-    key.copy_from_slice(&hash);
+    hk.expand(b"session-encryption", &mut key)
+        .expect("32 bytes is a valid HKDF-SHA256 output length");
     key
 }
 
@@ -300,6 +302,14 @@ pub fn resolve_secret(
     }
     std::fs::write(&secret_path, &secret)
         .map_err(|e| crate::AuthError::Config(format!("Failed to write auth secret: {e}")))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&secret_path, std::fs::Permissions::from_mode(0o600)).map_err(
+            |e| crate::AuthError::Config(format!("Failed to set secret permissions: {e}")),
+        )?;
+    }
 
     tracing::info!("Auto-generated auth secret at {}", secret_path.display());
     Ok(secret)

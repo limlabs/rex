@@ -11,10 +11,16 @@ pub fn render_consent_page(
     code_challenge: &str,
     scope: &str,
     state: &str,
+    csrf_token: &str,
 ) -> String {
     let escaped_client = html_escape(client_name);
     let escaped_user = html_escape(user_name);
     let escaped_client_id = html_escape(client_id);
+    let escaped_redirect_uri = html_escape(redirect_uri);
+    let escaped_code_challenge = html_escape(code_challenge);
+    let escaped_scope = html_escape(scope);
+    let escaped_state = html_escape(state);
+    let escaped_csrf_token = html_escape(csrf_token);
 
     let scope_items: String = scopes
         .iter()
@@ -64,20 +70,22 @@ button:hover {{ opacity: 0.9; }}
 <div class="buttons">
 <form method="POST" action="/_rex/auth/authorize" style="flex:1;display:flex">
 <input type="hidden" name="action" value="approve">
-<input type="hidden" name="client_id" value="{client_id}">
-<input type="hidden" name="redirect_uri" value="{redirect_uri}">
-<input type="hidden" name="code_challenge" value="{code_challenge}">
-<input type="hidden" name="scope" value="{scope}">
-<input type="hidden" name="state" value="{state}">
+<input type="hidden" name="client_id" value="{escaped_client_id}">
+<input type="hidden" name="redirect_uri" value="{escaped_redirect_uri}">
+<input type="hidden" name="code_challenge" value="{escaped_code_challenge}">
+<input type="hidden" name="scope" value="{escaped_scope}">
+<input type="hidden" name="state" value="{escaped_state}">
+<input type="hidden" name="csrf_token" value="{escaped_csrf_token}">
 <button type="submit" class="approve" style="flex:1">Approve</button>
 </form>
 <form method="POST" action="/_rex/auth/authorize" style="flex:1;display:flex">
 <input type="hidden" name="action" value="deny">
-<input type="hidden" name="client_id" value="{client_id}">
-<input type="hidden" name="redirect_uri" value="{redirect_uri}">
-<input type="hidden" name="code_challenge" value="{code_challenge}">
-<input type="hidden" name="scope" value="{scope}">
-<input type="hidden" name="state" value="{state}">
+<input type="hidden" name="client_id" value="{escaped_client_id}">
+<input type="hidden" name="redirect_uri" value="{escaped_redirect_uri}">
+<input type="hidden" name="code_challenge" value="{escaped_code_challenge}">
+<input type="hidden" name="scope" value="{escaped_scope}">
+<input type="hidden" name="state" value="{escaped_state}">
+<input type="hidden" name="csrf_token" value="{escaped_csrf_token}">
 <button type="submit" class="deny" style="flex:1">Deny</button>
 </form>
 </div>

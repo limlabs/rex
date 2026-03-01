@@ -98,9 +98,11 @@ fn is_valid_redirect_uri(uri: &str) -> bool {
     // Must be a valid URL
     match url::Url::parse(uri) {
         Ok(parsed) => {
-            // Must have http or https scheme (or custom scheme for native apps)
             let scheme = parsed.scheme();
-            matches!(scheme, "http" | "https") || scheme.len() > 4 // custom scheme like "myapp"
+            // Allow http/https, or custom schemes for native apps (e.g., "myapp://callback")
+            // Block known-dangerous schemes even if they pass the length check
+            matches!(scheme, "http" | "https")
+                || (scheme.len() > 4 && !matches!(scheme, "file" | "ftp" | "about" | "blob"))
         }
         Err(_) => false,
     }

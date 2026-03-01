@@ -53,6 +53,12 @@ pub struct ConsentDecision {
 ///
 /// Auth codes are in-memory only (HashMap with TTL).
 /// Clients, refresh tokens, and consent decisions persist to JSON files.
+///
+/// **Note:** The `RwLock` only protects against concurrent access within a single
+/// process. If multiple Rex instances share the same `.rex/auth/` directory (e.g.,
+/// behind a load balancer), they may race on the JSON files. For multi-process
+/// deployments, use a shared database backend or ensure each instance has its own
+/// store directory.
 pub struct FileStore {
     dir: PathBuf,
     clients: RwLock<HashMap<String, RegisteredClient>>,

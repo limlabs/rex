@@ -1,5 +1,6 @@
 use rand::RngCore;
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 /// Generate a random CSRF state token (32 bytes, hex-encoded = 64 chars).
 pub fn generate_state() -> String {
@@ -10,12 +11,12 @@ pub fn generate_state() -> String {
 
 /// Validate that a CSRF state matches the expected value.
 ///
-/// Uses hash-based comparison (SHA-256 digest equality) which is
-/// inherently constant-time for the comparison step.
+/// Uses SHA-256 hashing followed by constant-time comparison via `subtle::ConstantTimeEq`
+/// to prevent timing side-channel attacks.
 pub fn validate_state(received: &str, expected: &str) -> bool {
     let received_hash = Sha256::digest(received.as_bytes());
     let expected_hash = Sha256::digest(expected.as_bytes());
-    received_hash == expected_hash
+    received_hash.ct_eq(&expected_hash).into()
 }
 
 /// Build a `Set-Cookie` header value for the CSRF state cookie.

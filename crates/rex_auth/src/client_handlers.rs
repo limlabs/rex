@@ -266,7 +266,7 @@ pub async fn session_handler(
         }
         None => (
             [(axum::http::header::CONTENT_TYPE, "application/json")],
-            "{}",
+            r#"{"user":null,"status":"unauthenticated"}"#,
         )
             .into_response(),
     }
