@@ -30,7 +30,7 @@ jobs:
   update-lockfile:
     name: Update Cargo.lock on release PR
     needs: release-please
-    if: ${{ needs.release-please.outputs.pr_branch != '' && !needs.release-please.outputs.releases_created }}
+    if: ${{ needs.release-please.outputs.pr_branch != '' && needs.release-please.outputs.releases_created != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +53,7 @@ jobs:
   build-linux:
     name: Build Linux (x86_64)
     needs: release-please
-    if: ${{ needs.release-please.outputs.releases_created }}
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,7 +87,7 @@ jobs:
   build-macos-arm64:
     name: Build macOS (ARM64)
     needs: release-please
-    if: ${{ needs.release-please.outputs.releases_created }}
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -121,10 +121,13 @@ jobs:
   build-macos-x86_64:
     name: Build macOS (x86_64)
     needs: release-please
-    if: ${{ needs.release-please.outputs.releases_created }}
-    runs-on: macos-13
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install x86_64 target
+        run: rustup target add x86_64-apple-darwin
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -155,7 +158,7 @@ jobs:
   docker:
     name: Docker
     needs: release-please
-    if: ${{ needs.release-please.outputs.releases_created }}
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -169,7 +172,9 @@ jobs:
 
       - name: Extract version
         id: version
-        run: echo "version=${{ needs.release-please.outputs.tag_name }}" | sed 's/v//' >> "$GITHUB_OUTPUT"
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
 
       - name: Build & push
         uses: docker/build-push-action@v6
@@ -183,7 +188,7 @@ jobs:
   npm-publish:
     name: npm Publish
     needs: release-please
-    if: ${{ needs.release-please.outputs.releases_created }}
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -198,10 +203,11 @@ jobs:
 
       - name: Sync version from release tag
         run: |
-          VERSION="${{ needs.release-please.outputs.tag_name }}"
-          VERSION="${VERSION#v}"
+          VERSION="${TAG#v}"
           cd packages/rex
           npm version "$VERSION" --no-git-tag-version --allow-same-version
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
 
       - name: Publish
         run: cd packages/rex && npm publish --access public
@@ -211,7 +217,7 @@ jobs:
   upload-release-assets:
     name: Upload Release Assets
     needs: [release-please, build-linux, build-macos-arm64, build-macos-x86_64]
-    if: ${{ needs.release-please.outputs.releases_created }}
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
