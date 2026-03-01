@@ -34,6 +34,7 @@ pub struct AuthCode {
 pub struct StoredRefreshToken {
     pub token: String,
     pub client_id: String,
+    pub redirect_uri: String,
     pub subject: String,
     pub scope: String,
     pub created_at: u64,
@@ -208,6 +209,7 @@ impl FileStore {
     pub fn store_refresh_token(
         &self,
         client_id: String,
+        redirect_uri: String,
         subject: String,
         scope: String,
         ttl_secs: u64,
@@ -218,6 +220,7 @@ impl FileStore {
         let stored = StoredRefreshToken {
             token: token.clone(),
             client_id,
+            redirect_uri,
             subject,
             scope,
             created_at: now,
@@ -552,6 +555,7 @@ mod tests {
         let token = store
             .store_refresh_token(
                 "rex_client1".to_string(),
+                "http://localhost/cb".to_string(),
                 "user-1".to_string(),
                 "tools:read".to_string(),
                 3600, // 1 hour TTL

@@ -97,7 +97,15 @@ async fn handle_authorization_code(auth: &AuthServer, form: &HashMap<String, Str
     }
 
     // Issue tokens
-    issue_tokens(auth, store, &auth_code.subject, client_id, &auth_code.scope).await
+    issue_tokens(
+        auth,
+        store,
+        &auth_code.subject,
+        client_id,
+        redirect_uri,
+        &auth_code.scope,
+    )
+    .await
 }
 
 async fn handle_refresh_token(auth: &AuthServer, form: &HashMap<String, String>) -> Response {
@@ -131,6 +139,13 @@ async fn handle_refresh_token(auth: &AuthServer, form: &HashMap<String, String>)
         return token_error(400, "invalid_grant", "client_id mismatch");
     }
 
+    // Validate redirect_uri matches the original grant (if provided)
+    if let Some(redirect_uri) = form.get("redirect_uri") {
+        if stored.redirect_uri != *redirect_uri {
+            return token_error(400, "invalid_grant", "redirect_uri mismatch");
+        }
+    }
+
     // Check expiry
     let now = now_secs();
     if stored.expires_at <= now {
@@ -142,8 +157,16 @@ async fn handle_refresh_token(auth: &AuthServer, form: &HashMap<String, String>)
     // Revoke old refresh token (rotation)
     let _ = store.revoke_refresh_token(refresh_token);
 
-    // Issue new tokens
-    issue_tokens(auth, store, &stored.subject, client_id, &stored.scope).await
+    // Issue new tokens with the same redirect_uri binding
+    issue_tokens(
+        auth,
+        store,
+        &stored.subject,
+        client_id,
+        &stored.redirect_uri,
+        &stored.scope,
+    )
+    .await
 }
 
 async fn issue_tokens(
@@ -151,6 +174,7 @@ async fn issue_tokens(
     store: &crate::store::FileStore,
     subject: &str,
     client_id: &str,
+    redirect_uri: &str,
     scope: &str,
 ) -> Response {
     let now = now_secs();
@@ -192,6 +216,7 @@ async fn issue_tokens(
     // Create refresh token
     let refresh_token = match store.store_refresh_token(
         client_id.to_string(),
+        redirect_uri.to_string(),
         subject.to_string(),
         scope.to_string(),
         auth.config.mcp.refresh_token_ttl,
