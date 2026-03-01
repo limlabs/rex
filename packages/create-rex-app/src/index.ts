@@ -1,24 +1,23 @@
 #!/usr/bin/env node
 
-const fs = require("fs");
-const path = require("path");
-const { execSync } = require("child_process");
-const readline = require("readline");
+import fs from 'node:fs';
+import path from 'node:path';
+import { execSync } from 'node:child_process';
+import readline from 'node:readline';
 
 // --- Colors (ANSI) ---
 
-const bold = (s) => `\x1b[1m${s}\x1b[22m`;
-const dim = (s) => `\x1b[2m${s}\x1b[22m`;
-const green = (s) => `\x1b[32m${s}\x1b[39m`;
-const greenBold = (s) => bold(green(s));
-const magenta = (s) => `\x1b[35m${s}\x1b[39m`;
-const magentaBold = (s) => bold(magenta(s));
-const cyan = (s) => `\x1b[36m${s}\x1b[39m`;
-const red = (s) => `\x1b[31m${s}\x1b[39m`;
+const bold = (s: string): string => `\x1b[1m${s}\x1b[22m`;
+const dim = (s: string): string => `\x1b[2m${s}\x1b[22m`;
+const green = (s: string): string => `\x1b[32m${s}\x1b[39m`;
+const greenBold = (s: string): string => bold(green(s));
+const magenta = (s: string): string => `\x1b[35m${s}\x1b[39m`;
+const magentaBold = (s: string): string => bold(magenta(s));
+const red = (s: string): string => `\x1b[31m${s}\x1b[39m`;
 
 // --- Prompts ---
 
-function prompt(question) {
+function prompt(question: string): Promise<string> {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stderr,
@@ -33,7 +32,7 @@ function prompt(question) {
 
 // --- Template files ---
 
-const TEMPLATES = {
+const TEMPLATES: Record<string, Record<string, string>> = {
   default: {
     "pages/index.tsx": `export default function Home() {
   return (
@@ -107,19 +106,21 @@ a {
 
 // --- Detect package manager ---
 
-function detectPackageManager() {
-  const ua = process.env.npm_config_user_agent || "";
+type PackageManager = "npm" | "yarn" | "pnpm" | "bun";
+
+function detectPackageManager(): PackageManager {
+  const ua = process.env.npm_config_user_agent ?? "";
   if (ua.startsWith("pnpm")) return "pnpm";
   if (ua.startsWith("bun")) return "bun";
   if (ua.startsWith("yarn")) return "yarn";
   return "npm";
 }
 
-function installCommand(pm) {
+function installCommand(pm: PackageManager): string {
   return pm === "yarn" ? "yarn" : `${pm} install`;
 }
 
-function runCommand(pm) {
+function runCommand(pm: PackageManager): string {
   if (pm === "npm") return "npx";
   if (pm === "yarn") return "yarn";
   if (pm === "pnpm") return "pnpm exec";
@@ -128,7 +129,7 @@ function runCommand(pm) {
 
 // --- Main ---
 
-async function main() {
+async function main(): Promise<void> {
   let projectName = process.argv[2];
 
   console.error();
@@ -227,7 +228,7 @@ async function main() {
   console.error();
 }
 
-main().catch((err) => {
+main().catch((err: Error) => {
   console.error(`  ${red("✗")} ${err.message}`);
   process.exit(1);
 });

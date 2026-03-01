@@ -145,6 +145,9 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
+      - name: Install dependencies
+        run: cd packages/rex && npm install
+
       - name: Sync version from release tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
