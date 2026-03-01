@@ -798,7 +798,11 @@ mod rsc {
             .build()
             .unwrap();
         let resp = client.get(&url).send().await.unwrap();
-        assert_eq!(resp.status(), 200, "Async server component page should return 200");
+        assert_eq!(
+            resp.status(),
+            200,
+            "Async server component page should return 200"
+        );
 
         let body = resp.text().await.unwrap();
         assert!(
