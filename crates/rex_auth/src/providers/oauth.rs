@@ -1,13 +1,10 @@
+use super::{encode_scopes, url_encode};
 use crate::config::ProviderConfig;
 use crate::provider::{OAuthProvider, TokenSet};
 use crate::session::UserProfile;
 use crate::AuthError;
 use std::future::Future;
 use std::pin::Pin;
-
-fn url_encode(s: &str) -> String {
-    url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
-}
 
 pub struct GenericOAuthProvider {
     provider_id: String,
@@ -71,7 +68,7 @@ impl OAuthProvider for GenericOAuthProvider {
     }
 
     fn authorization_url(&self, state: &str, callback_url: &str) -> String {
-        let scopes = self.scopes.join("%20");
+        let scopes = encode_scopes(&self.scopes);
         let mut url = format!(
             "{}\
              ?client_id={}\
@@ -93,6 +90,7 @@ impl OAuthProvider for GenericOAuthProvider {
         code: &'a str,
         callback_url: &'a str,
         client: &'a reqwest::Client,
+        _code_verifier: Option<&'a str>,
     ) -> Pin<Box<dyn Future<Output = Result<TokenSet, AuthError>> + Send + 'a>> {
         Box::pin(async move {
             let resp: serde_json::Value = client

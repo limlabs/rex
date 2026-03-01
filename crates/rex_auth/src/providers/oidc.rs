@@ -1,3 +1,4 @@
+use super::{encode_scopes, url_encode};
 use crate::config::ProviderConfig;
 use crate::provider::{OAuthProvider, TokenSet};
 use crate::session::UserProfile;
@@ -6,14 +7,9 @@ use std::future::Future;
 use std::pin::Pin;
 use tokio::sync::OnceCell;
 
-fn url_encode(s: &str) -> String {
-    url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
-}
-
 /// Discovered OIDC endpoints from `.well-known/openid-configuration`.
 #[derive(Debug, Clone)]
 struct OidcDiscovery {
-    _authorization_endpoint: String,
     token_endpoint: String,
     userinfo_endpoint: Option<String>,
 }
@@ -78,14 +74,6 @@ impl GenericOidcProvider {
 
                 let doc: serde_json::Value = client.get(&url).send().await?.json().await?;
 
-                let authorization_endpoint = doc
-                    .get("authorization_endpoint")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        AuthError::Config("OIDC discovery missing authorization_endpoint".into())
-                    })?
-                    .to_string();
-
                 let token_endpoint = doc
                     .get("token_endpoint")
                     .and_then(|v| v.as_str())
@@ -100,7 +88,6 @@ impl GenericOidcProvider {
                     .map(String::from);
 
                 Ok(OidcDiscovery {
-                    _authorization_endpoint: authorization_endpoint,
                     token_endpoint,
                     userinfo_endpoint,
                 })
@@ -124,7 +111,7 @@ impl OAuthProvider for GenericOidcProvider {
         // this convention. The discovered endpoint is used during exchange_code
         // and fetch_user_profile.
         let base = self.issuer.trim_end_matches('/');
-        let scopes = self.scopes.join("%20");
+        let scopes = encode_scopes(&self.scopes);
         format!(
             "{base}/authorize\
              ?client_id={}\
@@ -142,6 +129,7 @@ impl OAuthProvider for GenericOidcProvider {
         code: &'a str,
         callback_url: &'a str,
         client: &'a reqwest::Client,
+        _code_verifier: Option<&'a str>,
     ) -> Pin<Box<dyn Future<Output = Result<TokenSet, AuthError>> + Send + 'a>> {
         Box::pin(async move {
             let discovery = self.discover(client).await?;

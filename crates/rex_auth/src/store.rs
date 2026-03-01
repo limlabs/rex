@@ -118,6 +118,38 @@ impl FileStore {
         Ok(client)
     }
 
+    /// Register a static client with a specific client_id.
+    /// If a client with this ID already exists, it is left unchanged.
+    pub fn register_static_client(
+        &self,
+        client_id: String,
+        name: String,
+        redirect_uris: Vec<String>,
+    ) -> Result<(), AuthError> {
+        {
+            let clients = self.clients.read().map_err(lock_error)?;
+            if clients.contains_key(&client_id) {
+                return Ok(());
+            }
+        }
+
+        let now = now_secs();
+        let client = RegisteredClient {
+            client_id: client_id.clone(),
+            client_name: name,
+            redirect_uris,
+            created_at: now,
+        };
+
+        {
+            let mut clients = self.clients.write().map_err(lock_error)?;
+            clients.insert(client_id, client);
+        }
+
+        self.flush_clients()?;
+        Ok(())
+    }
+
     /// Get a client by ID.
     pub fn get_client(&self, client_id: &str) -> Result<RegisteredClient, AuthError> {
         let clients = self.clients.read().map_err(lock_error)?;
@@ -484,6 +516,37 @@ mod tests {
         // Not found
         let err = store.get_client("rex_nonexistent").unwrap_err();
         assert!(matches!(err, AuthError::ClientNotFound(_)));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_static_client_registration() {
+        let (store, dir) = temp_store();
+
+        // Register a static client with a specific ID
+        store
+            .register_static_client(
+                "my-static-client".to_string(),
+                "Static App".to_string(),
+                vec!["http://localhost:3000/cb".to_string()],
+            )
+            .unwrap();
+
+        let client = store.get_client("my-static-client").unwrap();
+        assert_eq!(client.client_id, "my-static-client");
+        assert_eq!(client.client_name, "Static App");
+
+        // Registering again is a no-op (doesn't overwrite)
+        store
+            .register_static_client(
+                "my-static-client".to_string(),
+                "Different Name".to_string(),
+                vec![],
+            )
+            .unwrap();
+        let client2 = store.get_client("my-static-client").unwrap();
+        assert_eq!(client2.client_name, "Static App"); // unchanged
 
         let _ = std::fs::remove_dir_all(&dir);
     }

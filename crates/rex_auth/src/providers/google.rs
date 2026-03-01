@@ -1,13 +1,10 @@
+use super::{encode_scopes, url_encode};
 use crate::config::ProviderConfig;
 use crate::provider::{OAuthProvider, TokenSet};
 use crate::session::UserProfile;
 use crate::AuthError;
 use std::future::Future;
 use std::pin::Pin;
-
-fn url_encode(s: &str) -> String {
-    url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
-}
 
 pub struct GoogleProvider {
     client_id: String,
@@ -49,7 +46,7 @@ impl OAuthProvider for GoogleProvider {
     }
 
     fn authorization_url(&self, state: &str, callback_url: &str) -> String {
-        let scopes = self.scopes.join("%20");
+        let scopes = encode_scopes(&self.scopes);
         format!(
             "https://accounts.google.com/o/oauth2/v2/auth\
              ?client_id={}\
@@ -69,6 +66,7 @@ impl OAuthProvider for GoogleProvider {
         code: &'a str,
         callback_url: &'a str,
         client: &'a reqwest::Client,
+        _code_verifier: Option<&'a str>,
     ) -> Pin<Box<dyn Future<Output = Result<TokenSet, AuthError>> + Send + 'a>> {
         Box::pin(async move {
             let resp: serde_json::Value = client

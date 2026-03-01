@@ -29,6 +29,26 @@ pub fn csrf_state_cookie(state: &str, is_dev: bool) -> String {
     cookie
 }
 
+/// Build a `Set-Cookie` header value for the callback URL cookie.
+pub fn callback_url_cookie(url: &str, is_dev: bool) -> String {
+    let encoded = url::form_urlencoded::byte_serialize(url.as_bytes()).collect::<String>();
+    let mut cookie =
+        format!("__rex_callback_url={encoded}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600");
+    if !is_dev {
+        cookie.push_str("; Secure");
+    }
+    cookie
+}
+
+/// Build a `Set-Cookie` header value that clears the callback URL cookie.
+pub fn clear_callback_url_cookie(is_dev: bool) -> String {
+    let mut cookie = "__rex_callback_url=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0".to_string();
+    if !is_dev {
+        cookie.push_str("; Secure");
+    }
+    cookie
+}
+
 /// Build a `Set-Cookie` header value that clears the CSRF state cookie.
 pub fn clear_csrf_cookie(is_dev: bool) -> String {
     let mut cookie = "__rex_auth_state=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0".to_string();
@@ -80,5 +100,19 @@ mod tests {
     fn test_csrf_cookie_prod() {
         let cookie = csrf_state_cookie("abc123", false);
         assert!(cookie.contains("Secure"));
+    }
+
+    #[test]
+    fn test_callback_url_cookie() {
+        let cookie = callback_url_cookie("/dashboard", true);
+        assert!(cookie.contains("__rex_callback_url="));
+        assert!(cookie.contains("Max-Age=600"));
+    }
+
+    #[test]
+    fn test_clear_callback_url_cookie() {
+        let cookie = clear_callback_url_cookie(true);
+        assert!(cookie.contains("__rex_callback_url="));
+        assert!(cookie.contains("Max-Age=0"));
     }
 }

@@ -12,6 +12,21 @@ use crate::provider::OAuthProvider;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// URL-encode a string for use in query parameters.
+pub(crate) fn url_encode(s: &str) -> String {
+    url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
+}
+
+/// Encode a list of scopes into a single URL-safe string (space-separated via %20).
+/// Each individual scope value is URL-encoded first.
+pub(crate) fn encode_scopes(scopes: &[String]) -> String {
+    scopes
+        .iter()
+        .map(|s| url_encode(s))
+        .collect::<Vec<_>>()
+        .join("%20")
+}
+
 /// Build a map of provider ID → provider instance from the auth config.
 pub fn build_providers(
     configs: &[ProviderConfig],

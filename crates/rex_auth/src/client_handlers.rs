@@ -47,17 +47,28 @@ pub async fn signin_handler(
 
     let auth_url = provider.authorization_url(&state, &callback_url);
 
-    // Set CSRF state cookie
+    // Preserve callbackUrl in a separate cookie for the post-login redirect
+    let post_login_redirect = params
+        .get("callbackUrl")
+        .filter(|u| is_safe_callback_url(u))
+        .cloned();
     let csrf_cookie = csrf::csrf_state_cookie(&state, auth.is_dev);
 
-    Response::builder()
+    let mut builder = Response::builder()
         .status(302)
         .header("Location", auth_url)
-        .header("Set-Cookie", csrf_cookie)
-        .body(axum::body::Body::empty())
-        .unwrap_or_else(|_| {
-            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Error").into_response()
-        })
+        .header("Set-Cookie", csrf_cookie);
+
+    if let Some(ref redirect) = post_login_redirect {
+        builder = builder.header(
+            "Set-Cookie",
+            csrf::callback_url_cookie(redirect, auth.is_dev),
+        );
+    }
+
+    builder.body(axum::body::Body::empty()).unwrap_or_else(|_| {
+        (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Error").into_response()
+    })
 }
 
 /// GET /_rex/auth/callback/{provider}?code=xxx&state=yyy
@@ -144,8 +155,10 @@ pub async fn callback_handler(
 
     let callback_url = format!("{}/_rex/auth/callback/{}", auth.base_url, provider_id);
 
+    // Compute PKCE code_verifier if the provider uses PKCE
+    let verifier = provider.code_verifier(received_state);
     let tokens = match provider
-        .exchange_code(code, &callback_url, &auth.http_client)
+        .exchange_code(code, &callback_url, &auth.http_client, verifier.as_deref())
         .await
     {
         Ok(t) => t,
@@ -208,10 +221,11 @@ pub async fn callback_handler(
         auth.is_dev,
     );
     let clear_csrf = csrf::clear_csrf_cookie(auth.is_dev);
+    let clear_callback = csrf::clear_callback_url_cookie(auth.is_dev);
 
-    // Redirect to callback URL or home
-    let redirect_to = params
-        .get("callbackUrl")
+    // Redirect to callback URL (stored in cookie during signin) or home
+    let redirect_to = cookies
+        .get("__rex_callback_url")
         .filter(|u| is_safe_callback_url(u))
         .map(|s| s.as_str())
         .unwrap_or("/");
@@ -221,6 +235,7 @@ pub async fn callback_handler(
         .header("Location", redirect_to)
         .header("Set-Cookie", session_cookie)
         .header("Set-Cookie", clear_csrf)
+        .header("Set-Cookie", clear_callback)
         .body(axum::body::Body::empty())
         .unwrap_or_else(|_| {
             (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Error").into_response()

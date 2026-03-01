@@ -35,7 +35,7 @@ use std::sync::Arc;
 pub struct AuthServer {
     pub config: AuthConfig,
     pub providers: HashMap<String, Arc<dyn OAuthProvider>>,
-    pub session_key: [u8; 32],
+    pub(crate) session_key: [u8; 32],
     pub base_url: String,
     pub is_dev: bool,
     pub http_client: reqwest::Client,
@@ -75,16 +75,11 @@ impl AuthServer {
 
             // Register static clients
             for static_client in &config.mcp.clients.static_clients {
-                // Check if already registered
-                if fs.get_client(&static_client.client_id).is_err() {
-                    // Not found — we need to insert it manually
-                    // The FileStore generates IDs, but for static clients we need a specific ID
-                    // So we write directly
-                    tracing::debug!(
-                        "Static client {} already registered or will be added",
-                        static_client.client_id
-                    );
-                }
+                fs.register_static_client(
+                    static_client.client_id.clone(),
+                    static_client.client_name.clone(),
+                    static_client.redirect_uris.clone(),
+                )?;
             }
 
             (Some(km), Some(fs))

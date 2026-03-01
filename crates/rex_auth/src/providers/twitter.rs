@@ -1,3 +1,4 @@
+use super::{encode_scopes, url_encode};
 use crate::config::ProviderConfig;
 use crate::provider::{OAuthProvider, TokenSet};
 use crate::session::UserProfile;
@@ -6,10 +7,6 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use sha2::{Digest, Sha256};
 use std::future::Future;
 use std::pin::Pin;
-
-fn url_encode(s: &str) -> String {
-    url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
-}
 
 pub struct TwitterProvider {
     client_id: String,
@@ -54,7 +51,7 @@ impl OAuthProvider for TwitterProvider {
         // code_verifier seed for simplicity — the real PKCE verifier should be
         // stored server-side and matched during token exchange.
         let code_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(state.as_bytes()));
-        let scopes = self.scopes.join("%20");
+        let scopes = encode_scopes(&self.scopes);
         format!(
             "https://twitter.com/i/oauth2/authorize\
              ?client_id={}\
@@ -69,13 +66,20 @@ impl OAuthProvider for TwitterProvider {
         )
     }
 
+    fn code_verifier(&self, state: &str) -> Option<String> {
+        // Twitter PKCE: the challenge was SHA256(state), so the verifier is state itself.
+        Some(state.to_string())
+    }
+
     fn exchange_code<'a>(
         &'a self,
         code: &'a str,
         callback_url: &'a str,
         client: &'a reqwest::Client,
+        code_verifier: Option<&'a str>,
     ) -> Pin<Box<dyn Future<Output = Result<TokenSet, AuthError>> + Send + 'a>> {
         Box::pin(async move {
+            let verifier = code_verifier.unwrap_or_default();
             let resp: serde_json::Value = client
                 .post("https://api.twitter.com/2/oauth2/token")
                 .basic_auth(&self.client_id, Some(&self.client_secret))
@@ -83,7 +87,7 @@ impl OAuthProvider for TwitterProvider {
                     ("code", code),
                     ("grant_type", "authorization_code"),
                     ("redirect_uri", callback_url),
-                    ("code_verifier", "challenge"), // Must match code_challenge from auth URL
+                    ("code_verifier", verifier),
                 ])
                 .send()
                 .await?

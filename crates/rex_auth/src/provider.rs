@@ -33,12 +33,20 @@ pub trait OAuthProvider: Send + Sync {
     /// Build the authorization URL to redirect the user to.
     fn authorization_url(&self, state: &str, callback_url: &str) -> String;
 
+    /// Return the PKCE code verifier for this provider, if PKCE is used.
+    /// Called during the callback phase; `state` is the CSRF state value
+    /// that was passed to `authorization_url`.
+    fn code_verifier(&self, _state: &str) -> Option<String> {
+        None
+    }
+
     /// Exchange an authorization code for tokens.
     fn exchange_code<'a>(
         &'a self,
         code: &'a str,
         callback_url: &'a str,
         client: &'a reqwest::Client,
+        code_verifier: Option<&'a str>,
     ) -> Pin<Box<dyn Future<Output = Result<TokenSet, crate::AuthError>> + Send + 'a>>;
 
     /// Fetch the user's profile using the obtained tokens.
