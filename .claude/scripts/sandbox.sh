@@ -4,6 +4,8 @@
 set -e
 
 IMAGE="rex-sandbox"
+# Default sandbox name is <agent>-<workdir>
+SANDBOX_NAME="claude-$(basename "$PWD")"
 
 # Fetch GitHub PAT from 1Password (requires op CLI + auth on the host)
 if ! command -v op &>/dev/null; then
@@ -20,4 +22,9 @@ GITHUB_TOKEN="$(op read "op://claude/ClaudeLiminal-GitHub/pat" 2>/dev/null)" || 
 echo "$GITHUB_TOKEN" > .sandbox-github-token
 trap 'rm -f .sandbox-github-token' EXIT
 
-exec docker sandbox run -t "$IMAGE" claude .
+# Reconnect if sandbox exists, otherwise create with custom template
+if docker sandbox ls --format '{{.Name}}' 2>/dev/null | grep -qx "$SANDBOX_NAME"; then
+  exec docker sandbox run "$SANDBOX_NAME"
+else
+  exec docker sandbox run -t "$IMAGE" claude .
+fi
