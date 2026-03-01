@@ -1,68 +1,35 @@
 # Rex — Development Guide for Claude
 
-## Agent Workflow — Sandboxed Development
+## Git Identity
 
-All new agent work (features, bug fixes, refactors) MUST use this workflow. Do not skip steps.
-
-### Launching a Sandboxed Agent
-
-From the main session, use the launch script to create an isolated environment:
+At the start of every session, configure the bot identity for commits and pushes. The PAT is stored in 1Password and read via the `op` CLI:
 
 ```bash
-.claude/scripts/launch-sandbox.sh <branch-name> "<task description>"
+REX_PAT="$(op read 'op://claude/ClaudeLiminal-GitHub/pat')"
+git config --local credential.helper '!f() { echo "username=x-access-token"; echo "password='"$REX_PAT"'"; }; f'
 ```
 
-This single command:
-1. Creates a git worktree at `.claude/worktrees/<branch-name>` on a new branch
-2. Installs all dependencies (cargo fetch, npm install, lefthook)
-3. Writes a `.claude/TASK.md` with the task description and workflow instructions
-4. Launches a **Docker sandbox** (`docker sandbox run claude`) pointed at the worktree
+If `op` is not available or fails, warn the user and continue without bot identity. Do not commit or push until the identity is configured.
 
-**Port isolation**: Each Docker sandbox runs in its own microVM with a dedicated network namespace. Agents can bind to any port (3000, 8080, etc.) without conflicting with other agents or the host. This is the primary reason all agent work runs in sandboxes.
-
-### Inside the Sandbox
-
-When an agent starts inside a sandbox, it should:
-
-1. **Bootstrap** (first run only): Run `.claude/scripts/sandbox-init.sh` to install dev tools (Rust, Node.js, gh CLI). Tools persist across sandbox sessions for the same workspace.
-2. **Read the task**: Check `.claude/TASK.md` for the work item description
-3. **Implement**: Make changes on the worktree branch
-4. **Verify**: `cargo check` (zero warnings) + `cargo test` (all pass)
-5. **Commit**: Use [Conventional Commits](https://www.conventionalcommits.org/) — enforced by a `commit-msg` hook and required by release-please for changelog/version bumps:
-   - `feat: add widget support` — new feature (minor version bump)
-   - `fix(router): handle trailing slashes` — bug fix (patch bump)
-   - `feat!: redesign config format` — breaking change (major bump)
-   - Types: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`
-6. **Open a PR**:
-   ```bash
-   git push -u origin HEAD
-   gh pr create --title "feat: ..." --body "## Summary\n- ..."
-   ```
-
-### After the PR is Opened
-
-From the main session, spawn a lightweight review agent with minimal context:
+When committing, always use the bot author:
 
 ```bash
-claude -p "$(sed 's/{PR_NUMBER}/123/g' .claude/prompts/review.md)"
+git commit --author="claude-liminal <264858718+claude-liminal@users.noreply.github.com>"
 ```
 
-The review agent:
-- Fetches the PR diff via `gh pr diff`
-- Checks for correctness, best practices, performance, and safety
-- Posts a review via `gh pr review` (approve, request changes, or comment)
+When using `gh` CLI (PRs, issues), pass `GH_TOKEN`:
 
-### Why This Workflow
+```bash
+GH_TOKEN="$REX_PAT" gh pr create ...
+```
 
-| Concern | How it's solved |
-|---------|----------------|
-| Port conflicts | Each sandbox has its own network namespace |
-| Dependency pollution | Sandboxes have isolated filesystems |
-| Blast radius | Agents can't affect the host or other agents |
-| Code quality | Automatic PR review by a separate agent |
-| Traceability | Every change is a branch + PR |
+## Conventional Commits
 
----
+All commits must use [Conventional Commits](https://www.conventionalcommits.org/) — enforced by a `commit-msg` hook and required by release-please for changelog/version bumps:
+- `feat: add widget support` — new feature (minor version bump)
+- `fix(router): handle trailing slashes` — bug fix (patch bump)
+- `feat!: redesign config format` — breaking change (major bump)
+- Types: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`
 
 ## Quick Reference
 
