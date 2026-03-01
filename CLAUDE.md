@@ -11,9 +11,9 @@ docker build -f Dockerfile.sandbox -t rex-sandbox .
 .claude/scripts/sandbox.sh
 ```
 
-The wrapper fetches a GitHub PAT from 1Password (`op://claude/ClaudeLiminal-GitHub/pat`) and injects it into the sandbox so commits and PRs use the bot identity instead of your personal account.
+Each invocation creates its own git worktree + Docker sandbox, so multiple sessions run in parallel without conflicting. The wrapper fetches a GitHub PAT from 1Password (`op://claude/ClaudeLiminal-GitHub/pat`) so commits use the bot identity. On first boot, the entrypoint configures git/gh and fetches project dependencies.
 
-On first boot, the entrypoint automatically configures git/gh identity from the PAT and fetches project dependencies (`cargo fetch`, `npm install`). Subsequent sessions skip initialization.
+On exit, worktrees with no new commits are cleaned up automatically. Worktrees with commits are kept so you can review or merge them.
 
 ### Conventional Commits
 

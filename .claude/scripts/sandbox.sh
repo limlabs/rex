@@ -1,11 +1,12 @@
 #!/bin/bash
-# Launch a Claude Code session inside a Docker sandbox.
-# Fetches a GitHub PAT from 1Password so sandbox commits use the bot identity.
+# Launch a Claude Code session in its own worktree + Docker sandbox.
+# Each invocation gets an isolated copy of the repo with a bot GitHub identity.
 set -e
 
 IMAGE="rex-sandbox"
-# Default sandbox name is <agent>-<workdir>
-SANDBOX_NAME="claude-$(basename "$PWD")"
+ID="$(openssl rand -hex 4)"
+WORKTREE_DIR=".claude/worktrees/$ID"
+BRANCH="sandbox-$ID"
 
 # Fetch GitHub PAT from 1Password (requires op CLI + auth on the host)
 if ! command -v op &>/dev/null; then
@@ -18,13 +19,24 @@ GITHUB_TOKEN="$(op read "op://claude/ClaudeLiminal-GitHub/pat" 2>/dev/null)" || 
   exit 1
 }
 
-# Write token to a file the entrypoint reads (project dir is mounted in sandbox)
-echo "$GITHUB_TOKEN" > .sandbox-github-token
-trap 'rm -f .sandbox-github-token' EXIT
+# Create worktree for filesystem isolation
+mkdir -p .claude/worktrees
+git worktree add "$WORKTREE_DIR" -b "$BRANCH" HEAD
 
-# Reconnect if sandbox exists, otherwise create with custom template
-if docker sandbox ls --format '{{.Name}}' 2>/dev/null | grep -qx "$SANDBOX_NAME"; then
-  exec docker sandbox run "$SANDBOX_NAME"
-else
-  exec docker sandbox run -t "$IMAGE" claude .
-fi
+# Write token into the worktree for the entrypoint to read
+echo "$GITHUB_TOKEN" > "$WORKTREE_DIR/.sandbox-github-token"
+
+cleanup() {
+  rm -f "$WORKTREE_DIR/.sandbox-github-token"
+  # Remove worktree + branch if no new commits were made
+  COMMITS="$(git -C "$WORKTREE_DIR" rev-list HEAD --not main --count 2>/dev/null)" || COMMITS=0
+  if [ "$COMMITS" -eq 0 ]; then
+    git worktree remove "$WORKTREE_DIR" --force 2>/dev/null || true
+    git branch -D "$BRANCH" 2>/dev/null || true
+  else
+    echo "Worktree kept at $WORKTREE_DIR (branch $BRANCH, $COMMITS commits ahead)"
+  fi
+}
+trap cleanup EXIT
+
+docker sandbox run -t "$IMAGE" claude "$WORKTREE_DIR"
