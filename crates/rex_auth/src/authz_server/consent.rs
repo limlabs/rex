@@ -1,6 +1,7 @@
 /// Render the built-in consent page HTML.
 ///
 /// Self-contained HTML (no external dependencies), similar to `dev_error_overlay`.
+#[allow(clippy::too_many_arguments)]
 pub fn render_consent_page(
     client_name: &str,
     client_id: &str,

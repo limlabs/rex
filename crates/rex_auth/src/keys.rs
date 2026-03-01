@@ -213,7 +213,7 @@ fn generate_rsa_keypair() -> Result<StoredKeyPair, AuthError> {
             child
                 .stdin
                 .as_mut()
-                .unwrap()
+                .expect("stdin piped")
                 .write_all(private_key_pem.as_bytes())?;
             child.wait_with_output()
         })
@@ -241,7 +241,7 @@ fn generate_rsa_keypair() -> Result<StoredKeyPair, AuthError> {
 
     let created_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .expect("system clock before UNIX epoch")
         .as_secs();
 
     Ok(StoredKeyPair {
@@ -268,7 +268,7 @@ fn extract_rsa_components(private_key_pem: &str) -> Result<(String, String), Aut
             child
                 .stdin
                 .as_mut()
-                .unwrap()
+                .expect("stdin piped")
                 .write_all(private_key_pem.as_bytes())?;
             child.wait_with_output()
         })
@@ -387,6 +387,7 @@ fn to_jwk_public(key: &StoredKeyPair) -> JwkPublic {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

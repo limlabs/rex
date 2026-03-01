@@ -27,10 +27,7 @@ pub async fn token_handler(
     }
 }
 
-async fn handle_authorization_code(
-    auth: &AuthServer,
-    form: &HashMap<String, String>,
-) -> Response {
+async fn handle_authorization_code(auth: &AuthServer, form: &HashMap<String, String>) -> Response {
     let code = match form.get("code") {
         Some(c) => c,
         None => return token_error(400, "invalid_request", "Missing code"),
@@ -48,7 +45,13 @@ async fn handle_authorization_code(
 
     let code_verifier = match form.get("code_verifier") {
         Some(v) => v,
-        None => return token_error(400, "invalid_request", "Missing code_verifier (PKCE required)"),
+        None => {
+            return token_error(
+                400,
+                "invalid_request",
+                "Missing code_verifier (PKCE required)",
+            )
+        }
     };
 
     let store = match &auth.store {
@@ -59,7 +62,13 @@ async fn handle_authorization_code(
     // Consume the auth code (one-time use)
     let auth_code = match store.consume_auth_code(code) {
         Ok(Some(c)) => c,
-        Ok(None) => return token_error(400, "invalid_grant", "Invalid or expired authorization code"),
+        Ok(None) => {
+            return token_error(
+                400,
+                "invalid_grant",
+                "Invalid or expired authorization code",
+            )
+        }
         Err(e) => {
             tracing::error!("Store error consuming auth code: {e}");
             return token_error(500, "server_error", "Internal error");
@@ -91,10 +100,7 @@ async fn handle_authorization_code(
     issue_tokens(auth, store, &auth_code.subject, client_id, &auth_code.scope).await
 }
 
-async fn handle_refresh_token(
-    auth: &AuthServer,
-    form: &HashMap<String, String>,
-) -> Response {
+async fn handle_refresh_token(auth: &AuthServer, form: &HashMap<String, String>) -> Response {
     let refresh_token = match form.get("refresh_token") {
         Some(t) => t,
         None => return token_error(400, "invalid_request", "Missing refresh_token"),

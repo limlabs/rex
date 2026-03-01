@@ -144,7 +144,7 @@ fn resolve_import(from: &Path, specifier: &str, _root: &Path) -> Option<PathBuf>
 
     // If it already has an extension and exists, use it
     if candidate.exists() && candidate.is_file() {
-        return Some(candidate.canonicalize().ok()?);
+        return candidate.canonicalize().ok();
     }
 
     // Try standard extensions
@@ -152,7 +152,7 @@ fn resolve_import(from: &Path, specifier: &str, _root: &Path) -> Option<PathBuf>
     for ext in &extensions {
         let with_ext = candidate.with_extension(ext);
         if with_ext.exists() && with_ext.is_file() {
-            return Some(with_ext.canonicalize().ok()?);
+            return with_ext.canonicalize().ok();
         }
     }
 
@@ -161,7 +161,7 @@ fn resolve_import(from: &Path, specifier: &str, _root: &Path) -> Option<PathBuf>
         for ext in &extensions {
             let index = candidate.join(format!("index.{ext}"));
             if index.exists() && index.is_file() {
-                return Some(index.canonicalize().ok()?);
+                return index.canonicalize().ok();
             }
         }
     }
@@ -213,6 +213,7 @@ pub fn analyze_module_graph(entries: &[PathBuf], root: &Path) -> Result<ModuleGr
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use std::fs;

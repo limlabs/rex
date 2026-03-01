@@ -31,7 +31,7 @@ impl AccessTokenClaims {
     /// Scope is space-delimited per RFC 6749.
     pub fn require_scope(&self, required: &str) -> Result<(), AuthError> {
         let scopes: Vec<&str> = self.scope.split_whitespace().collect();
-        if scopes.iter().any(|s| *s == required) {
+        if scopes.contains(&required) {
             Ok(())
         } else {
             Err(AuthError::InsufficientScope {
@@ -45,7 +45,7 @@ impl AccessTokenClaims {
     pub fn is_expired(&self) -> bool {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("system clock before UNIX epoch")
             .as_secs();
         self.exp <= now
     }
@@ -109,6 +109,7 @@ pub fn validate_access_token(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

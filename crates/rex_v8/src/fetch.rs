@@ -203,11 +203,7 @@ async fn do_fetch(
         .map_err(|e| format!("fetch error: {e}"))?;
 
     let status = resp.status().as_u16();
-    let status_text = resp
-        .status()
-        .canonical_reason()
-        .unwrap_or("")
-        .to_string();
+    let status_text = resp.status().canonical_reason().unwrap_or("").to_string();
     let url = resp.url().to_string();
 
     let resp_headers: HashMap<String, String> = resp
@@ -270,8 +266,7 @@ macro_rules! resolve_fetch_promise {
         // headers object with get() method
         let headers_obj = v8::Object::new($scope);
         for (hk, hv) in &$result.headers {
-            if let (Some(k), Some(v)) = (v8::String::new($scope, hk), v8::String::new($scope, hv))
-            {
+            if let (Some(k), Some(v)) = (v8::String::new($scope, hk), v8::String::new($scope, hv)) {
                 headers_obj.set($scope, k.into(), v.into());
             }
         }
@@ -461,6 +456,7 @@ pub fn run_fetch_loop(isolate: &mut v8::OwnedIsolate, context: &v8::Global<v8::C
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

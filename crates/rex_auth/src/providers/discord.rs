@@ -106,10 +106,7 @@ impl OAuthProvider for DiscordProvider {
                     .and_then(|v| v.as_str())
                     .map(String::from),
                 expires_in: resp.get("expires_in").and_then(|v| v.as_u64()),
-                scope: resp
-                    .get("scope")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
+                scope: resp.get("scope").and_then(|v| v.as_str()).map(String::from),
             })
         })
     }
@@ -128,17 +125,12 @@ impl OAuthProvider for DiscordProvider {
                 .json()
                 .await?;
 
-            let id_str = user
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
+            let id_str = user.get("id").and_then(|v| v.as_str()).unwrap_or_default();
 
             let avatar = user
                 .get("avatar")
                 .and_then(|v| v.as_str())
-                .map(|avatar| {
-                    format!("https://cdn.discordapp.com/avatars/{id_str}/{avatar}.png")
-                });
+                .map(|avatar| format!("https://cdn.discordapp.com/avatars/{id_str}/{avatar}.png"));
 
             Ok(UserProfile {
                 id: format!("discord|{id_str}"),
@@ -146,10 +138,7 @@ impl OAuthProvider for DiscordProvider {
                     .get("username")
                     .and_then(|v| v.as_str())
                     .map(String::from),
-                email: user
-                    .get("email")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
+                email: user.get("email").and_then(|v| v.as_str()).map(String::from),
                 image: avatar,
             })
         })

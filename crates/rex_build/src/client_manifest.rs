@@ -61,6 +61,7 @@ pub fn client_reference_id(rel_path: &str, export_name: &str, build_id: &str) ->
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

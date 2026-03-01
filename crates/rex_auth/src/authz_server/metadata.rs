@@ -26,10 +26,7 @@ pub async fn metadata_handler(State(auth): State<Arc<AuthServer>>) -> impl IntoR
     (
         [
             (axum::http::header::CONTENT_TYPE, "application/json"),
-            (
-                axum::http::header::CACHE_CONTROL,
-                "public, max-age=3600",
-            ),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=3600"),
         ],
         serde_json::to_string(&metadata).unwrap_or_else(|_| "{}".to_string()),
     )

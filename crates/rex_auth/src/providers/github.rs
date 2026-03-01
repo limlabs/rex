@@ -26,9 +26,7 @@ impl GitHubProvider {
             .client_secret
             .clone()
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| {
-                AuthError::Config("GitHub provider requires clientSecret".into())
-            })?;
+            .ok_or_else(|| AuthError::Config("GitHub provider requires clientSecret".into()))?;
         Ok(Self {
             client_id,
             client_secret,
@@ -86,7 +84,10 @@ impl OAuthProvider for GitHubProvider {
                 .get("access_token")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| {
-                    let error = resp.get("error").and_then(|v| v.as_str()).unwrap_or("unknown");
+                    let error = resp
+                        .get("error")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
                     AuthError::OAuth(format!("GitHub token exchange failed: {error}"))
                 })?
                 .to_string();
@@ -103,10 +104,7 @@ impl OAuthProvider for GitHubProvider {
                     .and_then(|v| v.as_str())
                     .map(String::from),
                 expires_in: resp.get("expires_in").and_then(|v| v.as_u64()),
-                scope: resp
-                    .get("scope")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
+                scope: resp.get("scope").and_then(|v| v.as_str()).map(String::from),
             })
         })
     }

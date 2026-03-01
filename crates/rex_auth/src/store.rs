@@ -368,7 +368,7 @@ fn consent_key(subject: &str, client_id: &str) -> String {
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .expect("system clock before UNIX epoch")
         .as_secs()
 }
 
@@ -407,6 +407,7 @@ fn write_json_map<V: Serialize>(path: &Path, map: &HashMap<String, V>) -> Result
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

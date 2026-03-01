@@ -114,10 +114,7 @@ impl OAuthProvider for TwitterProvider {
                     .and_then(|v| v.as_str())
                     .map(String::from),
                 expires_in: resp.get("expires_in").and_then(|v| v.as_u64()),
-                scope: resp
-                    .get("scope")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
+                scope: resp.get("scope").and_then(|v| v.as_str()).map(String::from),
             })
         })
     }
@@ -140,17 +137,11 @@ impl OAuthProvider for TwitterProvider {
                 .get("data")
                 .ok_or_else(|| AuthError::OAuth("Twitter user response missing data".into()))?;
 
-            let id = data
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
+            let id = data.get("id").and_then(|v| v.as_str()).unwrap_or_default();
 
             Ok(UserProfile {
                 id: format!("twitter|{id}"),
-                name: data
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
+                name: data.get("name").and_then(|v| v.as_str()).map(String::from),
                 email: None, // Twitter v2 API does not expose email in users/me
                 image: data
                     .get("profile_image_url")

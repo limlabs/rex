@@ -49,8 +49,7 @@ impl HotState {
             "pages": manifest.pages,
         });
         if !manifest.app_routes.is_empty() {
-            json["app_routes"] = serde_json::to_value(&manifest.app_routes)
-                .unwrap_or_default();
+            json["app_routes"] = serde_json::to_value(&manifest.app_routes).unwrap_or_default();
         }
         serde_json::to_string(&json).expect("JSON serialization")
     }
@@ -650,12 +649,20 @@ async fn render_app_route(
                         String::new(),
                     )
                 } else {
-                    ("<h1>Internal Server Error</h1>".to_string(), String::new(), String::new())
+                    (
+                        "<h1>Internal Server Error</h1>".to_string(),
+                        String::new(),
+                        String::new(),
+                    )
                 }
             }
             Err(e) => {
                 error!("RSC pool error: {e}");
-                ("<h1>Internal Server Error</h1>".to_string(), String::new(), String::new())
+                (
+                    "<h1>Internal Server Error</h1>".to_string(),
+                    String::new(),
+                    String::new(),
+                )
             }
         };
 
@@ -686,7 +693,6 @@ async fn page_handler_inner(
     uri: &Uri,
     headers: &HeaderMap,
 ) -> Response {
-
     // Check app/ routes first (RSC)
     if let Some(ref app_trie) = hot.app_route_trie {
         if let Some(app_match) = app_trie.match_path(path) {
@@ -755,7 +761,10 @@ async fn page_handler_inner(
                 .collect();
 
             let cookies = cookies_from_headers(&header_map);
-            let session = state.auth.as_ref().and_then(|auth| auth.extract_session(&header_map));
+            let session = state
+                .auth
+                .as_ref()
+                .and_then(|auth| auth.extract_session(&header_map));
             let context = ServerSidePropsContext {
                 params,
                 query,
@@ -1000,7 +1009,10 @@ pub async fn data_handler(
                 .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
                 .collect();
             let cookies = cookies_from_headers(&header_map);
-            let session = state.auth.as_ref().and_then(|auth| auth.extract_session(&header_map));
+            let session = state
+                .auth
+                .as_ref()
+                .and_then(|auth| auth.extract_session(&header_map));
             let context = ServerSidePropsContext {
                 params,
                 query: HashMap::new(),

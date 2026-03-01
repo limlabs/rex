@@ -127,8 +127,7 @@ pub async fn authorize_get_handler(
                     .unwrap_or("/_rex/auth/signin");
                 let redirect = format!(
                     "{signin_url}?callbackUrl={}",
-                    url::form_urlencoded::byte_serialize(return_url.as_bytes())
-                        .collect::<String>()
+                    url::form_urlencoded::byte_serialize(return_url.as_bytes()).collect::<String>()
                 );
                 return Response::builder()
                     .status(302)
@@ -250,11 +249,7 @@ pub async fn authorize_post_handler(
     // Save consent decision
     let valid_scopes = crate::scopes::parse_scopes(&scope);
 
-    if let Err(e) = store.store_consent(
-        subject.clone(),
-        client_id.clone(),
-        valid_scopes.clone(),
-    ) {
+    if let Err(e) = store.store_consent(subject.clone(), client_id.clone(), valid_scopes.clone()) {
         tracing::error!("Failed to save consent: {e}");
     }
 
@@ -271,6 +266,7 @@ pub async fn authorize_post_handler(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn issue_auth_code(
     _auth: &AuthServer,
     store: &crate::store::FileStore,
@@ -322,8 +318,15 @@ fn validate_redirect_uri(uri: &str, registered: &[String]) -> bool {
             if let Some(prefix) = pattern.strip_suffix('/') {
                 // Match prefix + port + rest
                 if let Ok(parsed) = url::Url::parse(uri) {
-                    let no_port = format!("{}://{}:", parsed.scheme(), parsed.host_str().unwrap_or(""));
-                    if no_port == prefix.split_at(prefix.rfind(':').unwrap_or(0)).0.to_string() + ":" {
+                    let no_port =
+                        format!("{}://{}:", parsed.scheme(), parsed.host_str().unwrap_or(""));
+                    if no_port
+                        == prefix
+                            .split_at(prefix.rfind(':').unwrap_or(0))
+                            .0
+                            .to_string()
+                            + ":"
+                    {
                         return true;
                     }
                 }

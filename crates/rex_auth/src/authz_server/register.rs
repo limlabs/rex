@@ -25,12 +25,20 @@ pub async fn register_handler(
 ) -> Response {
     // Check if dynamic registration is allowed
     if !auth.config.mcp.clients.allow_dynamic {
-        return error_response(403, "registration_not_allowed", "Dynamic client registration is disabled");
+        return error_response(
+            403,
+            "registration_not_allowed",
+            "Dynamic client registration is disabled",
+        );
     }
 
     // Validate redirect URIs
     if req.redirect_uris.is_empty() {
-        return error_response(400, "invalid_redirect_uri", "At least one redirect_uri is required");
+        return error_response(
+            400,
+            "invalid_redirect_uri",
+            "At least one redirect_uri is required",
+        );
     }
 
     for uri in &req.redirect_uris {

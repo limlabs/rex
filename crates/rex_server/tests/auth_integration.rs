@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)]
 //! Integration tests for auth routes mounted through the RexServer router.
 //!
 //! These tests verify that auth routes are reachable when mounted via
@@ -7,9 +8,7 @@
 
 use axum::routing::{any, get};
 use axum::Router;
-use rex_auth::config::{
-    AuthConfig, ClientsConfig, McpAuthConfig, PagesConfig, SessionConfig,
-};
+use rex_auth::config::{AuthConfig, ClientsConfig, McpAuthConfig, PagesConfig, SessionConfig};
 use rex_auth::AuthServer;
 use serde_json::json;
 use std::sync::Arc;
@@ -142,11 +141,7 @@ async fn test_session_route_reachable() {
         .send()
         .await
         .unwrap();
-    assert_eq!(
-        resp.status(),
-        200,
-        "/_rex/auth/session must return 200"
-    );
+    assert_eq!(resp.status(), 200, "/_rex/auth/session must return 200");
     let body = resp.text().await.unwrap();
     assert_eq!(body, "{}"); // no session
 }
@@ -172,9 +167,7 @@ async fn test_signout_route_reachable() {
 async fn test_metadata_route_reachable() {
     let (url, client) = start_server().await;
     let resp = client
-        .get(format!(
-            "{url}/.well-known/oauth-authorization-server"
-        ))
+        .get(format!("{url}/.well-known/oauth-authorization-server"))
         .send()
         .await
         .unwrap();
@@ -199,11 +192,7 @@ async fn test_register_route_reachable() {
         .send()
         .await
         .unwrap();
-    assert_eq!(
-        resp.status(),
-        201,
-        "/_rex/auth/register must return 201"
-    );
+    assert_eq!(resp.status(), 201, "/_rex/auth/register must return 201");
 }
 
 #[tokio::test]
@@ -233,11 +222,7 @@ async fn test_revoke_route_reachable() {
         .send()
         .await
         .unwrap();
-    assert_eq!(
-        resp.status(),
-        200,
-        "/_rex/auth/revoke must return 200"
-    );
+    assert_eq!(resp.status(), 200, "/_rex/auth/revoke must return 200");
 }
 
 #[tokio::test]
@@ -248,11 +233,7 @@ async fn test_jwks_route_reachable() {
         .send()
         .await
         .unwrap();
-    assert_eq!(
-        resp.status(),
-        200,
-        "/_rex/auth/jwks must return 200"
-    );
+    assert_eq!(resp.status(), 200, "/_rex/auth/jwks must return 200");
 }
 
 #[tokio::test]

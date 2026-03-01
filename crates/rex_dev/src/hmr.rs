@@ -23,9 +23,7 @@ pub enum HmrMessage {
         file: Option<String>,
     },
     #[serde(rename = "tsc-error")]
-    TscError {
-        errors: Vec<TscDiagnostic>,
-    },
+    TscError { errors: Vec<TscDiagnostic> },
     #[serde(rename = "tsc-clear")]
     TscClear {},
 }

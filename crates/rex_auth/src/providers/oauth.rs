@@ -28,10 +28,7 @@ impl GenericOAuthProvider {
             .filter(|s| !s.is_empty())
             .ok_or_else(|| AuthError::Config("OAuth provider requires id".into()))?;
 
-        let display_name = config
-            .name
-            .clone()
-            .unwrap_or_else(|| provider_id.clone());
+        let display_name = config.name.clone().unwrap_or_else(|| provider_id.clone());
 
         Ok(Self {
             provider_id,
@@ -45,9 +42,7 @@ impl GenericOAuthProvider {
                 .client_secret
                 .clone()
                 .filter(|s| !s.is_empty())
-                .ok_or_else(|| {
-                    AuthError::Config("OAuth provider requires clientSecret".into())
-                })?,
+                .ok_or_else(|| AuthError::Config("OAuth provider requires clientSecret".into()))?,
             auth_url: config
                 .authorization_url
                 .clone()
@@ -142,10 +137,7 @@ impl OAuthProvider for GenericOAuthProvider {
                     .and_then(|v| v.as_str())
                     .map(String::from),
                 expires_in: resp.get("expires_in").and_then(|v| v.as_u64()),
-                scope: resp
-                    .get("scope")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
+                scope: resp.get("scope").and_then(|v| v.as_str()).map(String::from),
             })
         })
     }
@@ -156,12 +148,9 @@ impl OAuthProvider for GenericOAuthProvider {
         client: &'a reqwest::Client,
     ) -> Pin<Box<dyn Future<Output = Result<UserProfile, AuthError>> + Send + 'a>> {
         Box::pin(async move {
-            let userinfo_url = self
-                .userinfo_url
-                .as_deref()
-                .ok_or_else(|| {
-                    AuthError::OAuth("OAuth provider has no userinfoUrl configured".into())
-                })?;
+            let userinfo_url = self.userinfo_url.as_deref().ok_or_else(|| {
+                AuthError::OAuth("OAuth provider has no userinfoUrl configured".into())
+            })?;
 
             let user: serde_json::Value = client
                 .get(userinfo_url)
@@ -180,14 +169,8 @@ impl OAuthProvider for GenericOAuthProvider {
 
             Ok(UserProfile {
                 id: format!("{}|{sub}", self.provider_id),
-                name: user
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
-                email: user
-                    .get("email")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
+                name: user.get("name").and_then(|v| v.as_str()).map(String::from),
+                email: user.get("email").and_then(|v| v.as_str()).map(String::from),
                 image: user
                     .get("picture")
                     .or_else(|| user.get("avatar_url"))

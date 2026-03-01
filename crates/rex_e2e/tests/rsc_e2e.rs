@@ -83,9 +83,7 @@ mod rsc {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
-                .unwrap_or_else(|e| {
-                    panic!("Failed to start rex: {e}\nBinary: {}", bin.display())
-                });
+                .unwrap_or_else(|e| panic!("Failed to start rex: {e}\nBinary: {}", bin.display()));
 
             // Wait for server to be ready
             let deadline = Instant::now() + Duration::from_secs(30);
@@ -94,11 +92,8 @@ mod rsc {
                 if Instant::now() > deadline {
                     panic!("[rsc-e2e] Server failed to start within 30s on port {port}");
                 }
-                if TcpStream::connect_timeout(
-                    &addr.parse().unwrap(),
-                    Duration::from_millis(100),
-                )
-                .is_ok()
+                if TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(100))
+                    .is_ok()
                 {
                     break;
                 }
@@ -199,10 +194,7 @@ mod rsc {
         assert_eq!(resp.status(), 200);
 
         let body = resp.text().await.unwrap();
-        assert!(
-            body.contains("Dashboard"),
-            "Missing dashboard content"
-        );
+        assert!(body.contains("Dashboard"), "Missing dashboard content");
     }
 
     #[tokio::test]
@@ -213,10 +205,7 @@ mod rsc {
         assert_eq!(resp.status(), 200);
 
         let body = resp.text().await.unwrap();
-        assert!(
-            body.contains("Settings"),
-            "Missing settings content"
-        );
+        assert!(body.contains("Settings"), "Missing settings content");
     }
 
     #[tokio::test]
@@ -228,10 +217,7 @@ mod rsc {
         let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
 
         // Flight data should have an M: row for the client component
-        assert!(
-            body.contains("__REX_RSC_DATA__"),
-            "Missing flight data"
-        );
+        assert!(body.contains("__REX_RSC_DATA__"), "Missing flight data");
     }
 
     // -------------------------------------------------------
@@ -361,7 +347,10 @@ mod rsc {
             "Missing <head> tag"
         );
         assert!(body.contains("<body"), "Missing <body> tag");
-        assert!(body.contains("<div id=\"__rex\">"), "Missing __rex root div");
+        assert!(
+            body.contains("<div id=\"__rex\">"),
+            "Missing __rex root div"
+        );
     }
 
     #[tokio::test]
@@ -437,10 +426,7 @@ mod rsc {
                 );
 
                 let body = resp.text().await.unwrap();
-                assert!(
-                    !body.is_empty(),
-                    "Client chunk is empty: {chunk_url}"
-                );
+                assert!(!body.is_empty(), "Client chunk is empty: {chunk_url}");
             }
         }
     }
@@ -786,7 +772,9 @@ mod rsc {
         );
 
         // Critical ordering: head shell content before SSR body
-        let body_tag_pos = full_html.find("<body>").or_else(|| full_html.find("<body "))
+        let body_tag_pos = full_html
+            .find("<body>")
+            .or_else(|| full_html.find("<body "))
             .expect("Missing body tag");
         let rex_div_pos = full_html
             .find("<div id=\"__rex\">")

@@ -78,9 +78,11 @@ pub async fn handle_file_event(
             };
 
             // Build app route trie if app scan is present
-            let app_route_trie = scan.app_scan.as_ref().map(|app| {
-                RouteTrie::from_routes(&app.to_routes())
-            }).or_else(|| old_hot.app_route_trie.clone());
+            let app_route_trie = scan
+                .app_scan
+                .as_ref()
+                .map(|app| RouteTrie::from_routes(&app.to_routes()))
+                .or_else(|| old_hot.app_route_trie.clone());
 
             // Recompute document descriptor after reload
             let document_descriptor = if old_hot.has_custom_document {
@@ -158,9 +160,10 @@ pub async fn handle_file_event(
             };
 
             // Build app route trie if app scan is present
-            let app_route_trie = scan.app_scan.as_ref().map(|app| {
-                RouteTrie::from_routes(&app.to_routes())
-            });
+            let app_route_trie = scan
+                .app_scan
+                .as_ref()
+                .map(|app| RouteTrie::from_routes(&app.to_routes()));
 
             let has_custom_document = scan.document.is_some();
             let document_descriptor = if has_custom_document {

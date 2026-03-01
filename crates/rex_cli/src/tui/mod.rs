@@ -78,10 +78,7 @@ struct TuiApp {
 
 impl TuiApp {
     fn new(log_buffer: LogBuffer, startup_info: StartupInfo) -> Self {
-        let last_seen_msg = log_buffer
-            .last()
-            .map(|e| e.message)
-            .unwrap_or_default();
+        let last_seen_msg = log_buffer.last().map(|e| e.message).unwrap_or_default();
         Self {
             screen: Screen::Home,
             log_buffer,

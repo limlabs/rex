@@ -35,7 +35,5 @@ fn ok_response() -> Response {
         .header("Content-Type", "application/json")
         .header("Cache-Control", "no-store")
         .body(axum::body::Body::from("{}"))
-        .unwrap_or_else(|_| {
-            (axum::http::StatusCode::OK, "{}").into_response()
-        })
+        .unwrap_or_else(|_| (axum::http::StatusCode::OK, "{}").into_response())
 }

@@ -2,6 +2,7 @@
 //!
 //! Covers session tampering, CSRF attacks, PKCE bypass, JWT manipulation,
 //! auth code replay, and timing-safe comparisons.
+#![allow(clippy::unwrap_used)]
 
 use rex_auth::config::derive_key;
 use rex_auth::csrf;

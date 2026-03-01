@@ -105,10 +105,7 @@ impl AuthServer {
 
     /// Get the issuer URL (for JWT claims and metadata).
     pub fn issuer(&self) -> &str {
-        self.config
-            .issuer
-            .as_deref()
-            .unwrap_or(&self.base_url)
+        self.config.issuer.as_deref().unwrap_or(&self.base_url)
     }
 
     /// Build Axum routes for the auth endpoints.
@@ -119,22 +116,13 @@ impl AuthServer {
 
         let mut router = axum::Router::new()
             // OAuth client routes
-            .route(
-                "/_rex/auth/signin",
-                get(client_handlers::signin_handler),
-            )
+            .route("/_rex/auth/signin", get(client_handlers::signin_handler))
             .route(
                 "/_rex/auth/callback/{provider}",
                 get(client_handlers::callback_handler),
             )
-            .route(
-                "/_rex/auth/signout",
-                post(client_handlers::signout_handler),
-            )
-            .route(
-                "/_rex/auth/session",
-                get(client_handlers::session_handler),
-            );
+            .route("/_rex/auth/signout", post(client_handlers::signout_handler))
+            .route("/_rex/auth/session", get(client_handlers::session_handler));
 
         // OAuth 2.1 Authorization Server routes (when MCP enabled)
         if self.config.mcp.enabled {
@@ -148,10 +136,7 @@ impl AuthServer {
                     get(authz_server::authorize::authorize_get_handler)
                         .post(authz_server::authorize::authorize_post_handler),
                 )
-                .route(
-                    "/_rex/auth/token",
-                    post(authz_server::token::token_handler),
-                )
+                .route("/_rex/auth/token", post(authz_server::token::token_handler))
                 .route(
                     "/_rex/auth/register",
                     post(authz_server::register::register_handler),
@@ -160,20 +145,14 @@ impl AuthServer {
                     "/_rex/auth/revoke",
                     post(authz_server::revoke::revoke_handler),
                 )
-                .route(
-                    "/_rex/auth/jwks",
-                    get(authz_server::jwks::jwks_handler),
-                );
+                .route("/_rex/auth/jwks", get(authz_server::jwks::jwks_handler));
         }
 
         router
     }
 
     /// Extract session data from request headers (for GSSP context).
-    pub fn extract_session(
-        &self,
-        headers: &HashMap<String, String>,
-    ) -> Option<serde_json::Value> {
+    pub fn extract_session(&self, headers: &HashMap<String, String>) -> Option<serde_json::Value> {
         client_handlers::extract_session(
             headers,
             &self.session_key,

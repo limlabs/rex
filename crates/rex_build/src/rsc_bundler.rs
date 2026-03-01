@@ -89,15 +89,9 @@ pub async fn build_rsc_bundles(
     }
 
     // Build server RSC bundle
-    let server_bundle_path = build_rsc_server_bundle(
-        config,
-        app_scan,
-        &graph,
-        &server_dir,
-        &stub_aliases,
-        define,
-    )
-    .await?;
+    let server_bundle_path =
+        build_rsc_server_bundle(config, app_scan, &graph, &server_dir, &stub_aliases, define)
+            .await?;
 
     // Build client bundles for "use client" modules
     let client_chunks = build_rsc_client_bundles(
@@ -321,10 +315,7 @@ window.ReactDOM = ReactDOMClient;
     }];
 
     entries.extend(client_boundaries.iter().map(|m| {
-        let rel_path = m
-            .path
-            .strip_prefix(&config.project_root)
-            .unwrap_or(&m.path);
+        let rel_path = m.path.strip_prefix(&config.project_root).unwrap_or(&m.path);
         let name = sanitize_filename(&rel_path.to_string_lossy());
         rolldown::InputItem {
             name: Some(name),
@@ -412,17 +403,11 @@ window.ReactDOM = ReactDOMClient;
                             let module_name = sanitize_filename(&rel_path);
 
                             if module_name == name {
-                                let chunk_url =
-                                    format!("/_rex/static/rsc/{filename}");
+                                let chunk_url = format!("/_rex/static/rsc/{filename}");
 
                                 for export in &module.exports {
-                                    let ref_id =
-                                        client_reference_id(&rel_path, export, build_id);
-                                    client_manifest.add(
-                                        &ref_id,
-                                        chunk_url.clone(),
-                                        export.clone(),
-                                    );
+                                    let ref_id = client_reference_id(&rel_path, export, build_id);
+                                    client_manifest.add(&ref_id, chunk_url.clone(), export.clone());
                                 }
                             }
                         }
@@ -485,7 +470,10 @@ mod tests {
 
     #[test]
     fn sanitize_path() {
-        assert_eq!(sanitize_filename("components/Counter.tsx"), "components_Counter_tsx");
+        assert_eq!(
+            sanitize_filename("components/Counter.tsx"),
+            "components_Counter_tsx"
+        );
         assert_eq!(sanitize_filename("app/page.tsx"), "app_page_tsx");
     }
 }

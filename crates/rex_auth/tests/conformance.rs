@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)]
 //! RFC conformance tests for the rex_auth OAuth 2.1 Authorization Server.
 //!
 //! Validates compliance with:
@@ -8,9 +9,7 @@
 
 use axum::Router;
 use base64::Engine;
-use rex_auth::config::{
-    AuthConfig, ClientsConfig, McpAuthConfig, PagesConfig, SessionConfig,
-};
+use rex_auth::config::{AuthConfig, ClientsConfig, McpAuthConfig, PagesConfig, SessionConfig};
 use rex_auth::AuthServer;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -109,11 +108,7 @@ async fn register_client(base: &str, client: &reqwest::Client) -> String {
 }
 
 /// Complete the authorization flow (owner-mode auto-approve) and return (code, verifier).
-async fn get_auth_code(
-    base: &str,
-    client: &reqwest::Client,
-    client_id: &str,
-) -> (String, String) {
+async fn get_auth_code(base: &str, client: &reqwest::Client, client_id: &str) -> (String, String) {
     let verifier = generate_random_verifier();
     let challenge = compute_s256_challenge(&verifier);
 
@@ -129,9 +124,20 @@ async fn get_auth_code(
         .unwrap();
 
     // Owner mode: auto-approve → 302 redirect with code
-    assert_eq!(resp.status(), 302, "Expected redirect; got {}", resp.status());
+    assert_eq!(
+        resp.status(),
+        302,
+        "Expected redirect; got {}",
+        resp.status()
+    );
     let location = resp.headers().get("location").unwrap().to_str().unwrap();
-    let url = url::Url::parse(&format!("http://localhost:9999{}", location.strip_prefix("http://localhost:9999").unwrap_or(location))).unwrap();
+    let url = url::Url::parse(&format!(
+        "http://localhost:9999{}",
+        location
+            .strip_prefix("http://localhost:9999")
+            .unwrap_or(location)
+    ))
+    .unwrap();
     let code = url
         .query_pairs()
         .find(|(k, _)| k == "code")
@@ -270,9 +276,7 @@ async fn test_rfc8414_oauth21_requirements() {
     );
 
     // PKCE required — only S256
-    let challenge_methods = meta["code_challenge_methods_supported"]
-        .as_array()
-        .unwrap();
+    let challenge_methods = meta["code_challenge_methods_supported"].as_array().unwrap();
     assert!(
         challenge_methods.contains(&json!("S256")),
         "Must support S256 PKCE"
@@ -332,11 +336,7 @@ async fn test_rfc7591_registration_response_format() {
         .await
         .unwrap();
 
-    assert_eq!(
-        resp.status(),
-        201,
-        "Registration must return 201 Created"
-    );
+    assert_eq!(resp.status(), 201, "Registration must return 201 Created");
 
     let body: serde_json::Value = resp.json().await.unwrap();
 
@@ -455,7 +455,11 @@ async fn test_rfc7591_registration_disabled() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 403, "Dynamic registration should be rejected when disabled");
+    assert_eq!(
+        resp.status(),
+        403,
+        "Dynamic registration should be rejected when disabled"
+    );
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -673,10 +677,7 @@ async fn test_token_response_headers() {
     assert_eq!(resp.status(), 200);
 
     // Verify response headers per spec
-    assert_eq!(
-        resp.headers().get("cache-control").unwrap(),
-        "no-store"
-    );
+    assert_eq!(resp.headers().get("cache-control").unwrap(), "no-store");
     assert_eq!(resp.headers().get("pragma").unwrap(), "no-cache");
 }
 
@@ -840,7 +841,10 @@ async fn test_jwks_contains_valid_keys() {
         assert!(key["n"].is_string(), "modulus must be present");
         assert!(key["e"].is_string(), "exponent must be present");
         // Must NOT leak private key components
-        assert!(key.get("d").is_none(), "private exponent must not be in JWK");
+        assert!(
+            key.get("d").is_none(),
+            "private exponent must not be in JWK"
+        );
         assert!(key.get("p").is_none());
         assert!(key.get("q").is_none());
     }
@@ -906,7 +910,10 @@ async fn test_oauth21_full_flow_conformance() {
         .unwrap()
         .1
         .to_string();
-    assert_eq!(returned_state, "test-state-123", "State must be echoed back");
+    assert_eq!(
+        returned_state, "test-state-123",
+        "State must be echoed back"
+    );
 
     // 4. Token exchange
     let token_resp = client
@@ -922,7 +929,10 @@ async fn test_oauth21_full_flow_conformance() {
         .await
         .unwrap();
     assert_eq!(token_resp.status(), 200);
-    assert_eq!(token_resp.headers().get("cache-control").unwrap(), "no-store");
+    assert_eq!(
+        token_resp.headers().get("cache-control").unwrap(),
+        "no-store"
+    );
     assert_eq!(token_resp.headers().get("pragma").unwrap(), "no-cache");
 
     let tokens: serde_json::Value = token_resp.json().await.unwrap();

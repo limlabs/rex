@@ -221,6 +221,7 @@ fn parse_dynamic_segment(part: &str) -> Option<DynamicSegment> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use std::fs;

@@ -89,11 +89,9 @@ impl IntoResponse for AuthRejection {
                 "Invalid or expired token",
             )
                 .into_response(),
-            Self::NotConfigured => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Auth not configured",
-            )
-                .into_response(),
+            Self::NotConfigured => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "Auth not configured").into_response()
+            }
         }
     }
 }

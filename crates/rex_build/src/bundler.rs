@@ -179,12 +179,26 @@ globalThis.__rex_resolve_api = function() {
                     ".js".to_string(),
                 ]),
                 modules: Some(vec![
-                    config.project_root.join("node_modules").to_string_lossy().to_string(),
+                    config
+                        .project_root
+                        .join("node_modules")
+                        .to_string_lossy()
+                        .to_string(),
                     "node_modules".to_string(),
                 ]),
                 alias: Some(vec![
-                    ("rex/head".to_string(), vec![Some(runtime_dir.join("head.js").to_string_lossy().to_string())]),
-                    ("rex/link".to_string(), vec![Some(runtime_dir.join("link.js").to_string_lossy().to_string())]),
+                    (
+                        "rex/head".to_string(),
+                        vec![Some(
+                            runtime_dir.join("head.js").to_string_lossy().to_string(),
+                        )],
+                    ),
+                    (
+                        "rex/link".to_string(),
+                        vec![Some(
+                            runtime_dir.join("link.js").to_string_lossy().to_string(),
+                        )],
+                    ),
                 ]),
                 ..Default::default()
             }),
@@ -213,13 +227,8 @@ globalThis.__rex_resolve_api = function() {
 
     // Build RSC bundles if app/ scan is present
     if let Some(app_scan) = &scan.app_scan {
-        let rsc_result = crate::rsc_bundler::build_rsc_bundles(
-            config,
-            app_scan,
-            &build_id,
-            &define,
-        )
-        .await?;
+        let rsc_result =
+            crate::rsc_bundler::build_rsc_bundles(config, app_scan, &build_id, &define).await?;
 
         // Populate app_routes in manifest
         for route in &app_scan.routes {
@@ -237,17 +246,10 @@ globalThis.__rex_resolve_api = function() {
         }
 
         manifest.client_reference_manifest = Some(rsc_result.client_manifest);
-        manifest.rsc_server_bundle = Some(
-            rsc_result
-                .server_bundle_path
-                .to_string_lossy()
-                .to_string(),
-        );
+        manifest.rsc_server_bundle =
+            Some(rsc_result.server_bundle_path.to_string_lossy().to_string());
 
-        debug!(
-            app_routes = manifest.app_routes.len(),
-            "RSC bundles built"
-        );
+        debug!(app_routes = manifest.app_routes.len(), "RSC bundles built");
     }
 
     // Save manifest

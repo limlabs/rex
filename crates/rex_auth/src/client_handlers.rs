@@ -37,20 +37,13 @@ pub async fn signin_handler(
     // Validate callbackUrl — must be relative or same-origin
     if let Some(callback_url) = params.get("callbackUrl") {
         if !is_safe_callback_url(callback_url) {
-            return (
-                axum::http::StatusCode::BAD_REQUEST,
-                "Invalid callbackUrl",
-            )
-                .into_response();
+            return (axum::http::StatusCode::BAD_REQUEST, "Invalid callbackUrl").into_response();
         }
     }
 
     // Generate CSRF state
     let state = csrf::generate_state();
-    let callback_url = format!(
-        "{}/_rex/auth/callback/{}",
-        auth.base_url, provider_id
-    );
+    let callback_url = format!("{}/_rex/auth/callback/{}", auth.base_url, provider_id);
 
     let auth_url = provider.authorization_url(&state, &callback_url);
 
@@ -98,7 +91,10 @@ pub async fn callback_handler(
     let received_state = match params.get("state") {
         Some(s) => s,
         None => {
-            return (axum::http::StatusCode::BAD_REQUEST, "Missing state parameter")
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                "Missing state parameter",
+            )
                 .into_response();
         }
     };
@@ -112,13 +108,15 @@ pub async fn callback_handler(
     let expected_state = match cookies.get("__rex_auth_state") {
         Some(s) => s,
         None => {
-            return (axum::http::StatusCode::BAD_REQUEST, "Missing CSRF cookie")
-                .into_response();
+            return (axum::http::StatusCode::BAD_REQUEST, "Missing CSRF cookie").into_response();
         }
     };
 
     if !csrf::validate_state(received_state, expected_state) {
-        return (axum::http::StatusCode::BAD_REQUEST, "CSRF validation failed")
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            "CSRF validation failed",
+        )
             .into_response();
     }
 
@@ -148,10 +146,7 @@ pub async fn callback_handler(
         }
     };
 
-    let callback_url = format!(
-        "{}/_rex/auth/callback/{}",
-        auth.base_url, provider_id
-    );
+    let callback_url = format!("{}/_rex/auth/callback/{}", auth.base_url, provider_id);
 
     let tokens = match provider
         .exchange_code(code, &callback_url, &auth.http_client)
@@ -238,10 +233,7 @@ pub async fn callback_handler(
 
 /// POST /_rex/auth/signout
 pub async fn signout_handler(State(auth): State<Arc<AuthServer>>) -> Response {
-    let clear_cookie = session::clear_session_cookie(
-        &auth.config.session.cookie_name,
-        auth.is_dev,
-    );
+    let clear_cookie = session::clear_session_cookie(&auth.config.session.cookie_name, auth.is_dev);
 
     Response::builder()
         .status(302)

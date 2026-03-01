@@ -112,10 +112,7 @@ impl OAuthProvider for GoogleProvider {
                     .and_then(|v| v.as_str())
                     .map(String::from),
                 expires_in: resp.get("expires_in").and_then(|v| v.as_u64()),
-                scope: resp
-                    .get("scope")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
+                scope: resp.get("scope").and_then(|v| v.as_str()).map(String::from),
             })
         })
     }
@@ -143,10 +140,7 @@ impl OAuthProvider for GoogleProvider {
             Ok(UserProfile {
                 id,
                 name: user.get("name").and_then(|v| v.as_str()).map(String::from),
-                email: user
-                    .get("email")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
+                email: user.get("email").and_then(|v| v.as_str()).map(String::from),
                 image: user
                     .get("picture")
                     .and_then(|v| v.as_str())

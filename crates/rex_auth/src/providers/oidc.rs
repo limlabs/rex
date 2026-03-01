@@ -36,10 +36,7 @@ impl GenericOidcProvider {
             .filter(|s| !s.is_empty())
             .ok_or_else(|| AuthError::Config("OIDC provider requires id".into()))?;
 
-        let display_name = config
-            .name
-            .clone()
-            .unwrap_or_else(|| provider_id.clone());
+        let display_name = config.name.clone().unwrap_or_else(|| provider_id.clone());
 
         Ok(Self {
             provider_id,
@@ -79,20 +76,13 @@ impl GenericOidcProvider {
                     self.issuer.trim_end_matches('/')
                 );
 
-                let doc: serde_json::Value = client
-                    .get(&url)
-                    .send()
-                    .await?
-                    .json()
-                    .await?;
+                let doc: serde_json::Value = client.get(&url).send().await?.json().await?;
 
                 let authorization_endpoint = doc
                     .get("authorization_endpoint")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| {
-                        AuthError::Config(
-                            "OIDC discovery missing authorization_endpoint".into(),
-                        )
+                        AuthError::Config("OIDC discovery missing authorization_endpoint".into())
                     })?
                     .to_string();
 
@@ -133,9 +123,7 @@ impl OAuthProvider for GenericOidcProvider {
         // the URL using the issuer + /authorize path. Most OIDC providers follow
         // this convention. The discovered endpoint is used during exchange_code
         // and fetch_user_profile.
-        let base = self
-            .issuer
-            .trim_end_matches('/');
+        let base = self.issuer.trim_end_matches('/');
         let scopes = self.scopes.join("%20");
         format!(
             "{base}/authorize\
@@ -199,10 +187,7 @@ impl OAuthProvider for GenericOidcProvider {
                     .and_then(|v| v.as_str())
                     .map(String::from),
                 expires_in: resp.get("expires_in").and_then(|v| v.as_u64()),
-                scope: resp
-                    .get("scope")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
+                scope: resp.get("scope").and_then(|v| v.as_str()).map(String::from),
             })
         })
     }
@@ -218,9 +203,7 @@ impl OAuthProvider for GenericOidcProvider {
             let userinfo_url = discovery
                 .userinfo_endpoint
                 .as_deref()
-                .ok_or_else(|| {
-                    AuthError::OAuth("OIDC provider has no userinfo_endpoint".into())
-                })?;
+                .ok_or_else(|| AuthError::OAuth("OIDC provider has no userinfo_endpoint".into()))?;
 
             let user: serde_json::Value = client
                 .get(userinfo_url)
@@ -230,21 +213,12 @@ impl OAuthProvider for GenericOidcProvider {
                 .json()
                 .await?;
 
-            let sub = user
-                .get("sub")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
+            let sub = user.get("sub").and_then(|v| v.as_str()).unwrap_or_default();
 
             Ok(UserProfile {
                 id: format!("{}|{sub}", self.provider_id),
-                name: user
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
-                email: user
-                    .get("email")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
+                name: user.get("name").and_then(|v| v.as_str()).map(String::from),
+                email: user.get("email").and_then(|v| v.as_str()).map(String::from),
                 image: user
                     .get("picture")
                     .and_then(|v| v.as_str())

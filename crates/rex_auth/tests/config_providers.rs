@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)]
 //! Tests for configuration parsing, environment variable resolution,
 //! and provider construction.
 //!

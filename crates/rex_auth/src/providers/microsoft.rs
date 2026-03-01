@@ -22,9 +22,7 @@ impl MicrosoftProvider {
                 .client_id
                 .clone()
                 .filter(|s| !s.is_empty())
-                .ok_or_else(|| {
-                    AuthError::Config("Microsoft provider requires clientId".into())
-                })?,
+                .ok_or_else(|| AuthError::Config("Microsoft provider requires clientId".into()))?,
             client_secret: config
                 .client_secret
                 .clone()
@@ -115,10 +113,7 @@ impl OAuthProvider for MicrosoftProvider {
                     .and_then(|v| v.as_str())
                     .map(String::from),
                 expires_in: resp.get("expires_in").and_then(|v| v.as_u64()),
-                scope: resp
-                    .get("scope")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
+                scope: resp.get("scope").and_then(|v| v.as_str()).map(String::from),
             })
         })
     }
@@ -137,10 +132,7 @@ impl OAuthProvider for MicrosoftProvider {
                 .json()
                 .await?;
 
-            let id = user
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
+            let id = user.get("id").and_then(|v| v.as_str()).unwrap_or_default();
 
             // Microsoft Graph uses `mail` for primary email, falling back to
             // `userPrincipalName` which is often an email address.

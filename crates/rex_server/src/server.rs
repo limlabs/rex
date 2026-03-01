@@ -128,10 +128,7 @@ impl RexServer {
             // Image optimization endpoint
             .route("/_rex/image", get(handlers::image_handler))
             // RSC flight data endpoint (app/ router client navigation)
-            .route(
-                "/_rex/rsc/{build_id}/{*path}",
-                get(handlers::rsc_handler),
-            )
+            .route("/_rex/rsc/{build_id}/{*path}", get(handlers::rsc_handler))
             // Client-side router script
             .route("/_rex/router.js", get(router_js_handler))
             // RSC client runtime

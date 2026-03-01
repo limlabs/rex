@@ -32,7 +32,5 @@ pub async fn jwks_handler(State(auth): State<Arc<AuthServer>>) -> Response {
         .body(axum::body::Body::from(
             serde_json::to_string(&jwks).unwrap_or_else(|_| r#"{"keys":[]}"#.to_string()),
         ))
-        .unwrap_or_else(|_| {
-            (axum::http::StatusCode::OK, r#"{"keys":[]}"#).into_response()
-        })
+        .unwrap_or_else(|_| (axum::http::StatusCode::OK, r#"{"keys":[]}"#).into_response())
 }
