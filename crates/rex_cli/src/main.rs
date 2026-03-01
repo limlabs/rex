@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use rex_build::build_bundles;
 use rex_core::{ProjectConfig, RexConfig};
-use rex_router::scan_pages;
+use rex_router::scan_project;
 use std::path::PathBuf;
 use std::process::Command;
 use tracing::{debug, info};
@@ -270,6 +270,11 @@ async fn cmd_dev(
         if let Some(buf) = log_buffer {
             tui::run_tui(buf, startup_info).await?;
         }
+
+        // The TUI has exited — force-quit the process. Background tasks
+        // (file watcher, rebuild handler, HTTP server) have no shutdown
+        // signal and would block the tokio runtime's graceful shutdown.
+        std::process::exit(0);
     } else {
         eprintln!(
             "  {} {}",
@@ -302,7 +307,7 @@ async fn cmd_build(root: PathBuf) -> Result<()> {
     let start = std::time::Instant::now();
     debug!("Building for production...");
 
-    let scan = scan_pages(&config.pages_dir)?;
+    let scan = scan_project(&config.project_root, &config.pages_dir)?;
     debug!(routes = scan.routes.len(), "Routes scanned");
 
     let project_config = ProjectConfig::load(&config.project_root)?;
