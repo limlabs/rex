@@ -8,7 +8,10 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "rex/*": ["./node_modules/@limlabs/rex/src/*"]
+    }
   },
   "include": ["pages/**/*"]
 }

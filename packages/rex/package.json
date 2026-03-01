@@ -11,7 +11,10 @@
     },
     "./document": "./src/document.js",
     "./link": "./src/link.js",
-    "./router": "./src/router.js",
+    "./router": {
+      "types": "./src/router.d.ts",
+      "import": "./src/router.js"
+    },
     "./image": "./src/image.js"
   },
   "dependencies": {
