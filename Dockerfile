@@ -15,12 +15,11 @@ COPY crates/rex_dev/Cargo.toml crates/rex_dev/Cargo.toml
 COPY crates/rex_image/Cargo.toml crates/rex_image/Cargo.toml
 COPY crates/rex_e2e/Cargo.toml crates/rex_e2e/Cargo.toml
 COPY crates/rex_napi/Cargo.toml crates/rex_napi/Cargo.toml
-COPY crates/rex_auth/Cargo.toml crates/rex_auth/Cargo.toml
 
 # Create dummy src files so cargo fetch/build can resolve the workspace
 RUN for dir in crates/rex_cli crates/rex_core crates/rex_router crates/rex_build \
     crates/rex_v8 crates/rex_server crates/rex_dev crates/rex_image crates/rex_e2e \
-    crates/rex_napi crates/rex_auth; do \
+    crates/rex_napi; do \
     mkdir -p "$dir/src" && echo "" > "$dir/src/lib.rs"; \
     done && \
     mkdir -p crates/rex_cli/src && echo "fn main() {}" > crates/rex_cli/src/main.rs
