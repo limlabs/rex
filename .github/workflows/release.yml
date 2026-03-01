@@ -152,7 +152,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           cd packages/rex
-          npm version "$VERSION" --no-git-tag-version
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
 
       - name: Publish
         run: cd packages/rex && npm publish --access public
