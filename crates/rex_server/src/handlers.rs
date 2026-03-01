@@ -12,11 +12,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tracing::{debug, error, info};
 
-use crate::core::cookies_from_headers;
 use crate::document::{
     assemble_body_tail, assemble_document, assemble_head_shell, assemble_rsc_body_tail,
     assemble_rsc_head_shell, DocumentDescriptor, DocumentParams,
 };
+use rex_auth::cookies_from_headers;
 
 /// State that can change during dev-mode rebuilds.
 #[derive(Clone)]

@@ -1,4 +1,4 @@
-use crate::cookies::parse_cookies;
+use crate::cookies::cookies_from_header_map;
 use crate::csrf;
 use crate::session::{self, SessionData};
 use crate::AuthServer;
@@ -99,11 +99,7 @@ pub async fn callback_handler(
         }
     };
 
-    let cookie_header = headers
-        .get("cookie")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    let cookies = parse_cookies(cookie_header);
+    let cookies = cookies_from_header_map(&headers);
 
     let expected_state = match cookies.get("__rex_auth_state") {
         Some(s) => s,
@@ -250,11 +246,7 @@ pub async fn session_handler(
     State(auth): State<Arc<AuthServer>>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let cookie_header = headers
-        .get("cookie")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    let cookies = parse_cookies(cookie_header);
+    let cookies = cookies_from_header_map(&headers);
 
     let session = cookies
         .get(&auth.config.session.cookie_name)
@@ -286,8 +278,7 @@ pub fn extract_session(
     session_key: &[u8; 32],
     cookie_name: &str,
 ) -> Option<serde_json::Value> {
-    let cookie_header = headers.get("cookie").or_else(|| headers.get("Cookie"))?;
-    let cookies = parse_cookies(cookie_header);
+    let cookies = crate::cookies::cookies_from_headers(headers);
     let encrypted = cookies.get(cookie_name)?;
     let data = session::decrypt_session(encrypted, session_key)?;
     serde_json::to_value(&data).ok()
