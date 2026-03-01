@@ -311,6 +311,7 @@ impl Rex {
                 manifest_json,
                 document_descriptor,
                 app_route_trie,
+                has_mcp_tools: !scan.mcp_tools.is_empty(),
             })),
         });
 

@@ -108,6 +108,18 @@ fn default_redirect_status() -> u16 {
     307
 }
 
+// --- MCP tool types ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpToolRoute {
+    /// Tool name derived from filename stem (e.g., "search" from "search.ts")
+    pub name: String,
+    /// Absolute path to the source file
+    pub abs_path: PathBuf,
+    /// Path relative to the mcp/ directory
+    pub file_path: PathBuf,
+}
+
 // --- Middleware types ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

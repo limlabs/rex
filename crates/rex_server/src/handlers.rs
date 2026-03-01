@@ -39,6 +39,8 @@ pub struct HotState {
     pub middleware_matchers: Option<Vec<String>>,
     /// App route trie for app/ router (RSC). None if no app/ directory.
     pub app_route_trie: Option<RouteTrie>,
+    /// Whether mcp/ directory has tool files.
+    pub has_mcp_tools: bool,
 }
 
 impl HotState {
@@ -1429,6 +1431,7 @@ globalThis.__rex_resolve_gsp = function() {
                 has_middleware: false,
                 middleware_matchers: None,
                 app_route_trie: None,
+                has_mcp_tools: false,
             })),
         });
 
@@ -1700,6 +1703,7 @@ globalThis.__rex_resolve_gsp = function() {
                 has_middleware: false,
                 middleware_matchers: None,
                 app_route_trie: None,
+                has_mcp_tools: false,
             })),
         });
 
@@ -1914,6 +1918,7 @@ globalThis.__rex_resolve_gsp = function() {
                 has_middleware: true,
                 middleware_matchers: Some(matchers),
                 app_route_trie: None,
+                has_mcp_tools: false,
             })),
         });
 

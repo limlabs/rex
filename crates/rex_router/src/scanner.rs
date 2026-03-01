@@ -1,5 +1,5 @@
 use rex_core::app_route::AppScanResult;
-use rex_core::{DynamicSegment, PageType, Route};
+use rex_core::{DynamicSegment, McpToolRoute, PageType, Route};
 use std::path::Path;
 use tracing::debug;
 
@@ -16,6 +16,8 @@ pub struct ScanResult {
     pub middleware: Option<std::path::PathBuf>,
     /// App router scan result (if app/ directory exists)
     pub app_scan: Option<AppScanResult>,
+    /// MCP tool files found in the mcp/ directory
+    pub mcp_tools: Vec<McpToolRoute>,
 }
 
 /// Scan the pages/ directory and produce routes
@@ -54,6 +56,7 @@ pub fn scan_pages(pages_dir: &Path) -> anyhow::Result<ScanResult> {
         not_found,
         middleware: None,
         app_scan: None,
+        mcp_tools: Vec::new(),
     })
 }
 
@@ -66,6 +69,46 @@ pub fn find_middleware(project_root: &Path) -> Option<std::path::PathBuf> {
         }
     }
     None
+}
+
+/// Scan the mcp/ directory for tool handler files (flat, non-recursive).
+pub fn scan_mcp_tools(project_root: &Path) -> Vec<McpToolRoute> {
+    let mcp_dir = project_root.join("mcp");
+    if !mcp_dir.exists() || !mcp_dir.is_dir() {
+        return Vec::new();
+    }
+
+    let mut tools: Vec<McpToolRoute> = match std::fs::read_dir(&mcp_dir) {
+        Ok(entries) => entries
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let path = e.path();
+                path.is_file() && is_page_file(&path)
+            })
+            .map(|e| {
+                let abs_path = e.path();
+                let file_path = abs_path
+                    .strip_prefix(&mcp_dir)
+                    .expect("mcp tool path must be under mcp_dir")
+                    .to_path_buf();
+                let name = file_path
+                    .file_stem()
+                    .expect("mcp tool file must have a stem")
+                    .to_string_lossy()
+                    .to_string();
+                debug!(name = %name, path = %abs_path.display(), "scanned mcp tool");
+                McpToolRoute {
+                    name,
+                    abs_path,
+                    file_path,
+                }
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+
+    tools.sort_by(|a, b| a.name.cmp(&b.name));
+    tools
 }
 
 /// Scan pages and detect middleware. Convenience wrapper for callers that have the project root.
@@ -85,6 +128,7 @@ pub fn scan_project(project_root: &Path, pages_dir: &Path) -> anyhow::Result<Sca
             not_found: None,
             middleware: None,
             app_scan: None,
+            mcp_tools: Vec::new(),
         }
     };
     scan.middleware = find_middleware(project_root);
@@ -96,6 +140,7 @@ pub fn scan_project(project_root: &Path, pages_dir: &Path) -> anyhow::Result<Sca
         scan.app_scan = Some(app_scan);
     }
 
+    scan.mcp_tools = scan_mcp_tools(project_root);
     Ok(scan)
 }
 
@@ -325,6 +370,48 @@ mod tests {
         let _ = std::fs::create_dir_all(&tmp);
         let result = find_middleware(&tmp);
         assert!(result.is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_scan_mcp_tools_discovery() {
+        let tmp = std::env::temp_dir().join("rex_test_mcp_scan");
+        let mcp_dir = tmp.join("mcp");
+        let _ = std::fs::create_dir_all(&mcp_dir);
+        std::fs::write(mcp_dir.join("search.ts"), "export default function() {}").unwrap();
+        std::fs::write(mcp_dir.join("weather.ts"), "export default function() {}").unwrap();
+        // Non-tool files should be ignored
+        std::fs::write(mcp_dir.join("README.md"), "# MCP Tools").unwrap();
+
+        let tools = scan_mcp_tools(&tmp);
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].name, "search");
+        assert_eq!(tools[1].name, "weather");
+        assert!(tools[0].abs_path.ends_with("search.ts"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_scan_mcp_tools_empty_dir() {
+        let tmp = std::env::temp_dir().join("rex_test_mcp_empty");
+        let mcp_dir = tmp.join("mcp");
+        let _ = std::fs::create_dir_all(&mcp_dir);
+
+        let tools = scan_mcp_tools(&tmp);
+        assert!(tools.is_empty());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_scan_mcp_tools_no_dir() {
+        let tmp = std::env::temp_dir().join("rex_test_mcp_nodir");
+        let _ = std::fs::create_dir_all(&tmp);
+
+        let tools = scan_mcp_tools(&tmp);
+        assert!(tools.is_empty());
+
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

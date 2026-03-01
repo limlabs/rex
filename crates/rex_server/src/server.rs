@@ -1,7 +1,7 @@
 use crate::handlers::{self, AppState, HotState};
 use anyhow::Result;
 use axum::handler::Handler;
-use axum::routing::{any, get};
+use axum::routing::{any, get, post};
 use axum::Router;
 use rex_build::AssetManifest;
 use rex_core::ProjectConfig;
@@ -33,6 +33,7 @@ pub struct ServerConfig {
     pub middleware_matchers: Option<Vec<String>>,
     /// App route trie for RSC app/ routes. None if no app/ directory.
     pub app_route_trie: Option<RouteTrie>,
+    pub has_mcp_tools: bool,
 }
 
 pub struct RexServer {
@@ -81,6 +82,7 @@ impl RexServer {
                 manifest_json,
                 document_descriptor,
                 app_route_trie: config.app_route_trie,
+                has_mcp_tools: config.has_mcp_tools,
             })),
         });
 
@@ -129,6 +131,8 @@ impl RexServer {
             .route("/_rex/image", get(handlers::image_handler))
             // RSC flight data endpoint (app/ router client navigation)
             .route("/_rex/rsc/{build_id}/{*path}", get(handlers::rsc_handler))
+            // MCP endpoint (JSON-RPC 2.0 over POST)
+            .route("/mcp", post(crate::mcp::mcp_handler))
             // Client-side router script
             .route("/_rex/router.js", get(router_js_handler))
             // RSC client runtime

@@ -6,7 +6,7 @@ pub mod route;
 pub use config::RexConfig;
 pub use error::RexError;
 pub use route::{
-    BuildConfig, DataStrategy, DevConfig, DynamicSegment, HeaderEntry, HeaderRule,
+    BuildConfig, DataStrategy, DevConfig, DynamicSegment, HeaderEntry, HeaderRule, McpToolRoute,
     MiddlewareAction, MiddlewareResult, PageType, ProjectConfig, RedirectConfig, RedirectRule,
     RewriteRule, Route, RouteMatch, ServerSidePropsContext, ServerSidePropsResult,
 };

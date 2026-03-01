@@ -34,6 +34,8 @@ pub struct SsrIsolate {
     rsc_flight_fn: Option<v8::Global<v8::Function>>,
     /// RSC two-pass renderer: flight + HTML (app/ routes only)
     rsc_to_html_fn: Option<v8::Global<v8::Function>>,
+    mcp_call_fn: Option<v8::Global<v8::Function>>,
+    mcp_list_fn: Option<v8::Global<v8::Function>>,
     /// Last successfully loaded bundle, used to restore state on failed reload
     last_bundle: String,
 }
@@ -148,6 +150,8 @@ impl SsrIsolate {
             middleware_fn,
             rsc_flight_fn,
             rsc_to_html_fn,
+            mcp_call_fn,
+            mcp_list_fn,
         ) = {
             v8::scope!(scope, &mut isolate);
 
@@ -235,6 +239,10 @@ impl SsrIsolate {
             let rsc_flight_fn = v8_get_optional_fn!(scope, global, "__rex_render_flight");
             let rsc_to_html_fn = v8_get_optional_fn!(scope, global, "__rex_render_rsc_to_html");
 
+            // MCP tools are optional — only present when mcp/ directory has tool files
+            let mcp_call_fn = v8_get_optional_fn!(scope, global, "__rex_call_mcp_tool");
+            let mcp_list_fn = v8_get_optional_fn!(scope, global, "__rex_list_mcp_tools");
+
             (
                 v8::Global::new(scope, context),
                 v8::Global::new(scope, render_fn),
@@ -245,6 +253,8 @@ impl SsrIsolate {
                 middleware_fn,
                 rsc_flight_fn,
                 rsc_to_html_fn,
+                mcp_call_fn,
+                mcp_list_fn,
             )
         };
 
@@ -259,6 +269,8 @@ impl SsrIsolate {
             middleware_fn,
             rsc_flight_fn,
             rsc_to_html_fn,
+            mcp_call_fn,
+            mcp_list_fn,
             last_bundle: server_bundle_js.to_string(),
         })
     }
@@ -577,6 +589,61 @@ impl SsrIsolate {
         Ok(())
     }
 
+    /// List registered MCP tools. Returns JSON array of {name, description, parameters}.
+    /// Returns Ok(None) if no MCP tools are loaded.
+    pub fn list_mcp_tools(&mut self) -> Result<Option<String>> {
+        let list_fn = match &self.mcp_list_fn {
+            Some(f) => f,
+            None => return Ok(None),
+        };
+
+        v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+        let func = v8::Local::new(scope, list_fn);
+        let undef = v8::undefined(scope);
+
+        let result = v8_call!(scope, func, undef.into(), &[])
+            .map_err(|e| anyhow::anyhow!("MCP list error: {e}"))?;
+
+        Ok(Some(result.to_rust_string_lossy(scope)))
+    }
+
+    /// Call an MCP tool by name with JSON parameters. Returns JSON result.
+    /// Handles async tool handlers by pumping V8's microtask queue.
+    pub fn call_mcp_tool(&mut self, name: &str, params_json: &str) -> Result<String> {
+        let call_fn = self
+            .mcp_call_fn
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("MCP tools not loaded"))?;
+
+        let result_str = {
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+            let func = v8::Local::new(scope, call_fn);
+            let undef = v8::undefined(scope);
+            let arg0 = v8::String::new(scope, name)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+            let arg1 = v8::String::new(scope, params_json)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+
+            let result = v8_call!(scope, func, undef.into(), &[arg0.into(), arg1.into()])
+                .map_err(|e| anyhow::anyhow!("MCP tool error: {e}"))?;
+
+            result.to_rust_string_lossy(scope)
+        };
+
+        if result_str == "__REX_MCP_ASYNC__" {
+            self.isolate.perform_microtask_checkpoint();
+
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+            let resolve_result = v8_eval!(scope, "globalThis.__rex_resolve_mcp()", "<mcp-resolve>")
+                .map_err(|e| anyhow::anyhow!("MCP tool error: {e}"))?;
+            Ok(resolve_result.to_rust_string_lossy(scope))
+        } else {
+            Ok(result_str)
+        }
+    }
+
     /// Reload the server bundle (for dev mode hot reload)
     pub fn reload(&mut self, server_bundle_js: &str) -> Result<()> {
         v8::scope_with_context!(scope, &mut self.isolate, &self.context);
@@ -615,6 +682,10 @@ impl SsrIsolate {
         // Re-lookup RSC functions (may be added/removed on reload)
         self.rsc_flight_fn = v8_get_optional_fn!(scope, global, "__rex_render_flight");
         self.rsc_to_html_fn = v8_get_optional_fn!(scope, global, "__rex_render_rsc_to_html");
+
+        // Re-lookup MCP tools (may be added/removed on reload)
+        self.mcp_call_fn = v8_get_optional_fn!(scope, global, "__rex_call_mcp_tool");
+        self.mcp_list_fn = v8_get_optional_fn!(scope, global, "__rex_list_mcp_tools");
 
         self.last_bundle = server_bundle_js.to_string();
         debug!("SSR isolate reloaded");
@@ -1330,5 +1401,134 @@ globalThis.__rex_resolve_gsp = function() {
         assert_eq!(json["action"], "redirect");
         assert_eq!(json["url"], "/login");
         assert_eq!(json["status"], 302);
+    }
+
+    #[test]
+    fn test_list_mcp_tools_none() {
+        let mut iso = make_isolate(&[("index", "function() { return 'hi'; }", None)]);
+        // No MCP tools registered, should return None
+        let result = iso.list_mcp_tools().unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_list_mcp_tools() {
+        crate::init_v8();
+        let mut bundle = format!(
+            "{}\n{}",
+            MOCK_REACT_RUNTIME,
+            make_server_bundle(&[("index", "function() { return 'hi'; }", None)])
+        );
+        bundle.push_str(
+            r#"
+            globalThis.__rex_mcp_tools = {
+                'search': {
+                    description: 'Search items',
+                    parameters: { type: 'object', properties: { query: { type: 'string' } } },
+                    default: function(params) { return { results: [] }; }
+                }
+            };
+            globalThis.__rex_list_mcp_tools = function() {
+                var tools = globalThis.__rex_mcp_tools;
+                var result = [];
+                var names = Object.keys(tools);
+                for (var i = 0; i < names.length; i++) {
+                    var name = names[i];
+                    var mod = tools[name];
+                    result.push({ name: name, description: mod.description || '', parameters: mod.parameters || {} });
+                }
+                return JSON.stringify(result);
+            };
+        "#,
+        );
+        let mut iso = SsrIsolate::new(&bundle).unwrap();
+        let result = iso.list_mcp_tools().unwrap();
+        assert!(result.is_some());
+        let tools: Vec<serde_json::Value> = serde_json::from_str(&result.unwrap()).unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], "search");
+        assert_eq!(tools[0]["description"], "Search items");
+    }
+
+    #[test]
+    fn test_call_mcp_tool_sync() {
+        crate::init_v8();
+        let mut bundle = format!(
+            "{}\n{}",
+            MOCK_REACT_RUNTIME,
+            make_server_bundle(&[("index", "function() { return 'hi'; }", None)])
+        );
+        bundle.push_str(
+            r#"
+            globalThis.__rex_mcp_tools = {
+                'echo': {
+                    description: 'Echo input',
+                    parameters: { type: 'object', properties: { msg: { type: 'string' } } },
+                    default: function(params) { return { echo: params.msg }; }
+                }
+            };
+            globalThis.__rex_call_mcp_tool = function(name, paramsJson) {
+                var tools = globalThis.__rex_mcp_tools;
+                var mod = tools[name];
+                if (!mod) throw new Error('MCP tool not found: ' + name);
+                var params = JSON.parse(paramsJson);
+                var result = mod.default(params);
+                return JSON.stringify(result);
+            };
+        "#,
+        );
+        let mut iso = SsrIsolate::new(&bundle).unwrap();
+        let result = iso.call_mcp_tool("echo", r#"{"msg":"hello"}"#).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["echo"], "hello");
+    }
+
+    #[test]
+    fn test_call_mcp_tool_async() {
+        crate::init_v8();
+        let mut bundle = format!(
+            "{}\n{}",
+            MOCK_REACT_RUNTIME,
+            make_server_bundle(&[("index", "function() { return 'hi'; }", None)])
+        );
+        bundle.push_str(
+            r#"
+            globalThis.__rex_mcp_tools = {
+                'async_tool': {
+                    description: 'Async tool',
+                    parameters: {},
+                    default: function(params) { return Promise.resolve({ async: true }); }
+                }
+            };
+            globalThis.__rex_mcp_resolved = null;
+            globalThis.__rex_mcp_rejected = null;
+            globalThis.__rex_call_mcp_tool = function(name, paramsJson) {
+                var tools = globalThis.__rex_mcp_tools;
+                var mod = tools[name];
+                if (!mod) throw new Error('MCP tool not found: ' + name);
+                var params = JSON.parse(paramsJson);
+                var result = mod.default(params);
+                if (result && typeof result.then === 'function') {
+                    globalThis.__rex_mcp_resolved = null;
+                    globalThis.__rex_mcp_rejected = null;
+                    result.then(
+                        function(v) { globalThis.__rex_mcp_resolved = v; },
+                        function(e) { globalThis.__rex_mcp_rejected = e; }
+                    );
+                    return '__REX_MCP_ASYNC__';
+                }
+                return JSON.stringify(result);
+            };
+            globalThis.__rex_resolve_mcp = function() {
+                if (globalThis.__rex_mcp_rejected) throw globalThis.__rex_mcp_rejected;
+                if (globalThis.__rex_mcp_resolved !== null) return JSON.stringify(globalThis.__rex_mcp_resolved);
+                throw new Error('MCP tool promise did not resolve');
+            };
+        "#,
+        );
+        let mut iso = SsrIsolate::new(&bundle).unwrap();
+        let result = iso.call_mcp_tool("async_tool", "{}").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["async"], true);
     }
 }
