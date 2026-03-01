@@ -19,7 +19,7 @@
       var msg;
       try {
         msg = JSON.parse(event.data);
-      } catch (e) {
+      } catch {
         return;
       }
 
