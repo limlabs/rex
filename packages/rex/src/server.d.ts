@@ -1,3 +1,39 @@
+export interface RexApiRequest {
+  /** HTTP method (e.g. "GET", "POST"). */
+  method: string;
+  /** The request URL path. */
+  url: string;
+  /** Request headers as a plain object. */
+  headers: Record<string, string>;
+  /** Parsed query parameters. */
+  query: Record<string, string>;
+  /** Request body (parsed JSON or raw string). */
+  body: unknown;
+  /** Request cookies as a plain object. */
+  cookies: Record<string, string>;
+}
+
+export interface RexApiResponse<T = unknown> {
+  /** Set the HTTP status code. */
+  status(code: number): RexApiResponse<T>;
+  /** Set a response header. */
+  setHeader(name: string, value: string): RexApiResponse<T>;
+  /** Send a JSON response. */
+  json(data: T): RexApiResponse<T>;
+  /** Send a string or object response. */
+  send(body: string | T): RexApiResponse<T>;
+  /** End the response. */
+  end(body?: string): RexApiResponse<T>;
+  /** Redirect to a URL, optionally with a status code. */
+  redirect(url: string): RexApiResponse<T>;
+  redirect(status: number, url: string): RexApiResponse<T>;
+}
+
+/** @deprecated Use `RexApiRequest` instead. */
+export type NextApiRequest = RexApiRequest;
+/** @deprecated Use `RexApiResponse` instead. */
+export type NextApiResponse<T = unknown> = RexApiResponse<T>;
+
 export interface RexOptions {
   /** Path to the project root directory (containing pages/). */
   root: string;

@@ -15,7 +15,11 @@
       "types": "./src/router.d.ts",
       "import": "./src/router.js"
     },
-    "./image": "./src/image.js"
+    "./image": "./src/image.js",
+    "./middleware": {
+      "types": "./src/middleware.d.ts",
+      "import": "../../runtime/server/middleware.js"
+    }
   },
   "dependencies": {
     "oxlint": "^1.0.0"
