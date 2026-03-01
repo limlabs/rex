@@ -1,10 +1,17 @@
 #!/bin/bash
 # Initialize dev environment inside a Docker sandbox.
-# Run this once when a sandbox is first created — installed tools persist
-# across sandbox sessions for the same workspace.
+# Runs automatically on first session — skips if already initialized.
+# Installed tools persist across sandbox sessions for the same workspace.
 #
 # Installs: Rust toolchain, Node.js 22, gh CLI, project dependencies
 set -e
+
+MARKER="$HOME/.sandbox-initialized"
+
+if [ -f "$MARKER" ]; then
+  echo "==> Sandbox already initialized, skipping."
+  exit 0
+fi
 
 echo "==> Initializing sandbox dev environment..."
 
@@ -56,3 +63,6 @@ echo "==> Sandbox dev environment ready!"
 echo "    cargo: $(cargo --version)"
 echo "    node:  $(node --version)"
 echo "    gh:    $(gh --version | head -1)"
+
+# Mark as initialized so future sessions skip this
+touch "$MARKER"

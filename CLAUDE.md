@@ -4,7 +4,7 @@
 
 This project runs inside a [Docker sandbox](https://docs.docker.com/ai/sandboxes/) — an isolated microVM with its own filesystem, network, and Docker daemon. The project directory is mounted at the same absolute path, so file paths work identically inside and outside the sandbox.
 
-**Bootstrap** (first run only): Run `.claude/scripts/sandbox-init.sh` to install dev tools (Rust, Node.js, gh CLI). Installed tools persist across sessions for the same sandbox.
+**On every session start**, run `.claude/scripts/sandbox-init.sh`. It is idempotent — first run installs dev tools (Rust, Node.js, gh CLI), subsequent runs exit immediately.
 
 ### Conventional Commits
 
