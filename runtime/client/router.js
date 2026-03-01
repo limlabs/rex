@@ -51,7 +51,7 @@
   function matchRoute(pathname) {
     if (pages[pathname]) return { pattern: pathname, params: {} };
     for (var pattern in pages) {
-      if (pattern.indexOf(':') === -1) continue;
+      if (pattern.indexOf(':') === -1 && pattern.indexOf('*') === -1) continue;
       var params = matchDynamic(pattern, pathname);
       if (params) return { pattern: pattern, params: params };
     }
@@ -61,15 +61,21 @@
   function matchDynamic(pattern, pathname) {
     var pp = pattern.split('/');
     var up = pathname.split('/');
-    if (pp.length !== up.length) return null;
     var params = {};
     for (var i = 0; i < pp.length; i++) {
+      if (pp[i][0] === '*') {
+        // Catch-all: consume remaining segments
+        params[pp[i].slice(1)] = up.slice(i).map(decodeURIComponent);
+        return params;
+      }
+      if (i >= up.length) return null;
       if (pp[i][0] === ':') {
         params[pp[i].slice(1)] = decodeURIComponent(up[i]);
       } else if (pp[i] !== up[i]) {
         return null;
       }
     }
+    if (pp.length !== up.length) return null;
     return params;
   }
 
@@ -77,7 +83,7 @@
   function matchAppRoute(pathname) {
     if (appRoutes[pathname]) return { pattern: pathname, params: {} };
     for (var pattern in appRoutes) {
-      if (pattern.indexOf(':') === -1) continue;
+      if (pattern.indexOf(':') === -1 && pattern.indexOf('*') === -1) continue;
       var params = matchDynamic(pattern, pathname);
       if (params) return { pattern: pattern, params: params };
     }

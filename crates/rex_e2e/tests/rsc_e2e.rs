@@ -507,6 +507,39 @@ mod rsc {
         );
     }
 
+    // -------------------------------------------------------
+    // Mixed pages/ + app/ coexistence tests
+    // -------------------------------------------------------
+
+    #[tokio::test]
+    #[ignore]
+    async fn rsc_mixed_pages_api_route_works() {
+        // The app-router fixture has both app/ and pages/ directories.
+        // pages/api/health.ts should be handled by the pages router while
+        // app/ routes are handled by the RSC router.
+        let url = format!("{}/api/health", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 200, "Pages API route should return 200");
+
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["ok"], true);
+        assert_eq!(body["router"], "pages");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn rsc_mixed_app_routes_still_work() {
+        // Verify app/ routes still work alongside pages/ routes
+        let url = format!("{}/about", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 200, "App route /about should return 200");
+        let body = resp.text().await.unwrap();
+        assert!(
+            body.contains("__REX_RSC_DATA__"),
+            "App route should have RSC flight data"
+        );
+    }
+
     #[tokio::test]
     #[ignore]
     async fn rsc_module_map_references_valid_chunks() {

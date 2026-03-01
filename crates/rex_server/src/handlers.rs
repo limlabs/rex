@@ -12,31 +12,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tracing::{debug, error, info};
 
+use crate::core::cookies_from_headers;
 use crate::document::{
     assemble_body_tail, assemble_document, assemble_head_shell, assemble_rsc_body_tail,
     assemble_rsc_head_shell, DocumentDescriptor, DocumentParams,
 };
-
-/// Parse cookies from a headers map.
-fn parse_cookies_from_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
-    if let Some(cookie_header) = headers.get("cookie").or_else(|| headers.get("Cookie")) {
-        cookie_header
-            .split(';')
-            .filter_map(|pair| {
-                let pair = pair.trim();
-                let eq = pair.find('=')?;
-                let name = pair[..eq].trim();
-                let value = pair[eq + 1..].trim();
-                if name.is_empty() {
-                    return None;
-                }
-                Some((name.to_string(), value.to_string()))
-            })
-            .collect()
-    } else {
-        HashMap::new()
-    }
-}
 
 /// State that can change during dev-mode rebuilds.
 #[derive(Clone)]
@@ -610,10 +590,20 @@ async fn render_app_route(
     hot: &Arc<HotState>,
     route_match: &rex_core::RouteMatch,
     _path: &str,
+    uri: &Uri,
 ) -> Response {
     let route_key = route_match.route.pattern.clone();
     let params = route_match.params.clone();
-    let props_json = serde_json::json!({ "params": params }).to_string();
+    let search_params: HashMap<String, String> = uri
+        .query()
+        .map(|q| {
+            url::form_urlencoded::parse(q.as_bytes())
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let props_json =
+        serde_json::json!({ "params": params, "searchParams": search_params }).to_string();
 
     // Look up client chunks for this app route
     let app_assets = hot.manifest.app_routes.get(&route_key);
@@ -700,7 +690,7 @@ async fn page_handler_inner(
     // Check app/ routes first (RSC)
     if let Some(ref app_trie) = hot.app_route_trie {
         if let Some(app_match) = app_trie.match_path(path) {
-            return render_app_route(state, hot, &app_match, path).await;
+            return render_app_route(state, hot, &app_match, path, uri).await;
         }
     }
 
@@ -764,7 +754,7 @@ async fn page_handler_inner(
                 .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
                 .collect();
 
-            let cookies = parse_cookies_from_headers(&header_map);
+            let cookies = cookies_from_headers(&header_map);
             let session = state.auth.as_ref().and_then(|auth| auth.extract_session(&header_map));
             let context = ServerSidePropsContext {
                 params,
@@ -1009,7 +999,7 @@ pub async fn data_handler(
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
                 .collect();
-            let cookies = parse_cookies_from_headers(&header_map);
+            let cookies = cookies_from_headers(&header_map);
             let session = state.auth.as_ref().and_then(|auth| auth.extract_session(&header_map));
             let context = ServerSidePropsContext {
                 params,
@@ -1048,6 +1038,7 @@ pub async fn data_handler(
 pub async fn rsc_handler(
     State(state): State<Arc<AppState>>,
     Path((build_id, page_path)): Path<(String, String)>,
+    uri: Uri,
 ) -> Response {
     let hot = snapshot(&state);
 
@@ -1070,7 +1061,18 @@ pub async fn rsc_handler(
     let route_key = &route_match.route.pattern;
     let params = route_match.params.clone();
 
-    let props_json = serde_json::json!({ "params": params }).to_string();
+    // Pass both route params and query string to the RSC render
+    let search_params: HashMap<String, String> = uri
+        .query()
+        .map(|q| {
+            url::form_urlencoded::parse(q.as_bytes())
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let props_json =
+        serde_json::json!({ "params": params, "searchParams": search_params }).to_string();
     let route_key_owned = route_key.to_string();
 
     let result = state

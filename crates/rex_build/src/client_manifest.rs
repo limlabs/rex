@@ -43,16 +43,21 @@ impl ClientReferenceManifest {
 
 /// Generate a stable reference ID for a client component export.
 ///
-/// Uses a simple hash of the relative path + export name + build ID.
+/// Uses truncated SHA-256 for cross-version stability.
+/// `DefaultHasher` is not guaranteed stable across Rust releases;
+/// a cryptographic hash ensures IDs are consistent across builds.
 pub fn client_reference_id(rel_path: &str, export_name: &str, build_id: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    use sha2::{Digest, Sha256};
 
-    let mut hasher = DefaultHasher::new();
-    rel_path.hash(&mut hasher);
-    export_name.hash(&mut hasher);
-    build_id.hash(&mut hasher);
-    format!("{:x}", hasher.finish())
+    let mut hasher = Sha256::new();
+    hasher.update(rel_path.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(export_name.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(build_id.as_bytes());
+    let hash = hasher.finalize();
+    // Truncate to 7 bytes (14 hex chars) — enough for uniqueness, short for URLs
+    hex::encode(&hash[..7])
 }
 
 #[cfg(test)]

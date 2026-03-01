@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tracing::{debug, error, info};
 
 /// Extract session from auth state if configured.
-fn extract_session(
+pub(crate) fn extract_session(
     state: &Arc<AppState>,
     headers: &HashMap<String, String>,
 ) -> Option<serde_json::Value> {
@@ -17,7 +17,7 @@ fn extract_session(
 }
 
 /// Parse a `Cookie` header value into name-value pairs.
-fn parse_cookies(cookie_header: &str) -> HashMap<String, String> {
+pub(crate) fn parse_cookies(cookie_header: &str) -> HashMap<String, String> {
     cookie_header
         .split(';')
         .filter_map(|pair| {
@@ -34,7 +34,7 @@ fn parse_cookies(cookie_header: &str) -> HashMap<String, String> {
 }
 
 /// Extract cookies from a headers map.
-fn cookies_from_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
+pub(crate) fn cookies_from_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
     if let Some(cookie_header) = headers.get("cookie").or_else(|| headers.get("Cookie")) {
         parse_cookies(cookie_header)
     } else {

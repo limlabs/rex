@@ -195,13 +195,14 @@ pub fn analyze_module_graph(entries: &[PathBuf], root: &Path) -> Result<ModuleGr
     while let Some(path) = queue.pop_front() {
         let info = analyze_module(&path, root)?;
 
-        // Enqueue imports (but don't cross into client modules' dependencies
-        // if we're on the server side — client modules are leaf nodes for
-        // the server graph)
-        for import in &info.imports {
-            if !visited.contains(import) {
-                visited.insert(import.clone());
-                queue.push_back(import.clone());
+        // Don't walk into client modules' dependencies — they are leaf nodes
+        // for the server graph. The client bundler handles their deps separately.
+        if !info.is_client {
+            for import in &info.imports {
+                if !visited.contains(import) {
+                    visited.insert(import.clone());
+                    queue.push_back(import.clone());
+                }
             }
         }
 
@@ -406,5 +407,59 @@ export default function Main() { return <div />; }
         let from = root.join("page.tsx");
         assert!(resolve_import(&from, "react", root).is_none());
         assert!(resolve_import(&from, "next/link", root).is_none());
+    }
+
+    #[test]
+    fn graph_walk_stops_at_client_boundary() {
+        let dir = setup_temp_dir();
+        let root = dir.path();
+
+        // Server page imports client Counter
+        fs::write(
+            root.join("page.tsx"),
+            r#"
+import Counter from './Counter';
+export default function Page() { return <Counter />; }
+"#,
+        )
+        .unwrap();
+
+        // Client Counter imports a client-only helper
+        fs::write(
+            root.join("Counter.tsx"),
+            r#"
+"use client";
+import { format } from './client-utils';
+export default function Counter() { return <button>{format(0)}</button>; }
+"#,
+        )
+        .unwrap();
+
+        // Client-only helper (should NOT be in the graph)
+        fs::write(
+            root.join("client-utils.tsx"),
+            r#"
+export function format(n: number) { return `Count: ${n}`; }
+"#,
+        )
+        .unwrap();
+
+        let entries = vec![root.join("page.tsx")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+
+        // Only page (server) and Counter (client boundary) should be in the graph.
+        // client-utils.tsx should NOT be included — the walk stops at the client boundary.
+        assert_eq!(graph.modules.len(), 2);
+
+        let counter_canonical = root.join("Counter.tsx").canonicalize().unwrap();
+        let counter = graph.modules.get(&counter_canonical).unwrap();
+        assert!(counter.is_client);
+
+        // Verify client-utils is not in the graph
+        let utils_canonical = root.join("client-utils.tsx").canonicalize().unwrap();
+        assert!(
+            !graph.modules.contains_key(&utils_canonical),
+            "client-utils.tsx should not be in the server module graph"
+        );
     }
 }

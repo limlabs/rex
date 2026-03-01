@@ -356,42 +356,21 @@ fn response_json_callback(
     };
     let promise = resolver.get_promise(scope);
 
-    // JSON.parse(body)
+    // Use v8::json::parse which is simpler and correctly throws on invalid JSON
     let json_str = body.to_rust_string_lossy(scope);
-    if let Some(json_key) = v8::String::new(scope, "JSON") {
-        let global = scope.get_current_context().global(scope);
-        if let Some(json_obj) = global.get(scope, json_key.into()) {
-            if let Ok(json_obj) = v8::Local::<v8::Object>::try_from(json_obj) {
-                if let Some(parse_key) = v8::String::new(scope, "parse") {
-                    if let Some(parse_fn) = json_obj.get(scope, parse_key.into()) {
-                        if let Ok(parse_fn) = v8::Local::<v8::Function>::try_from(parse_fn) {
-                            if let Some(body_v8) = v8::String::new(scope, &json_str) {
-                                match parse_fn.call(scope, json_obj.into(), &[body_v8.into()]) {
-                                    Some(parsed) => {
-                                        resolver.resolve(scope, parsed);
-                                        ret.set(promise.into());
-                                        return;
-                                    }
-                                    None => {
-                                        if let Some(msg) =
-                                            v8::String::new(scope, "JSON parse error")
-                                        {
-                                            let err = v8::Exception::syntax_error(scope, msg);
-                                            resolver.reject(scope, err);
-                                        }
-                                        ret.set(promise.into());
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+    let result = v8::String::new(scope, &json_str).and_then(|s| v8::json::parse(scope, s));
+
+    match result {
+        Some(parsed) => {
+            resolver.resolve(scope, parsed);
+        }
+        None => {
+            let msg = v8::String::new(scope, "Failed to parse JSON response body")
+                .unwrap_or_else(|| v8::String::empty(scope));
+            let err = v8::Exception::syntax_error(scope, msg);
+            resolver.reject(scope, err);
         }
     }
-
-    resolver.resolve(scope, body);
     ret.set(promise.into());
 }
 
@@ -417,6 +396,9 @@ fn response_text_callback(
     ret.set(promise.into());
 }
 
+/// Default timeout for the fetch loop (30 seconds).
+const FETCH_LOOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Run the batch-and-resolve loop until all async work is settled.
 ///
 /// This is the core pattern that enables `fetch()` in bare V8:
@@ -426,8 +408,32 @@ fn response_text_callback(
 /// 4. Fire all queued requests concurrently via join_all
 /// 5. Resolve/reject promises
 /// 6. Repeat
+///
+/// Times out after 30 seconds to prevent runaway fetch chains.
 pub fn run_fetch_loop(isolate: &mut v8::OwnedIsolate, context: &v8::Global<v8::Context>) {
+    let deadline = std::time::Instant::now() + FETCH_LOOP_TIMEOUT;
+
     loop {
+        if std::time::Instant::now() > deadline {
+            tracing::error!(
+                "fetch loop timed out after {}s — possible infinite fetch chain",
+                FETCH_LOOP_TIMEOUT.as_secs()
+            );
+            // Reject all remaining queued fetches
+            let remaining = drain_fetch_queue();
+            if !remaining.is_empty() {
+                v8::scope_with_context!(scope, isolate, context);
+                for req in remaining {
+                    let resolver = v8::Local::new(scope, &req.resolver);
+                    if let Some(msg) = v8::String::new(scope, "fetch loop timed out") {
+                        let err = v8::Exception::error(scope, msg);
+                        resolver.reject(scope, err);
+                    }
+                }
+            }
+            break;
+        }
+
         isolate.perform_microtask_checkpoint();
 
         let pending = drain_fetch_queue();
