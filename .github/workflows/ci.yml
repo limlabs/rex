@@ -56,7 +56,6 @@ jobs:
 
   test:
     name: Test & Coverage
-    needs: check
     runs-on: ubuntu-latest
     env:
       COVERAGE_THRESHOLD: 52
