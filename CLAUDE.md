@@ -8,7 +8,7 @@ Dev tools (Rust, Node.js, gh CLI, lefthook) are pre-installed via `Dockerfile.sa
 
 ```bash
 docker build -f Dockerfile.sandbox -t rex-sandbox .
-.claude/scripts/sandbox.sh
+scripts/sandbox.sh
 ```
 
 Each invocation creates its own git worktree + Docker sandbox, so multiple sessions run in parallel without conflicting. The wrapper fetches a GitHub PAT from 1Password (`op://claude/ClaudeLiminal-GitHub/pat`) so commits use the bot identity. On first boot, the entrypoint configures git/gh and fetches project dependencies.
