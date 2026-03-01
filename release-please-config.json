@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "bump-minor-pre-major": true,
+      "extra-files": [
+        "crates/rex_core/Cargo.toml",
+        "crates/rex_build/Cargo.toml",
+        "crates/rex_cli/Cargo.toml",
+        "crates/rex_dev/Cargo.toml",
+        "crates/rex_e2e/Cargo.toml",
+        "crates/rex_image/Cargo.toml",
+        "crates/rex_napi/Cargo.toml",
+        "crates/rex_router/Cargo.toml",
+        "crates/rex_server/Cargo.toml",
+        "crates/rex_v8/Cargo.toml",
+        {
+          "type": "json",
+          "path": "packages/rex/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "packages/create-rex-app/package.json",
+          "jsonpath": "$.version"
+        }
+      ]
+    }
+  }
+}
