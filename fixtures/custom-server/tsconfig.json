@@ -2,11 +2,14 @@
   "compilerOptions": {
     "target": "es2017",
     "module": "esnext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "rex/*": ["./node_modules/@limlabs/rex/src/*"]
+    }
   },
-  "include": ["pages"]
+  "include": ["pages", "server.ts"]
 }
