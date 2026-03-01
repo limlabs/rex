@@ -52,6 +52,37 @@ Endpoints:
 - `/_rex/router.js` — served from `server.rs` via `include_str!`
 - `/_rex/data/{buildId}/{path}.json` — GSSP data for client transitions
 
+## CI/CD
+
+**Repo:** `github.com/limlabs/rex`
+
+### Workflows
+
+| Workflow | Trigger | What it does |
+|----------|---------|-------------|
+| **CI** (`.github/workflows/ci.yml`) | PR to main, push to main | fmt, clippy, check, oxlint, tests |
+| **Release** (`.github/workflows/release.yml`) | GitHub Release created | Builds linux/macOS binaries, pushes Docker to `ghcr.io/limlabs/rex`, publishes npm `@limlabs/rex` |
+
+### Creating a release
+
+1. `git tag v0.1.0 && git push origin v0.1.0`
+2. Create a GitHub Release from the tag (or `gh release create v0.1.0`)
+3. The release workflow builds binaries, pushes Docker, and publishes to npm
+
+### Docker
+
+```bash
+docker build -t rex .
+docker run -v $(pwd):/app -w /app -p 3000:3000 rex
+```
+
+### Required secrets
+
+| Secret | Where | Purpose |
+|--------|-------|---------|
+| `GITHUB_TOKEN` | Automatic | GHCR push, release asset upload |
+| `NPM_TOKEN` | Manual (`gh secret set NPM_TOKEN`) | npm publish |
+
 ## Plane Project Tracker
 
 Project **Rex** (`REX`), ID: `bb7d9e34-d888-4548-bdec-016b8e01a12f`

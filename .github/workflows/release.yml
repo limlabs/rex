@@ -1,0 +1,177 @@
+name: Release
+
+on:
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-linux:
+    name: Build Linux (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git/db
+            target/
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-release-
+
+      - name: Build
+        run: cargo build --release --bin rex
+
+      - name: Package
+        run: |
+          cd target/release
+          tar czf rex-linux-x86_64.tar.gz rex
+          sha256sum rex-linux-x86_64.tar.gz > rex-linux-x86_64.tar.gz.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rex-linux-x86_64
+          path: |
+            target/release/rex-linux-x86_64.tar.gz
+            target/release/rex-linux-x86_64.tar.gz.sha256
+
+  build-macos-arm64:
+    name: Build macOS (ARM64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git/db
+            target/
+          key: ${{ runner.os }}-arm64-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-arm64-cargo-release-
+
+      - name: Build
+        run: cargo build --release --bin rex --target aarch64-apple-darwin
+
+      - name: Package
+        run: |
+          cd target/aarch64-apple-darwin/release
+          tar czf rex-macos-arm64.tar.gz rex
+          shasum -a 256 rex-macos-arm64.tar.gz > rex-macos-arm64.tar.gz.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rex-macos-arm64
+          path: |
+            target/aarch64-apple-darwin/release/rex-macos-arm64.tar.gz
+            target/aarch64-apple-darwin/release/rex-macos-arm64.tar.gz.sha256
+
+  build-macos-x86_64:
+    name: Build macOS (x86_64)
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git/db
+            target/
+          key: ${{ runner.os }}-x86-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-x86-cargo-release-
+
+      - name: Build
+        run: cargo build --release --bin rex --target x86_64-apple-darwin
+
+      - name: Package
+        run: |
+          cd target/x86_64-apple-darwin/release
+          tar czf rex-macos-x86_64.tar.gz rex
+          shasum -a 256 rex-macos-x86_64.tar.gz > rex-macos-x86_64.tar.gz.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rex-macos-x86_64
+          path: |
+            target/x86_64-apple-darwin/release/rex-macos-x86_64.tar.gz
+            target/x86_64-apple-darwin/release/rex-macos-x86_64.tar.gz.sha256
+
+  docker:
+    name: Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/limlabs/rex:${{ steps.version.outputs.version }}
+            ghcr.io/limlabs/rex:latest
+
+  npm-publish:
+    name: npm Publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Sync version from release tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cd packages/rex
+          npm version "$VERSION" --no-git-tag-version
+
+      - name: Publish
+        run: cd packages/rex && npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  upload-release-assets:
+    name: Upload Release Assets
+    needs: [build-linux, build-macos-arm64, build-macos-x86_64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/rex-linux-x86_64/rex-linux-x86_64.tar.gz
+            artifacts/rex-linux-x86_64/rex-linux-x86_64.tar.gz.sha256
+            artifacts/rex-macos-arm64/rex-macos-arm64.tar.gz
+            artifacts/rex-macos-arm64/rex-macos-arm64.tar.gz.sha256
+            artifacts/rex-macos-x86_64/rex-macos-x86_64.tar.gz
+            artifacts/rex-macos-x86_64/rex-macos-x86_64.tar.gz.sha256
