@@ -1,0 +1,199 @@
+use crate::config::ProviderConfig;
+use crate::provider::{OAuthProvider, TokenSet};
+use crate::session::UserProfile;
+use crate::AuthError;
+use std::future::Future;
+use std::pin::Pin;
+
+fn url_encode(s: &str) -> String {
+    url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
+}
+
+pub struct GenericOAuthProvider {
+    provider_id: String,
+    display_name: String,
+    client_id: String,
+    client_secret: String,
+    auth_url: String,
+    token_url: String,
+    userinfo_url: Option<String>,
+    scopes: Vec<String>,
+}
+
+impl GenericOAuthProvider {
+    pub fn from_config(config: &ProviderConfig) -> Result<Self, AuthError> {
+        let provider_id = config
+            .id
+            .clone()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| AuthError::Config("OAuth provider requires id".into()))?;
+
+        let display_name = config
+            .name
+            .clone()
+            .unwrap_or_else(|| provider_id.clone());
+
+        Ok(Self {
+            provider_id,
+            display_name,
+            client_id: config
+                .client_id
+                .clone()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| AuthError::Config("OAuth provider requires clientId".into()))?,
+            client_secret: config
+                .client_secret
+                .clone()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    AuthError::Config("OAuth provider requires clientSecret".into())
+                })?,
+            auth_url: config
+                .authorization_url
+                .clone()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    AuthError::Config("OAuth provider requires authorizationUrl".into())
+                })?,
+            token_url: config
+                .token_url
+                .clone()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| AuthError::Config("OAuth provider requires tokenUrl".into()))?,
+            userinfo_url: config.userinfo_url.clone(),
+            scopes: config.scopes.clone().unwrap_or_default(),
+        })
+    }
+}
+
+impl OAuthProvider for GenericOAuthProvider {
+    fn id(&self) -> &str {
+        &self.provider_id
+    }
+
+    fn name(&self) -> &str {
+        &self.display_name
+    }
+
+    fn authorization_url(&self, state: &str, callback_url: &str) -> String {
+        let scopes = self.scopes.join("%20");
+        let mut url = format!(
+            "{}\
+             ?client_id={}\
+             &redirect_uri={}\
+             &response_type=code\
+             &state={state}",
+            self.auth_url,
+            self.client_id,
+            url_encode(callback_url),
+        );
+        if !scopes.is_empty() {
+            url.push_str(&format!("&scope={scopes}"));
+        }
+        url
+    }
+
+    fn exchange_code<'a>(
+        &'a self,
+        code: &'a str,
+        callback_url: &'a str,
+        client: &'a reqwest::Client,
+    ) -> Pin<Box<dyn Future<Output = Result<TokenSet, AuthError>> + Send + 'a>> {
+        Box::pin(async move {
+            let resp: serde_json::Value = client
+                .post(&self.token_url)
+                .form(&[
+                    ("client_id", self.client_id.as_str()),
+                    ("client_secret", self.client_secret.as_str()),
+                    ("code", code),
+                    ("grant_type", "authorization_code"),
+                    ("redirect_uri", callback_url),
+                ])
+                .send()
+                .await?
+                .json()
+                .await?;
+
+            let access_token = resp
+                .get("access_token")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    let error = resp
+                        .get("error_description")
+                        .or_else(|| resp.get("error"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    AuthError::OAuth(format!("OAuth token exchange failed: {error}"))
+                })?
+                .to_string();
+
+            Ok(TokenSet {
+                access_token,
+                refresh_token: resp
+                    .get("refresh_token")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                id_token: resp
+                    .get("id_token")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                token_type: resp
+                    .get("token_type")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                expires_in: resp.get("expires_in").and_then(|v| v.as_u64()),
+                scope: resp
+                    .get("scope")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+            })
+        })
+    }
+
+    fn fetch_user_profile<'a>(
+        &'a self,
+        tokens: &'a TokenSet,
+        client: &'a reqwest::Client,
+    ) -> Pin<Box<dyn Future<Output = Result<UserProfile, AuthError>> + Send + 'a>> {
+        Box::pin(async move {
+            let userinfo_url = self
+                .userinfo_url
+                .as_deref()
+                .ok_or_else(|| {
+                    AuthError::OAuth("OAuth provider has no userinfoUrl configured".into())
+                })?;
+
+            let user: serde_json::Value = client
+                .get(userinfo_url)
+                .header("Authorization", format!("Bearer {}", tokens.access_token))
+                .send()
+                .await?
+                .json()
+                .await?;
+
+            // Try `sub` first (OIDC-style), then `id` (common OAuth pattern).
+            let sub = user
+                .get("sub")
+                .or_else(|| user.get("id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+
+            Ok(UserProfile {
+                id: format!("{}|{sub}", self.provider_id),
+                name: user
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                email: user
+                    .get("email")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                image: user
+                    .get("picture")
+                    .or_else(|| user.get("avatar_url"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+            })
+        })
+    }
+}

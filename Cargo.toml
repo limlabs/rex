@@ -11,6 +11,7 @@ members = [
     "crates/rex_image",
     "crates/rex_e2e",
     "crates/rex_napi",
+    "crates/rex_auth",
 ]
 
 [workspace.dependencies]
@@ -34,7 +35,7 @@ notify-debouncer-mini = "0.5"
 crossbeam-channel = "0.5"
 
 # HTTP client
-reqwest = { version = "0.12", features = ["blocking"] }
+reqwest = { version = "0.12", features = ["blocking", "json"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -57,6 +58,9 @@ rustc-hash = "2"
 
 # Async
 futures = "0.3"
+
+# Environment
+dotenvy = "0.15"
 
 # File hashing
 sha2 = "0.10"

@@ -12,6 +12,27 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tracing::debug;
 
+/// Load environment variables from `.env` files in the project root.
+///
+/// Follows the same priority order as Next.js:
+/// 1. `.env.local` (highest priority, gitignored secrets)
+/// 2. `.env` (shared defaults)
+///
+/// Variables already set in the environment are NOT overwritten.
+fn load_dotenv(project_root: &std::path::Path) {
+    // Load highest-priority first — dotenvy won't overwrite existing vars,
+    // so earlier files take precedence over later ones.
+    for name in [".env.local", ".env"] {
+        let path = project_root.join(name);
+        if path.exists() {
+            match dotenvy::from_path(&path) {
+                Ok(()) => debug!(file = name, "Loaded env file"),
+                Err(e) => debug!(file = name, error = %e, "Failed to load env file"),
+            }
+        }
+    }
+}
+
 /// Options for creating a Rex instance.
 #[derive(Debug, Clone)]
 pub struct RexOptions {
@@ -92,6 +113,7 @@ impl Rex {
     /// This is the primary constructor for dev mode and fresh builds.
     pub async fn new(opts: RexOptions) -> Result<Self> {
         let root = std::fs::canonicalize(&opts.root)?;
+        load_dotenv(&root);
         let config = RexConfig::new(root).with_dev(opts.dev).with_port(opts.port);
         config.validate()?;
 
@@ -147,6 +169,7 @@ impl Rex {
     /// Skips the build step and loads the manifest from disk.
     pub async fn from_build(opts: RexOptions) -> Result<Self> {
         let root = std::fs::canonicalize(&opts.root)?;
+        load_dotenv(&root);
         let config = RexConfig::new(root).with_port(opts.port);
 
         // Load manifest
@@ -210,11 +233,42 @@ impl Rex {
             config.project_root.join(".rex").join("cache").join("images"),
         );
 
+        // Initialize auth if configured
+        let auth = if let Some(auth_value) = &project_config.auth {
+            let base_url = format!("http://localhost:{port}");
+            match rex_auth::config::parse_auth_config(auth_value) {
+                Ok(auth_config) => {
+                    match rex_auth::AuthServer::new(
+                        auth_config,
+                        &config.project_root,
+                        &base_url,
+                        config.dev,
+                    ) {
+                        Ok(server) => {
+                            tracing::info!("Auth initialized");
+                            Some(std::sync::Arc::new(server))
+                        }
+                        Err(e) => {
+                            tracing::error!("Auth initialization failed: {e}");
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Invalid auth config: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let state = Arc::new(AppState {
             isolate_pool: pool,
             is_dev: config.dev,
             project_root: config.project_root.clone(),
             image_cache,
+            auth,
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
                 api_route_trie: api_trie,
@@ -323,6 +377,7 @@ impl Rex {
                     resolved_url: path.to_string(),
                     headers: HashMap::new(),
                     cookies: HashMap::new(),
+                    session: None,
                 };
                 let context_json = serde_json::to_string(&context).expect("JSON serialization");
                 self.state
