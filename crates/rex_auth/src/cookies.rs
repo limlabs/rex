@@ -19,7 +19,7 @@ pub fn parse_cookies(cookie_header: &str) -> HashMap<String, String> {
         .collect()
 }
 
-/// Extract cookies from a headers map (case-insensitive lookup for "cookie").
+/// Extract cookies from a `HashMap<String, String>` headers map (case-insensitive lookup for "cookie").
 pub fn cookies_from_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
     // Try both common casings
     if let Some(cookie_header) = headers.get("cookie").or_else(|| headers.get("Cookie")) {
@@ -27,6 +27,15 @@ pub fn cookies_from_headers(headers: &HashMap<String, String>) -> HashMap<String
     } else {
         HashMap::new()
     }
+}
+
+/// Extract cookies from an Axum `HeaderMap`.
+pub fn cookies_from_header_map(headers: &axum::http::HeaderMap) -> HashMap<String, String> {
+    headers
+        .get("cookie")
+        .and_then(|v| v.to_str().ok())
+        .map(parse_cookies)
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

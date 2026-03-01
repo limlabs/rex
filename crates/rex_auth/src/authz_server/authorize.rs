@@ -1,4 +1,4 @@
-use crate::cookies::parse_cookies;
+use crate::cookies::cookies_from_header_map;
 use crate::session;
 use crate::AuthServer;
 use axum::extract::{Query, State};
@@ -89,11 +89,7 @@ pub async fn authorize_get_handler(
     let valid_scopes = crate::scopes::validate_scopes(&requested_scopes, &auth.config.mcp.scopes);
 
     // Check if user is authenticated (session cookie)
-    let cookie_header = headers
-        .get("cookie")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    let cookies = parse_cookies(cookie_header);
+    let cookies = cookies_from_header_map(&headers);
 
     let session_data = cookies
         .get(&auth.config.session.cookie_name)
@@ -229,11 +225,7 @@ pub async fn authorize_post_handler(
     }
 
     // Get user subject from session
-    let cookie_header = headers
-        .get("cookie")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    let cookies = parse_cookies(cookie_header);
+    let cookies = cookies_from_header_map(&headers);
 
     let subject = cookies
         .get(&auth.config.session.cookie_name)

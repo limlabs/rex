@@ -15,6 +15,7 @@ pub mod session;
 pub mod store;
 
 pub use config::AuthConfig;
+pub use cookies::{cookies_from_header_map, cookies_from_headers, parse_cookies};
 pub use error::AuthError;
 pub use jwt::AccessTokenClaims;
 pub use keys::KeyManager;

@@ -1,3 +1,4 @@
+use rex_auth::cookies_from_headers;
 use rex_core::{
     DataStrategy, MiddlewareAction, MiddlewareResult, ProjectConfig, ServerSidePropsContext,
 };
@@ -14,32 +15,6 @@ pub(crate) fn extract_session(
         .auth
         .as_ref()
         .and_then(|auth| auth.extract_session(headers))
-}
-
-/// Parse a `Cookie` header value into name-value pairs.
-pub(crate) fn parse_cookies(cookie_header: &str) -> HashMap<String, String> {
-    cookie_header
-        .split(';')
-        .filter_map(|pair| {
-            let pair = pair.trim();
-            let eq = pair.find('=')?;
-            let name = pair[..eq].trim();
-            let value = pair[eq + 1..].trim();
-            if name.is_empty() {
-                return None;
-            }
-            Some((name.to_string(), value.to_string()))
-        })
-        .collect()
-}
-
-/// Extract cookies from a headers map.
-pub(crate) fn cookies_from_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
-    if let Some(cookie_header) = headers.get("cookie").or_else(|| headers.get("Cookie")) {
-        parse_cookies(cookie_header)
-    } else {
-        HashMap::new()
-    }
 }
 
 use crate::document::{assemble_document, DocumentParams};
