@@ -6,8 +6,8 @@ let _sessionPromise = null;
 let _listeners = [];
 
 function notifyListeners() {
-  for (const fn of _listeners) {
-    try { fn(); } catch (_) {}
+  for (const cb of _listeners) {
+    try { cb(); } catch (_) {}
   }
 }
 
@@ -68,7 +68,7 @@ function useSession() {
 
     _listeners.push(onUpdate);
     return function () {
-      _listeners = _listeners.filter(function (fn) { return fn !== onUpdate; });
+      _listeners = _listeners.filter(function (cb) { return cb !== onUpdate; });
     };
   }, []);
 

@@ -30,10 +30,13 @@ pub fn csrf_state_cookie(state: &str, is_dev: bool) -> String {
 }
 
 /// Build a `Set-Cookie` header value for the callback URL cookie.
+///
+/// The value is stored as-is (a validated relative path like `/dashboard`).
+/// No URL-encoding — the cookie is HttpOnly and the value was already validated
+/// by `is_safe_callback_url` (no CRLF, no protocol-relative, etc.).
 pub fn callback_url_cookie(url: &str, is_dev: bool) -> String {
-    let encoded = url::form_urlencoded::byte_serialize(url.as_bytes()).collect::<String>();
     let mut cookie =
-        format!("__rex_callback_url={encoded}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600");
+        format!("__rex_callback_url={url}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600");
     if !is_dev {
         cookie.push_str("; Secure");
     }

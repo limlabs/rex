@@ -45,8 +45,8 @@ impl AccessTokenClaims {
     pub fn is_expired(&self) -> bool {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("system clock before UNIX epoch")
-            .as_secs();
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         self.exp <= now
     }
 }

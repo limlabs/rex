@@ -333,26 +333,8 @@ fn validate_redirect_uri(uri: &str, registered: &[String]) -> bool {
         if reg == uri {
             return true;
         }
-        // Wildcard port matching
+        // Wildcard port matching: `http://localhost:*/callback` matches any port
         if reg.contains(":*") {
-            let pattern = reg.replace(":*", ":");
-            if let Some(prefix) = pattern.strip_suffix('/') {
-                // Match prefix + port + rest
-                if let Ok(parsed) = url::Url::parse(uri) {
-                    let no_port =
-                        format!("{}://{}:", parsed.scheme(), parsed.host_str().unwrap_or(""));
-                    if no_port
-                        == prefix
-                            .split_at(prefix.rfind(':').unwrap_or(0))
-                            .0
-                            .to_string()
-                            + ":"
-                    {
-                        return true;
-                    }
-                }
-            }
-            // Simple approach: replace :* with :\d+ pattern match
             let parts: Vec<&str> = reg.splitn(2, ":*").collect();
             if parts.len() == 2 {
                 if let Some(rest) = uri.strip_prefix(parts[0]) {
