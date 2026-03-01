@@ -857,8 +857,8 @@ pub async fn handle_request(
         return handle_image(state, req).await;
     }
 
-    // /_rex/mcp — handled by Axum router directly, but for NAPI/core dispatch:
-    if path == "/_rex/mcp" {
+    // /mcp — handled by Axum router directly, but for NAPI/core dispatch:
+    if path == "/mcp" {
         return RexResponse {
             status: 405,
             headers: vec![("content-type".to_string(), "text/plain".to_string())],

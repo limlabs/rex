@@ -531,4 +531,153 @@ mod tests {
             "Port should be closed after shutdown"
         );
     }
+
+    // -------------------------------------------------------
+    // MCP endpoint tests (JSON-RPC 2.0 over POST /mcp)
+    // -------------------------------------------------------
+
+    /// Helper: POST a JSON-RPC request to /mcp and return the parsed response.
+    async fn mcp_request(method: &str, params: serde_json::Value) -> serde_json::Value {
+        let url = format!("{}/mcp", base_url());
+        let client = reqwest::Client::new();
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": method,
+            "params": params,
+        });
+        let resp = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200, "MCP endpoint should return 200");
+        resp.json().await.unwrap()
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_mcp_initialize() {
+        let resp = mcp_request(
+            "initialize",
+            serde_json::json!({
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": { "name": "rex-e2e", "version": "0.1" }
+            }),
+        )
+        .await;
+
+        let result = resp.get("result").expect("initialize should return result");
+        assert_eq!(
+            result["protocolVersion"], "2025-03-26",
+            "Should return matching protocol version"
+        );
+        assert!(
+            result.get("capabilities").is_some(),
+            "Should include capabilities"
+        );
+        assert_eq!(
+            result["serverInfo"]["name"], "rex",
+            "Server name should be 'rex'"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_mcp_tools_list() {
+        let resp = mcp_request("tools/list", serde_json::json!({})).await;
+
+        let tools = resp["result"]["tools"]
+            .as_array()
+            .expect("tools/list should return an array");
+        assert!(
+            !tools.is_empty(),
+            "Should have at least one tool (fixtures/basic/mcp/search.ts)"
+        );
+
+        // The basic fixture has a "search" tool
+        let search = tools.iter().find(|t| t["name"] == "search");
+        assert!(search.is_some(), "Should include 'search' tool");
+
+        let search = search.unwrap();
+        assert!(
+            search.get("description").is_some(),
+            "Tool should have a description"
+        );
+        assert!(
+            search.get("inputSchema").is_some(),
+            "Tool should have an inputSchema"
+        );
+        assert_eq!(
+            search["inputSchema"]["type"], "object",
+            "inputSchema should be an object type"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_mcp_tools_call() {
+        let resp = mcp_request(
+            "tools/call",
+            serde_json::json!({
+                "name": "search",
+                "arguments": { "query": "hello" }
+            }),
+        )
+        .await;
+
+        assert!(
+            resp.get("error").is_none(),
+            "tools/call should not return an error: {resp}"
+        );
+
+        let content = resp["result"]["content"]
+            .as_array()
+            .expect("tools/call result should have content array");
+        assert!(!content.is_empty(), "content should not be empty");
+        assert_eq!(content[0]["type"], "text", "content type should be 'text'");
+
+        // Parse the text payload and verify it contains results
+        let text = content[0]["text"].as_str().unwrap();
+        let payload: serde_json::Value = serde_json::from_str(text).unwrap();
+        assert!(
+            payload.get("results").is_some(),
+            "search tool should return results"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_mcp_tools_call_unknown_tool() {
+        let resp = mcp_request(
+            "tools/call",
+            serde_json::json!({
+                "name": "nonexistent_tool",
+                "arguments": {}
+            }),
+        )
+        .await;
+
+        // MCP spec: tool errors are returned as successful JSON-RPC responses
+        // with isError: true in the result, not as JSON-RPC errors.
+        let result = &resp["result"];
+        assert_eq!(
+            result["isError"], true,
+            "Unknown tool should return isError: true, got: {resp}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_mcp_unknown_method() {
+        let resp = mcp_request("bogus/method", serde_json::json!({})).await;
+
+        assert!(
+            resp.get("error").is_some(),
+            "Unknown JSON-RPC method should return an error"
+        );
+    }
 }

@@ -126,7 +126,7 @@ impl RexServer {
             // Image optimization endpoint
             .route("/_rex/image", get(handlers::image_handler))
             // MCP endpoint (JSON-RPC 2.0 over POST)
-            .route("/_rex/mcp", post(crate::mcp::mcp_handler))
+            .route("/mcp", post(crate::mcp::mcp_handler))
             // Client-side router script
             .route("/_rex/router.js", get(router_js_handler))
             // Merge any extra routes (e.g., HMR websocket)
