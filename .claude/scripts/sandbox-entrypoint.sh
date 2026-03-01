@@ -32,6 +32,15 @@ if [ ! -f "$MARKER" ]; then
     fi
   fi
 
+  # Link shared memory into where Claude Code expects it
+  WORKSPACE="$(pwd)"
+  if [ -d "$WORKSPACE/.claude-memory" ]; then
+    PROJECT_ID="$(echo "$WORKSPACE" | sed 's|/|-|g')"
+    MEMORY_DIR="$HOME/.claude/projects/$PROJECT_ID/memory"
+    mkdir -p "$HOME/.claude/projects/$PROJECT_ID"
+    ln -sf "$WORKSPACE/.claude-memory" "$MEMORY_DIR"
+  fi
+
   # Fetch project dependencies
   cargo fetch --quiet 2>/dev/null || true
   if [ -d fixtures/basic ]; then

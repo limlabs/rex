@@ -6,6 +6,7 @@ node_modules
 *.swo
 .DS_Store
 .sandbox-github-token
+.claude-memory
 .claude/worktrees/
 witness-reports/
 .venv/

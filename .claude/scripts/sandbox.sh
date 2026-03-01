@@ -26,8 +26,19 @@ git worktree add "$WORKTREE_DIR" -b "$BRANCH" HEAD
 # Write token into the worktree for the entrypoint to read
 echo "$GITHUB_TOKEN" > "$WORKTREE_DIR/.sandbox-github-token"
 
+# Copy shared memory into the worktree
+HOST_MEMORY="$HOME/.claude/projects/-Users-austin-code-rex/memory"
+if [ -d "$HOST_MEMORY" ]; then
+  cp -r "$HOST_MEMORY" "$WORKTREE_DIR/.claude-memory"
+fi
+
 cleanup() {
   rm -f "$WORKTREE_DIR/.sandbox-github-token"
+  # Sync memory back to host
+  if [ -d "$WORKTREE_DIR/.claude-memory" ]; then
+    mkdir -p "$HOST_MEMORY"
+    cp -r "$WORKTREE_DIR/.claude-memory/" "$HOST_MEMORY/"
+  fi
   # Remove worktree + branch if no new commits were made
   COMMITS="$(git -C "$WORKTREE_DIR" rev-list HEAD --not main --count 2>/dev/null)" || COMMITS=0
   if [ "$COMMITS" -eq 0 ]; then
