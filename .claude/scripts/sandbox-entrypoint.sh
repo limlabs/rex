@@ -11,7 +11,15 @@ if [ ! -f "$MARKER" ]; then
   # Source cargo env
   [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
 
-  # Configure GitHub auth + git identity from PAT (injected by sandbox.sh)
+  # Configure GitHub auth + git identity from PAT (written by sandbox.sh)
+  GITHUB_TOKEN=""
+  for d in /workspace /app .; do
+    if [ -f "$d/.sandbox-github-token" ]; then
+      GITHUB_TOKEN="$(cat "$d/.sandbox-github-token")"
+      rm -f "$d/.sandbox-github-token"
+      break
+    fi
+  done
   if [ -n "$GITHUB_TOKEN" ]; then
     echo "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null || true
     GH_USER="$(gh api user --jq .login 2>/dev/null)" || true

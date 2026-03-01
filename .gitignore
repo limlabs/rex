@@ -5,6 +5,7 @@ node_modules
 *.swp
 *.swo
 .DS_Store
+.sandbox-github-token
 witness-reports/
 .venv/
 __pycache__/

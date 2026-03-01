@@ -17,6 +17,8 @@ GITHUB_TOKEN="$(op read "op://claude/ClaudeLiminal-GitHub/pat" 2>/dev/null)" || 
   exit 1
 }
 
-exec docker sandbox run --name "$NAME" -t "$IMAGE" \
-  -e "GITHUB_TOKEN=$GITHUB_TOKEN" \
-  claude .
+# Write token to a file the entrypoint reads (project dir is mounted in sandbox)
+echo "$GITHUB_TOKEN" > .sandbox-github-token
+trap 'rm -f .sandbox-github-token' EXIT
+
+exec docker sandbox run --name "$NAME" -t "$IMAGE" claude .
