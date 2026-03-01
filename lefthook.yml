@@ -17,6 +17,15 @@ pre-commit:
       run: cargo test
       fail_text: "Tests must pass before committing"
 
+commit-msg:
+  commands:
+    conventional-commit:
+      run: .claude/hooks/check-commit-msg.sh {1}
+      fail_text: |
+        Commit message must follow Conventional Commits (required by release-please).
+        Format: type(scope): description
+        Types: feat, fix, chore, docs, style, refactor, perf, test, build, ci, revert
+
 pre-push:
   parallel: false
   commands:
