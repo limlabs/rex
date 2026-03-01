@@ -51,7 +51,7 @@ pub struct AppState {
 }
 
 /// Snapshot the hot state (O(1) Arc clone, no lock held across await).
-fn snapshot(state: &Arc<AppState>) -> Arc<HotState> {
+pub fn snapshot(state: &Arc<AppState>) -> Arc<HotState> {
     Arc::clone(&state.hot.read().expect("HotState lock poisoned"))
 }
 

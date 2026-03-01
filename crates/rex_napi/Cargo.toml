@@ -1,0 +1,31 @@
+[package]
+name = "rex_napi"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rex_core = { path = "../rex_core" }
+rex_router = { path = "../rex_router" }
+rex_build = { path = "../rex_build" }
+rex_v8 = { path = "../rex_v8" }
+rex_server = { path = "../rex_server" }
+rex_image = { path = "../rex_image" }
+
+napi = { version = "2", features = ["async", "serde-json", "napi9"] }
+napi-derive = "2"
+
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[build-dependencies]
+napi-build = "2"

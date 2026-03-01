@@ -1,6 +1,7 @@
 /target
 .rex
 node_modules
+*.node
 *.swp
 *.swo
 .DS_Store
