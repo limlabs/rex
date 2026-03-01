@@ -1,7 +1,7 @@
 use crate::handlers::{self, AppState, HotState};
 use anyhow::Result;
 use axum::handler::Handler;
-use axum::routing::{any, get};
+use axum::routing::{any, get, post};
 use axum::Router;
 use rex_build::AssetManifest;
 use rex_core::ProjectConfig;
@@ -31,6 +31,7 @@ pub struct ServerConfig {
     pub project_config: ProjectConfig,
     pub has_middleware: bool,
     pub middleware_matchers: Option<Vec<String>>,
+    pub has_mcp_tools: bool,
 }
 
 pub struct RexServer {
@@ -77,6 +78,7 @@ impl RexServer {
                 project_config: config.project_config,
                 manifest_json,
                 document_descriptor,
+                has_mcp_tools: config.has_mcp_tools,
             })),
         });
 
@@ -123,6 +125,8 @@ impl RexServer {
             .route("/_rex/data/{build_id}/{*path}", get(handlers::data_handler))
             // Image optimization endpoint
             .route("/_rex/image", get(handlers::image_handler))
+            // MCP endpoint (JSON-RPC 2.0 over POST)
+            .route("/_rex/mcp", post(crate::mcp::mcp_handler))
             // Client-side router script
             .route("/_rex/router.js", get(router_js_handler))
             // Merge any extra routes (e.g., HMR websocket)

@@ -12,6 +12,7 @@ pub enum FileEventKind {
     PageRemoved,
     CssModified,
     MiddlewareModified,
+    McpModified,
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +50,12 @@ pub fn start_watcher(project_root: &Path, pages_dir: &Path) -> Result<mpsc::Rece
                                 if is_middleware_file(&path, &project_root_owned) {
                                     if path.exists() {
                                         FileEventKind::MiddlewareModified
+                                    } else {
+                                        FileEventKind::PageRemoved
+                                    }
+                                } else if is_mcp_file(&path, &project_root_owned) {
+                                    if path.exists() {
+                                        FileEventKind::McpModified
                                     } else {
                                         FileEventKind::PageRemoved
                                     }
@@ -109,6 +116,15 @@ fn is_middleware_file(path: &Path, project_root: &Path) -> bool {
             if let Some(parent) = path.parent() {
                 return parent == project_root;
             }
+        }
+    }
+    false
+}
+
+fn is_mcp_file(path: &Path, project_root: &Path) -> bool {
+    if is_page_file(path) {
+        if let Some(parent) = path.parent() {
+            return parent == project_root.join("mcp");
         }
     }
     false

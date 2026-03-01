@@ -35,6 +35,8 @@ pub struct HotState {
     pub has_middleware: bool,
     /// Middleware matcher patterns (None = no middleware, Some(empty) = run on all).
     pub middleware_matchers: Option<Vec<String>>,
+    /// Whether mcp/ directory has tool files.
+    pub has_mcp_tools: bool,
 }
 
 impl HotState {
@@ -1232,6 +1234,7 @@ globalThis.__rex_resolve_gsp = function() {
                 document_descriptor: None,
                 has_middleware: false,
                 middleware_matchers: None,
+                has_mcp_tools: false,
             })),
         });
 
@@ -1501,6 +1504,7 @@ globalThis.__rex_resolve_gsp = function() {
                 document_descriptor: None,
                 has_middleware: false,
                 middleware_matchers: None,
+                has_mcp_tools: false,
             })),
         });
 
@@ -1713,6 +1717,7 @@ globalThis.__rex_resolve_gsp = function() {
                 document_descriptor: None,
                 has_middleware: true,
                 middleware_matchers: Some(matchers),
+                has_mcp_tools: false,
             })),
         });
 

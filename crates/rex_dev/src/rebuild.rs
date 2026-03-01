@@ -21,7 +21,8 @@ pub async fn handle_file_event(
     match event.kind {
         FileEventKind::PageModified
         | FileEventKind::CssModified
-        | FileEventKind::MiddlewareModified => {
+        | FileEventKind::MiddlewareModified
+        | FileEventKind::McpModified => {
             let t0 = Instant::now();
 
             // Rescan, rebuild, reload isolates, update hot state
@@ -92,6 +93,7 @@ pub async fn handle_file_event(
                 build_id: build_result.build_id,
                 manifest_json,
                 document_descriptor,
+                has_mcp_tools: !scan.mcp_tools.is_empty(),
                 // Preserve unchanged fields
                 route_trie: old_hot.route_trie.clone(),
                 api_route_trie: old_hot.api_route_trie.clone(),
@@ -167,6 +169,7 @@ pub async fn handle_file_event(
                 project_config: old_hot.project_config.clone(),
                 manifest_json,
                 document_descriptor,
+                has_mcp_tools: !scan.mcp_tools.is_empty(),
             });
 
             // Signal full reload to clients
