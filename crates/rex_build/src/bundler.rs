@@ -27,13 +27,11 @@ pub async fn build_bundles(
     let server_dir = config.server_build_dir();
     let client_dir = config.client_build_dir();
 
-    // Clean output directories to remove stale artifacts from previous builds
-    if server_dir.exists() {
-        fs::remove_dir_all(&server_dir)?;
-    }
-    if client_dir.exists() {
-        fs::remove_dir_all(&client_dir)?;
-    }
+    // Clean output directories to remove stale artifacts from previous builds.
+    // Use let _ to ignore errors — on macOS, remove_dir_all can race with
+    // Spotlight/fsevents and fail with ENOTEMPTY (os error 66).
+    let _ = fs::remove_dir_all(&server_dir);
+    let _ = fs::remove_dir_all(&client_dir);
     fs::create_dir_all(&server_dir)?;
     fs::create_dir_all(&client_dir)?;
 
@@ -578,6 +576,12 @@ async fn build_server_bundle(
                     .to_string(),
             )],
         ),
+        (
+            "rex/auth".to_string(),
+            vec![Some(
+                runtime_dir.join("auth.js").to_string_lossy().to_string(),
+            )],
+        ),
         // Next.js compatibility shims
         (
             "next/head".to_string(),
@@ -732,14 +736,23 @@ async fn build_client_bundles(
         });
     }
 
-    // Page entries
+    // Page entries (with server-export DCE)
+    let dce_dir = output_dir.join("_dce");
+    fs::create_dir_all(&dce_dir)?;
+
     for route in &scan.routes {
         let chunk_name = route_to_chunk_name(route);
         let effective_path = css_modules
             .page_overrides
             .get(&route.abs_path)
             .unwrap_or(&route.abs_path);
-        let page_path = effective_path.to_string_lossy().replace('\\', "/");
+
+        // Apply dead code elimination: strip getServerSideProps/getStaticProps
+        // and their server-only dependencies from the client copy.
+        let page_path = match apply_dce_to_page(effective_path, &dce_dir, &chunk_name) {
+            Ok(Some(dce_path)) => dce_path.to_string_lossy().replace('\\', "/"),
+            _ => effective_path.to_string_lossy().replace('\\', "/"),
+        };
         let entry_code = format!(
             r#"import {{ createElement }} from 'react';
 import {{ hydrateRoot }} from 'react-dom/client';
@@ -826,6 +839,12 @@ if (!window.__REX_NAVIGATING__) {{
             "rex/image".to_string(),
             vec![Some(
                 runtime_dir.join("image.js").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "rex/auth".to_string(),
+            vec![Some(
+                runtime_dir.join("auth.js").to_string_lossy().to_string(),
             )],
         ),
         // Next.js compatibility shims
@@ -935,6 +954,7 @@ if (!window.__REX_NAVIGATING__) {{
     }
 
     let _ = fs::remove_dir_all(&entries_dir);
+    let _ = fs::remove_dir_all(&dce_dir);
 
     debug!(
         pages = scan.routes.len(),
@@ -944,6 +964,37 @@ if (!window.__REX_NAVIGATING__) {{
 }
 
 /// Map a route to a chunk name for rolldown entry naming.
+/// Apply DCE to a page source, stripping server-only exports.
+/// Returns the path to the DCE'd file if any code was removed, or None if unchanged.
+fn apply_dce_to_page(
+    page_path: &Path,
+    dce_dir: &Path,
+    chunk_name: &str,
+) -> Result<Option<PathBuf>> {
+    let source = fs::read_to_string(page_path)?;
+
+    let source_type = match page_path.extension().and_then(|e| e.to_str()) {
+        Some("tsx") => oxc_span::SourceType::tsx(),
+        Some("ts") => oxc_span::SourceType::ts(),
+        Some("jsx") => oxc_span::SourceType::jsx(),
+        _ => oxc_span::SourceType::mjs(),
+    };
+
+    let stripped = crate::dce::strip_server_exports(&source, source_type)?;
+    if stripped.len() == source.len() && stripped == source {
+        return Ok(None); // no changes
+    }
+
+    let ext = page_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("tsx");
+    let dce_path = dce_dir.join(format!("{chunk_name}.{ext}"));
+    fs::write(&dce_path, &stripped)?;
+    debug!(page = %page_path.display(), "DCE stripped server exports for client bundle");
+    Ok(Some(dce_path))
+}
+
 fn route_to_chunk_name(route: &rex_core::Route) -> String {
     let module_name = route.module_name();
     let cn = module_name
