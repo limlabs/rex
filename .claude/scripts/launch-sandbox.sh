@@ -76,8 +76,13 @@ TASKEOF
   echo "==> Task written to .claude/TASK.md"
 fi
 
-# ── 4. Launch Docker sandbox ────────────────────────────────────────
+# ── 4. Fetch GitHub token from 1Password ─────────────────────────────
+echo "==> Fetching GitHub token from 1Password..."
+GITHUB_TOKEN="$(op read "op://claude/ClaudeLiminal-GitHub/pat")"
+export GITHUB_TOKEN
+
+# ── 5. Launch Docker sandbox ────────────────────────────────────────
 echo "==> Launching Docker sandbox for: $WORKTREE_DIR"
 echo "    (Each sandbox has its own network — no port conflicts)"
 echo ""
-docker sandbox run claude "$WORKTREE_DIR"
+GITHUB_TOKEN="$GITHUB_TOKEN" docker sandbox run claude "$WORKTREE_DIR"
