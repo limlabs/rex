@@ -81,7 +81,8 @@ pub async fn build_bundles(
         let entry_dir = server_dir.join("_server_entry");
         fs::create_dir_all(&entry_dir)?;
 
-        let entry = r#"import { createElement } from 'react';
+        let mut entry = String::from(
+            r#"import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 globalThis.__rex_pages = {};
 var __rex_createElement = createElement;
@@ -92,7 +93,61 @@ globalThis.__rex_render_page = function() { return JSON.stringify({ body: '', he
 globalThis.__rex_get_server_side_props = function() { return JSON.stringify({ props: {} }); };
 globalThis.__rex_get_static_props = function() { return JSON.stringify({ props: {} }); };
 globalThis.__rex_render_document = function() { return JSON.stringify({ html: '', head: '' }); };
-"#;
+"#,
+        );
+
+        // Include API routes in the minimal bundle (pages/api/ can coexist with app/)
+        if !scan.api_routes.is_empty() {
+            entry.push_str("\nglobalThis.__rex_api_handlers = {};\n");
+            for (i, route) in scan.api_routes.iter().enumerate() {
+                let api_path = route.abs_path.to_string_lossy().replace('\\', "/");
+                let module_name = route.module_name();
+                entry.push_str(&format!("import * as __api{i} from '{api_path}';\n"));
+                entry.push_str(&format!(
+                    "globalThis.__rex_api_handlers['{module_name}'] = __api{i};\n"
+                ));
+            }
+            // Add the API handler runtime functions (same as in build_server_bundle)
+            entry.push_str(
+                r#"
+globalThis.__rex_call_api_handler = function(routeKey, reqJson) {
+    var handlers = globalThis.__rex_api_handlers;
+    if (!handlers) throw new Error('No API handlers registered');
+    var handler = handlers[routeKey];
+    if (!handler) throw new Error('API handler not found: ' + routeKey);
+    var handlerFn = handler.default;
+    if (!handlerFn) throw new Error('No default export for API route: ' + routeKey);
+
+    var reqData = JSON.parse(reqJson);
+    var res = {
+        _statusCode: 200, _headers: {}, _body: '',
+        status: function(code) { this._statusCode = code; return this; },
+        setHeader: function(name, value) { this._headers[name.toLowerCase()] = value; return this; },
+        json: function(data) { this._headers['content-type'] = 'application/json'; this._body = JSON.stringify(data); return this; },
+        send: function(body) { if (typeof body === 'object' && !this._headers['content-type']) return this.json(body); this._body = typeof body === 'string' ? body : String(body); return this; },
+        end: function(body) { if (body !== undefined) this._body = String(body); return this; },
+        redirect: function(statusOrUrl, maybeUrl) { if (typeof statusOrUrl === 'string') { this._statusCode = 307; this._headers['location'] = statusOrUrl; } else { this._statusCode = statusOrUrl; this._headers['location'] = maybeUrl; } return this; }
+    };
+    var req = { method: reqData.method, url: reqData.url, headers: reqData.headers || {}, query: reqData.query || {}, body: reqData.body, cookies: reqData.cookies || {} };
+
+    var result = handlerFn(req, res);
+    if (result && typeof result.then === 'function') {
+        globalThis.__rex_api_resolved = null;
+        globalThis.__rex_api_rejected = null;
+        result.then(function() { globalThis.__rex_api_resolved = { statusCode: res._statusCode, headers: res._headers, body: res._body }; }, function(e) { globalThis.__rex_api_rejected = e; });
+        return '__REX_API_ASYNC__';
+    }
+    return JSON.stringify({ statusCode: res._statusCode, headers: res._headers, body: res._body });
+};
+
+globalThis.__rex_resolve_api = function() {
+    if (globalThis.__rex_api_rejected) throw globalThis.__rex_api_rejected;
+    if (globalThis.__rex_api_resolved !== null) return JSON.stringify(globalThis.__rex_api_resolved);
+    throw new Error('API handler promise did not resolve');
+};
+"#,
+            );
+        }
         let entry_path = entry_dir.join("server-entry.js");
         fs::write(&entry_path, entry)?;
 

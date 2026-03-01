@@ -8,6 +8,7 @@
 
 #[allow(clippy::unwrap_used)]
 mod rsc {
+    use futures::StreamExt;
     use std::net::TcpStream;
     use std::path::PathBuf;
     use std::process::{Child, Command, Stdio};
@@ -584,5 +585,215 @@ mod rsc {
                 );
             }
         }
+    }
+
+    // -------------------------------------------------------
+    // Streaming HTML verification tests
+    // -------------------------------------------------------
+
+    #[tokio::test]
+    #[ignore]
+    async fn rsc_response_is_chunked_transfer() {
+        // Streaming responses use chunked transfer encoding (no content-length).
+        // This verifies the server is actually streaming rather than buffering.
+        let url = format!("{}/", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+
+        // Chunked responses either have Transfer-Encoding: chunked
+        // or lack a Content-Length header (axum uses chunked for Body::from_stream)
+        let has_chunked = resp
+            .headers()
+            .get("transfer-encoding")
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.contains("chunked"))
+            .unwrap_or(false);
+        let no_content_length = resp.headers().get("content-length").is_none();
+
+        assert!(
+            has_chunked || no_content_length,
+            "Response should be streamed (chunked or no content-length), \
+             but has content-length: {:?}",
+            resp.headers().get("content-length")
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn rsc_head_shell_flushed_before_body() {
+        // The head shell (DOCTYPE, meta, modulepreload, module map) must
+        // be a separate stream chunk from the body tail (SSR HTML, flight data).
+        // Read the response as a byte stream and verify the first chunk
+        // contains head content but NOT the SSR body content.
+        let url = format!("{}/dashboard/settings", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        let mut stream = resp.bytes_stream();
+
+        let mut chunks: Vec<String> = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let bytes = chunk.unwrap();
+            chunks.push(String::from_utf8_lossy(&bytes).to_string());
+        }
+
+        assert!(
+            chunks.len() >= 2,
+            "Expected at least 2 stream chunks (head shell + body tail), got {}",
+            chunks.len()
+        );
+
+        let first_chunk = &chunks[0];
+
+        // Head shell must contain early content
+        assert!(
+            first_chunk.contains("<!DOCTYPE html>"),
+            "First chunk must start with DOCTYPE"
+        );
+        assert!(
+            first_chunk.contains("__REX_RSC_MODULE_MAP__"),
+            "First chunk must contain early module map injection"
+        );
+        assert!(
+            first_chunk.contains("<body>") || first_chunk.contains("<body "),
+            "First chunk must open <body> tag"
+        );
+
+        // Head shell must NOT contain the SSR body (that comes in later chunks)
+        assert!(
+            !first_chunk.contains("__rex\""),
+            "First chunk should not contain the __rex div (that's in the body tail)"
+        );
+        assert!(
+            !first_chunk.contains("__REX_RSC_DATA__"),
+            "First chunk should not contain flight data (that's in the body tail)"
+        );
+
+        // Remaining chunks (joined) must contain the body tail
+        let tail: String = chunks[1..].join("");
+        assert!(
+            tail.contains("<div id=\"__rex\">"),
+            "Body tail must contain the __rex SSR div"
+        );
+        assert!(
+            tail.contains("__REX_RSC_DATA__"),
+            "Body tail must contain inline flight data"
+        );
+        assert!(
+            tail.contains("</html>"),
+            "Body tail must close the HTML document"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn rsc_head_shell_has_modulepreload_hints() {
+        // The head shell should contain <link rel="modulepreload"> for client
+        // component chunks. This is critical for eliminating the import waterfall —
+        // the browser starts fetching JS while V8 renders the body.
+        let url = format!("{}/dashboard/settings", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        let mut stream = resp.bytes_stream();
+
+        // Read only the first chunk (the head shell)
+        let first_chunk = stream
+            .next()
+            .await
+            .expect("stream should have at least one chunk")
+            .unwrap();
+        let head_shell = String::from_utf8_lossy(&first_chunk);
+
+        // Settings page imports Counter ("use client"), so its chunk should be preloaded
+        assert!(
+            head_shell.contains("rel=\"modulepreload\""),
+            "Head shell must contain modulepreload links for client chunks.\n\
+             Head shell:\n{}",
+            head_shell
+        );
+
+        // The modulepreload href should point to a valid static asset path
+        assert!(
+            head_shell.contains("/_rex/static/rsc/"),
+            "Modulepreload links must reference /_rex/static/rsc/ paths"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn rsc_body_tail_contains_ssr_content() {
+        // The body tail (second stream phase) should contain actual SSR-rendered
+        // content from V8, not just shell/placeholder HTML.
+        let url = format!("{}/about", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        let mut stream = resp.bytes_stream();
+
+        let mut chunks: Vec<String> = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let bytes = chunk.unwrap();
+            chunks.push(String::from_utf8_lossy(&bytes).to_string());
+        }
+
+        assert!(
+            chunks.len() >= 2,
+            "Expected at least 2 stream chunks, got {}",
+            chunks.len()
+        );
+
+        // The body tail should have the actual rendered content
+        let tail: String = chunks[1..].join("");
+        assert!(
+            tail.contains("About"),
+            "Body tail should contain rendered page content ('About')"
+        );
+
+        // Flight data should be in the body tail (same chunk as SSR HTML)
+        assert!(
+            tail.contains("type=\"text/rsc\""),
+            "Body tail should contain flight data script with type=text/rsc"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn rsc_streaming_complete_html_is_valid() {
+        // When all chunks are assembled, the result must be a complete valid HTML document.
+        let url = format!("{}/", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        let mut stream = resp.bytes_stream();
+
+        let mut full_html = String::new();
+        while let Some(chunk) = stream.next().await {
+            let bytes = chunk.unwrap();
+            full_html.push_str(&String::from_utf8_lossy(&bytes));
+        }
+
+        // Verify complete document structure
+        assert!(full_html.starts_with("<!DOCTYPE html>"));
+        assert!(full_html.contains("<html>"));
+        assert!(full_html.contains("<head>"));
+        assert!(full_html.contains("</head>"));
+        assert!(full_html.contains("<body>") || full_html.contains("<body "));
+        assert!(full_html.contains("</body>"));
+        assert!(full_html.trim_end().ends_with("</html>"));
+
+        // Critical ordering: module map appears before flight data
+        let map_pos = full_html
+            .find("__REX_RSC_MODULE_MAP__")
+            .expect("Missing module map");
+        let flight_pos = full_html
+            .find("__REX_RSC_DATA__")
+            .expect("Missing flight data");
+        assert!(
+            map_pos < flight_pos,
+            "Module map (pos {map_pos}) must appear before flight data (pos {flight_pos})"
+        );
+
+        // Critical ordering: head shell content before SSR body
+        let body_tag_pos = full_html.find("<body>").or_else(|| full_html.find("<body "))
+            .expect("Missing body tag");
+        let rex_div_pos = full_html
+            .find("<div id=\"__rex\">")
+            .expect("Missing __rex div");
+        assert!(
+            body_tag_pos < rex_div_pos,
+            "Body tag must appear before __rex div"
+        );
     }
 }
