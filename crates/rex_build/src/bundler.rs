@@ -674,6 +674,7 @@ async fn build_server_bundle(
 /// Rolldown handles the full pipeline: parsing TSX/JSX, resolving imports from
 /// node_modules (including React), transforming, and code-splitting shared
 /// dependencies into separate chunks. Output is ESM.
+#[allow(clippy::too_many_arguments)]
 async fn build_client_bundles(
     config: &RexConfig,
     scan: &ScanResult,
@@ -2736,7 +2737,7 @@ export default function Home() {
         );
 
         // The output file should exist and contain actual CSS (not just the directive)
-        for (_input, output) in &mappings {
+        for output in mappings.values() {
             assert!(output.exists(), "Tailwind output file should exist");
             let content = fs::read_to_string(output).unwrap();
             assert!(

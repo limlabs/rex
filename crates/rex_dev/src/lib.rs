@@ -1,6 +1,7 @@
 pub mod hmr;
 pub mod rebuild;
 pub mod tailwind;
+pub mod typecheck;
 pub mod watcher;
 
 pub use hmr::HmrBroadcast;

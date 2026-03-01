@@ -717,7 +717,7 @@ pub async fn handle_image(state: &Arc<AppState>, req: &RexRequest) -> RexRespons
     let q: u8 = query.get("q").and_then(|v| v.parse().ok()).unwrap_or(75);
     let f = query.get("f").cloned();
 
-    if w < 16 || w > 4096 {
+    if !(16..=4096).contains(&w) {
         return RexResponse::text(400, "width must be 16-4096".to_string());
     }
 

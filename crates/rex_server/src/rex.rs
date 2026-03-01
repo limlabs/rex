@@ -185,6 +185,7 @@ impl Rex {
 
     /// Shared initialization logic: builds route tries, computes document descriptor,
     /// creates AppState and HotState.
+    #[allow(clippy::too_many_arguments)]
     async fn init_from_parts(
         config: RexConfig,
         scan: ScanResult,
