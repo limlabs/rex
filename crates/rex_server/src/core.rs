@@ -857,6 +857,15 @@ pub async fn handle_request(
         return handle_image(state, req).await;
     }
 
+    // /mcp — handled by Axum router directly, but for NAPI/core dispatch:
+    if path == "/mcp" {
+        return RexResponse {
+            status: 405,
+            headers: vec![("content-type".to_string(), "text/plain".to_string())],
+            body: RexBody::Full(b"MCP endpoint requires POST via Axum router".to_vec()),
+        };
+    }
+
     // /api/*
     if path.starts_with("/api/") || path == "/api" {
         return handle_api(state, hot, req).await;

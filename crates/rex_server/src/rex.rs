@@ -233,6 +233,7 @@ impl Rex {
                 project_config,
                 manifest_json,
                 document_descriptor,
+                has_mcp_tools: !scan.mcp_tools.is_empty(),
             })),
         });
 

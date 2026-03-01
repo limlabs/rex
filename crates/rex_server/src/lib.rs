@@ -1,6 +1,7 @@
 pub mod core;
 pub mod document;
 pub mod handlers;
+pub mod mcp;
 pub mod rex;
 pub mod server;
 

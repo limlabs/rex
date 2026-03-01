@@ -287,6 +287,58 @@ globalThis.__rex_resolve_gsp = function() {
 };
 "#;
 
+/// MCP tool runtime functions appended to the virtual entry when mcp/ tools exist.
+/// Defines __rex_list_mcp_tools() and __rex_call_mcp_tool(name, paramsJson).
+const MCP_RUNTIME: &str = r#"
+globalThis.__rex_mcp_resolved = null;
+globalThis.__rex_mcp_rejected = null;
+
+globalThis.__rex_list_mcp_tools = function() {
+    var tools = globalThis.__rex_mcp_tools;
+    if (!tools) return '[]';
+    var result = [];
+    var names = Object.keys(tools);
+    for (var i = 0; i < names.length; i++) {
+        var name = names[i];
+        var mod = tools[name];
+        result.push({
+            name: name,
+            description: mod.description || '',
+            parameters: mod.parameters || { type: 'object', properties: {} }
+        });
+    }
+    return JSON.stringify(result);
+};
+
+globalThis.__rex_call_mcp_tool = function(name, paramsJson) {
+    var tools = globalThis.__rex_mcp_tools;
+    if (!tools) throw new Error('No MCP tools registered');
+    var mod = tools[name];
+    if (!mod) throw new Error('MCP tool not found: ' + name);
+    var handlerFn = mod.default;
+    if (!handlerFn) throw new Error('No default export for MCP tool: ' + name);
+
+    var params = JSON.parse(paramsJson);
+    var result = handlerFn(params);
+    if (result && typeof result.then === 'function') {
+        globalThis.__rex_mcp_resolved = null;
+        globalThis.__rex_mcp_rejected = null;
+        result.then(
+            function(v) { globalThis.__rex_mcp_resolved = v; },
+            function(e) { globalThis.__rex_mcp_rejected = e; }
+        );
+        return '__REX_MCP_ASYNC__';
+    }
+    return JSON.stringify(result);
+};
+
+globalThis.__rex_resolve_mcp = function() {
+    if (globalThis.__rex_mcp_rejected) throw globalThis.__rex_mcp_rejected;
+    if (globalThis.__rex_mcp_resolved !== null) return JSON.stringify(globalThis.__rex_mcp_resolved);
+    throw new Error('MCP tool promise did not resolve');
+};
+"#;
+
 /// Middleware runtime functions appended to the virtual entry when middleware.ts exists.
 /// Defines __rex_run_middleware(reqJson) and __rex_resolve_middleware().
 const MIDDLEWARE_RUNTIME: &str = r#"
@@ -510,12 +562,30 @@ async fn build_server_bundle(
         entry.push_str("globalThis.__rex_middleware = __middleware;\n");
     }
 
+    // MCP tools (if mcp/ directory has tool files)
+    if !scan.mcp_tools.is_empty() {
+        entry.push_str("\nglobalThis.__rex_mcp_tools = {};\n");
+        for (i, tool) in scan.mcp_tools.iter().enumerate() {
+            let tool_path = tool.abs_path.to_string_lossy().replace('\\', "/");
+            let tool_name = &tool.name;
+            entry.push_str(&format!("import * as __mcp{i} from '{tool_path}';\n"));
+            entry.push_str(&format!(
+                "globalThis.__rex_mcp_tools['{tool_name}'] = __mcp{i};\n"
+            ));
+        }
+    }
+
     // SSR runtime functions
     entry.push_str(SSR_RUNTIME);
 
     // Middleware runtime (only when middleware exists)
     if scan.middleware.is_some() {
         entry.push_str(MIDDLEWARE_RUNTIME);
+    }
+
+    // MCP runtime (only when mcp/ tools exist)
+    if !scan.mcp_tools.is_empty() {
+        entry.push_str(MCP_RUNTIME);
     }
 
     let entry_path = entries_dir.join("server-entry.js");
@@ -1659,6 +1729,7 @@ mod tests {
             error: None,
             not_found: None,
             middleware: None,
+            mcp_tools: vec![],
         };
 
         (tmp, config, scan)
@@ -2080,6 +2151,7 @@ export function renderToString(el) { return renderEl(el); }
             error: None,
             not_found: None,
             middleware: None,
+            mcp_tools: vec![],
         };
 
         let result = build_bundles(&config, &scan, &ProjectConfig::default())
@@ -2238,6 +2310,7 @@ export default function Home() {
             error: None,
             not_found: None,
             middleware: None,
+            mcp_tools: vec![],
         };
 
         let result = build_bundles(&config, &scan, &ProjectConfig::default())
@@ -2521,6 +2594,7 @@ export default function Home() {
             error: None,
             not_found: None,
             middleware: None,
+            mcp_tools: vec![],
         };
 
         let (_result, pool) = build_and_load(&config, &scan).await;
