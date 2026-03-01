@@ -88,6 +88,7 @@ DX_METRICS = [
     ("node_modules_mb", "node_modules", "MB"),
     ("cold_start_ms", "Cold Start", "ms"),
     ("rebuild_ms", "Rebuild", "ms"),
+    ("lint_time_ms", "Lint", "ms"),
     ("dev_memory_mb", "Memory", "MB"),
 ]
 

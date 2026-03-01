@@ -20,6 +20,8 @@ pub struct SsrIsolate {
     gsp_fn: v8::Global<v8::Function>,
     api_handler_fn: Option<v8::Global<v8::Function>>,
     document_fn: Option<v8::Global<v8::Function>>,
+    /// Last successfully loaded bundle, used to restore state on failed reload
+    last_bundle: String,
 }
 
 /// Evaluate a script in the given scope, using TryCatch for error handling.
@@ -211,6 +213,7 @@ impl SsrIsolate {
             gsp_fn,
             api_handler_fn,
             document_fn,
+            last_bundle: server_bundle_js.to_string(),
         })
     }
 
@@ -355,9 +358,16 @@ impl SsrIsolate {
     pub fn reload(&mut self, server_bundle_js: &str) -> Result<()> {
         v8::scope_with_context!(scope, &mut self.isolate, &self.context);
 
+        // Clear page registry and try the new bundle
         v8_eval!(scope, "globalThis.__rex_pages = {};", "<reload>")?;
-        v8_eval!(scope, server_bundle_js, "server-bundle.js")
-            .context("Failed to evaluate updated server bundle")?;
+        if let Err(e) = v8_eval!(scope, server_bundle_js, "server-bundle.js") {
+            // Restore the last working bundle so the isolate remains functional
+            tracing::warn!("New bundle failed, restoring previous: {e}");
+            v8_eval!(scope, "globalThis.__rex_pages = {};", "<restore>")?;
+            v8_eval!(scope, &self.last_bundle, "server-bundle.js")
+                .context("Failed to restore previous server bundle")?;
+            return Err(e.context("Failed to evaluate updated server bundle"));
+        }
 
         let ctx = scope.get_current_context();
         let global = ctx.global(scope);
@@ -376,6 +386,7 @@ impl SsrIsolate {
         // Re-lookup document renderer (may be added/removed on reload)
         self.document_fn = v8_get_optional_fn!(scope, global, "__rex_render_document");
 
+        self.last_bundle = server_bundle_js.to_string();
         debug!("SSR isolate reloaded");
         Ok(())
     }

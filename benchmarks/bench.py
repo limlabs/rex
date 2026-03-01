@@ -498,6 +498,7 @@ def dx_framework(
     start_fn,
     about_page: Path,
     iterations: int = 1,
+    lint_cmd: list[str] | None = None,
 ):
     progress(fw, "dx")
     section(fw, "DX")
@@ -627,6 +628,19 @@ def dx_framework(
             else:
                 print(f"  {yellow('Rebuild: all iterations timed out')}")
 
+    # ── Lint time ──
+    if lint_cmd is not None:
+        lint_samples: list[float] = []
+        for i in range(iterations):
+            if iterations > 1:
+                print(f"  {dim(f'Lint iteration {i + 1}/{iterations}...')}")
+            t0 = time.monotonic()
+            subprocess.run(lint_cmd, cwd=project_dir, capture_output=True, timeout=60)
+            lint_samples.append(round((time.monotonic() - t0) * 1000))
+
+        med, sd = add_sampled("dx", fw, "lint_time_ms", lint_samples)
+        print(fmt_sampled("Lint time:   ", med, sd, "ms", iterations))
+
     print()
 
 
@@ -637,9 +651,23 @@ def run_dx(frameworks: list[str], iterations: int = 1):
     print()
 
     if "rex" in frameworks:
-        dx_framework("rex", REX_FIXTURE, start_rex, REX_FIXTURE / "pages/about.tsx", iterations)
+        dx_framework(
+            "rex",
+            REX_FIXTURE,
+            start_rex,
+            REX_FIXTURE / "pages/about.tsx",
+            iterations,
+            lint_cmd=[str(REX_BIN), "lint", "--root", str(REX_FIXTURE)],
+        )
     if "nextjs" in frameworks:
-        dx_framework("nextjs", NEXT_DIR, start_next, NEXT_DIR / "pages/about.tsx", iterations)
+        dx_framework(
+            "nextjs",
+            NEXT_DIR,
+            start_next,
+            NEXT_DIR / "pages/about.tsx",
+            iterations,
+            lint_cmd=["npx", "next", "lint", "--dir", "pages", "--no-cache"],
+        )
     if "nextjs_app" in frameworks:
         dx_framework(
             "nextjs_app",
@@ -647,6 +675,7 @@ def run_dx(frameworks: list[str], iterations: int = 1):
             start_next_app,
             NEXT_APP_DIR / "app/about/page.tsx",
             iterations,
+            lint_cmd=["npx", "next", "lint", "--dir", "app", "--no-cache"],
         )
     if "tanstack" in frameworks:
         dx_framework(
@@ -658,11 +687,21 @@ def run_dx(frameworks: list[str], iterations: int = 1):
         )
     if "rex_tw" in frameworks:
         dx_framework(
-            "rex_tw", REX_TW_FIXTURE, start_rex_tw, REX_TW_FIXTURE / "pages/about.tsx", iterations
+            "rex_tw",
+            REX_TW_FIXTURE,
+            start_rex_tw,
+            REX_TW_FIXTURE / "pages/about.tsx",
+            iterations,
+            lint_cmd=[str(REX_BIN), "lint", "--root", str(REX_TW_FIXTURE)],
         )
     if "nextjs_tw" in frameworks:
         dx_framework(
-            "nextjs_tw", NEXT_TW_DIR, start_next_tw, NEXT_TW_DIR / "pages/about.tsx", iterations
+            "nextjs_tw",
+            NEXT_TW_DIR,
+            start_next_tw,
+            NEXT_TW_DIR / "pages/about.tsx",
+            iterations,
+            lint_cmd=["npx", "next", "lint", "--dir", "pages", "--no-cache"],
         )
     if "tanstack_tw" in frameworks:
         dx_framework(

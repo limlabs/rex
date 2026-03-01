@@ -30,11 +30,13 @@ SAMPLE_DX = [
     {"suite": "dx", "framework": "rex", "metric": "node_modules_mb", "value": 12},
     {"suite": "dx", "framework": "rex", "metric": "cold_start_ms", "value": 200},
     {"suite": "dx", "framework": "rex", "metric": "rebuild_ms", "value": 50},
+    {"suite": "dx", "framework": "rex", "metric": "lint_time_ms", "value": 30},
     {"suite": "dx", "framework": "nextjs", "metric": "install_time_ms", "value": 4000},
     {"suite": "dx", "framework": "nextjs", "metric": "dependency_count", "value": 300},
     {"suite": "dx", "framework": "nextjs", "metric": "node_modules_mb", "value": 180},
     {"suite": "dx", "framework": "nextjs", "metric": "cold_start_ms", "value": 3000},
     {"suite": "dx", "framework": "nextjs", "metric": "rebuild_ms", "value": 400},
+    {"suite": "dx", "framework": "nextjs", "metric": "lint_time_ms", "value": 2500},
 ]
 
 SAMPLE_SERVER = [
@@ -137,7 +139,7 @@ class TestLoadResults:
         assert not result.is_empty()
         assert "label" in result.columns
         rex_rows = result.filter(pl.col("label") == "Rex")
-        assert len(rex_rows) == 5
+        assert len(rex_rows) == 6
 
     def test_labels_mapped(self, tmp_path):
         path = tmp_path / "results.json"
@@ -185,6 +187,7 @@ class TestMakeDxSummary:
         assert rex["node_modules"] == "12MB"
         assert rex["Cold Start"] == "200ms"
         assert rex["Rebuild"] == "50ms"
+        assert rex["Lint"] == "30ms"
 
     def test_missing_metric_excluded(self):
         # Only install_time_ms, no other metrics
