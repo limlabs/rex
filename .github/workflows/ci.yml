@@ -59,7 +59,7 @@ jobs:
     needs: check
     runs-on: ubuntu-latest
     env:
-      COVERAGE_THRESHOLD: 47
+      COVERAGE_THRESHOLD: 52
     steps:
       - uses: actions/checkout@v4
 
