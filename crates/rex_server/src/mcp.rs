@@ -121,6 +121,18 @@ fn json_rpc_error(id: serde_json::Value, code: i32, message: String) -> JsonRpcR
     }
 }
 
+/// Serialize a JSON-RPC response to a string, falling back to an empty object on error.
+fn serialize_response(resp: &JsonRpcResponse) -> String {
+    serde_json::to_string(resp).unwrap_or_default()
+}
+
+/// Convert a serializable value to `serde_json::Value`.
+/// This only fails for types that can't be represented as JSON (e.g., maps with non-string keys),
+/// which none of our MCP types have.
+fn to_json_value<T: Serialize>(value: T) -> serde_json::Value {
+    serde_json::to_value(value).expect("MCP types are always JSON-serializable")
+}
+
 pub async fn mcp_handler(
     State(state): State<Arc<AppState>>,
     _headers: HeaderMap,
@@ -146,7 +158,7 @@ pub async fn mcp_handler(
             return (
                 StatusCode::OK,
                 [("content-type", "application/json")],
-                serde_json::to_string(&resp).unwrap_or_default(),
+                serialize_response(&resp),
             )
                 .into_response();
         }
@@ -162,7 +174,7 @@ pub async fn mcp_handler(
         return (
             StatusCode::OK,
             [("content-type", "application/json")],
-            serde_json::to_string(&resp).unwrap_or_default(),
+            serialize_response(&resp),
         )
             .into_response();
     }
@@ -189,7 +201,7 @@ pub async fn mcp_handler(
                     version: env!("CARGO_PKG_VERSION").to_string(),
                 },
             };
-            json_rpc_response(id, serde_json::to_value(result).unwrap())
+            json_rpc_response(id, to_json_value(result))
         }
 
         "ping" => json_rpc_response(id, serde_json::json!({})),
@@ -213,11 +225,11 @@ pub async fn mcp_handler(
                         })
                         .collect();
                     let result = McpToolsListResult { tools };
-                    json_rpc_response(id, serde_json::to_value(result).unwrap())
+                    json_rpc_response(id, to_json_value(result))
                 }
                 Ok(Ok(None)) | Ok(Err(_)) => {
                     let result = McpToolsListResult { tools: vec![] };
-                    json_rpc_response(id, serde_json::to_value(result).unwrap())
+                    json_rpc_response(id, to_json_value(result))
                 }
                 Err(e) => json_rpc_error(id, -32603, format!("Internal error: {e}")),
             }
@@ -230,12 +242,11 @@ pub async fn mcp_handler(
                     return (
                         StatusCode::OK,
                         [("content-type", "application/json")],
-                        serde_json::to_string(&json_rpc_error(
+                        serialize_response(&json_rpc_error(
                             id,
                             -32602,
                             format!("Invalid params: {e}"),
-                        ))
-                        .unwrap_or_default(),
+                        )),
                     )
                         .into_response();
                 }
@@ -258,7 +269,7 @@ pub async fn mcp_handler(
                         }],
                         is_error: None,
                     };
-                    json_rpc_response(id, serde_json::to_value(call_result).unwrap())
+                    json_rpc_response(id, to_json_value(call_result))
                 }
                 Ok(Err(e)) | Err(e) => {
                     let call_result = McpToolCallResult {
@@ -268,7 +279,7 @@ pub async fn mcp_handler(
                         }],
                         is_error: Some(true),
                     };
-                    json_rpc_response(id, serde_json::to_value(call_result).unwrap())
+                    json_rpc_response(id, to_json_value(call_result))
                 }
             }
         }
@@ -279,7 +290,7 @@ pub async fn mcp_handler(
     (
         StatusCode::OK,
         [("content-type", "application/json")],
-        serde_json::to_string(&response).unwrap_or_default(),
+        serialize_response(&response),
     )
         .into_response()
 }
@@ -291,7 +302,7 @@ mod tests {
     #[test]
     fn test_parse_json_rpc_request() {
         let json = r#"{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}"#;
-        let req: JsonRpcRequest = serde_json::from_str(json).unwrap();
+        let req: JsonRpcRequest = serde_json::from_str(json).expect("valid JSON-RPC request");
         assert_eq!(req.method, "initialize");
         assert_eq!(req.id, Some(serde_json::json!(1)));
     }
@@ -299,7 +310,7 @@ mod tests {
     #[test]
     fn test_parse_json_rpc_notification() {
         let json = r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#;
-        let req: JsonRpcRequest = serde_json::from_str(json).unwrap();
+        let req: JsonRpcRequest = serde_json::from_str(json).expect("valid JSON-RPC notification");
         assert_eq!(req.method, "notifications/initialized");
         assert!(req.id.is_none());
     }
@@ -307,7 +318,7 @@ mod tests {
     #[test]
     fn test_json_rpc_response_serialization() {
         let resp = json_rpc_response(serde_json::json!(1), serde_json::json!({"result": "ok"}));
-        let json = serde_json::to_string(&resp).unwrap();
+        let json = serde_json::to_string(&resp).expect("serializable response");
         assert!(json.contains("\"jsonrpc\":\"2.0\""));
         assert!(json.contains("\"result\""));
         assert!(!json.contains("\"error\""));
@@ -316,7 +327,7 @@ mod tests {
     #[test]
     fn test_json_rpc_error_serialization() {
         let resp = json_rpc_error(serde_json::json!(2), -32601, "Method not found".to_string());
-        let json = serde_json::to_string(&resp).unwrap();
+        let json = serde_json::to_string(&resp).expect("serializable error");
         assert!(json.contains("\"error\""));
         assert!(json.contains("-32601"));
         assert!(!json.contains("\"result\""));
@@ -325,7 +336,7 @@ mod tests {
     #[test]
     fn test_parse_tool_call_params() {
         let json = r#"{"name":"search","arguments":{"query":"test"}}"#;
-        let params: McpToolCallParams = serde_json::from_str(json).unwrap();
+        let params: McpToolCallParams = serde_json::from_str(json).expect("valid tool call params");
         assert_eq!(params.name, "search");
         assert_eq!(params.arguments["query"], "test");
     }
@@ -342,7 +353,7 @@ mod tests {
                 version: "0.1.0".to_string(),
             },
         };
-        let json = serde_json::to_value(&result).unwrap();
+        let json = serde_json::to_value(&result).expect("serializable init result");
         assert_eq!(json["protocolVersion"], "2025-03-26");
         assert_eq!(json["serverInfo"]["name"], "rex");
         assert!(json["capabilities"]["tools"].is_object());

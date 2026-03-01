@@ -83,8 +83,15 @@ pub fn scan_mcp_tools(project_root: &Path) -> Vec<McpToolRoute> {
             })
             .map(|e| {
                 let abs_path = e.path();
-                let file_path = abs_path.strip_prefix(&mcp_dir).unwrap().to_path_buf();
-                let name = file_path.file_stem().unwrap().to_string_lossy().to_string();
+                let file_path = abs_path
+                    .strip_prefix(&mcp_dir)
+                    .expect("mcp tool path must be under mcp_dir")
+                    .to_path_buf();
+                let name = file_path
+                    .file_stem()
+                    .expect("mcp tool file must have a stem")
+                    .to_string_lossy()
+                    .to_string();
                 debug!(name = %name, path = %abs_path.display(), "scanned mcp tool");
                 McpToolRoute {
                     name,
