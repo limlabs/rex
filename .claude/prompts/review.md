@@ -20,6 +20,7 @@ Review PR #{PR_NUMBER} thoroughly.
 - No O(n^2) algorithms where O(n) or O(n log n) is possible
 - Async code doesn't block the runtime (no blocking I/O in async context)
 - V8 isolate work stays on its dedicated thread
+- Consider impact on existing benchmarks (`benchmarks/`). If a feature or change could affect performance-sensitive paths, flag whether an existing benchmark covers it or whether a new benchmark is warranted
 
 **Safety & security**
 - No command injection, path traversal, or unsanitized user input
@@ -27,7 +28,9 @@ Review PR #{PR_NUMBER} thoroughly.
 - CSS/HTML output is properly escaped
 
 **Tests**
-- New behavior has test coverage
+- New behavior must have 100% unit test coverage
+- Every new behavior must be exercised by at least one integration test
+- User-facing features must have an e2e test against a fixture with a real Rex project (one fixture per feature)
 - Existing tests still make sense with the changes
 - `cargo check` produces zero warnings
 
