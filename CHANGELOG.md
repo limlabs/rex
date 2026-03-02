@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/limlabs/rex/compare/v0.5.0...v0.5.1) (2026-03-02)
+
+
+### Bug Fixes
+
+* add missing rex/head module ([#24](https://github.com/limlabs/rex/issues/24)) ([194329b](https://github.com/limlabs/rex/commit/194329bc34b89ff001b852c0d24c9ee7c3b9b6b4))
+* **ci:** filter artifact download to exclude docker metadata ([#21](https://github.com/limlabs/rex/issues/21)) ([c9a1900](https://github.com/limlabs/rex/commit/c9a1900e16783954ca61dddae3a78588c7691ad9))
+
 ## [0.5.0](https://github.com/limlabs/rex/compare/v0.4.0...v0.5.0) (2026-03-02)
 
 
