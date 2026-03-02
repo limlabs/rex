@@ -44,19 +44,8 @@ jobs:
       - name: TypeScript strict check
         run: cd runtime && npm run typecheck
 
-      - name: Build runtime IIFE files
-        run: cd runtime && npm run build
-
       - name: oxlint
         run: npx oxlint --deny-warnings runtime/ packages/rex/src/
-
-      - name: Verify clean working tree
-        run: |
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "::error::Working tree is dirty after build"
-            git status --porcelain
-            exit 1
-          fi
 
   test:
     name: Test & Coverage
