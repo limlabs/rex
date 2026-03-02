@@ -125,7 +125,12 @@ impl Rex {
             .min(if opts.dev { 4 } else { 8 });
 
         debug!(pool_size, "Creating V8 isolate pool");
-        let pool = IsolatePool::new(pool_size, Arc::new(server_bundle))?;
+        let project_root_str = config.project_root.to_string_lossy().to_string();
+        let pool = IsolatePool::new(
+            pool_size,
+            Arc::new(server_bundle),
+            Some(Arc::new(project_root_str)),
+        )?;
 
         let static_dir = config.client_build_dir();
 
@@ -164,7 +169,12 @@ impl Rex {
             .map(|n| n.get())
             .unwrap_or(4);
 
-        let pool = IsolatePool::new(pool_size, Arc::new(server_bundle))?;
+        let project_root_str = config.project_root.to_string_lossy().to_string();
+        let pool = IsolatePool::new(
+            pool_size,
+            Arc::new(server_bundle),
+            Some(Arc::new(project_root_str)),
+        )?;
 
         let static_dir = config.client_build_dir();
         let build_id = manifest.build_id.clone();
