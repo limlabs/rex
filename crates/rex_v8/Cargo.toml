@@ -1,6 +1,6 @@
 [package]
 name = "rex_v8"
-version = "0.5.0" # x-release-please-version
+version = "0.6.0" # x-release-please-version
 edition = "2021"
 
 [lints]
@@ -15,3 +15,6 @@ tracing = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
