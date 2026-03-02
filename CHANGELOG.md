@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/limlabs/rex/compare/v0.4.0...v0.5.0) (2026-03-02)
+
+
+### Features
+
+* **core:** support TOML config as alternative to JSON ([#18](https://github.com/limlabs/rex/issues/18)) ([2246fd9](https://github.com/limlabs/rex/commit/2246fd96ce0c491948e4b110f8a47a0bfce71b7c))
+
 ## [0.4.0](https://github.com/limlabs/rex/compare/v0.3.0...v0.4.0) (2026-03-02)
 
 
