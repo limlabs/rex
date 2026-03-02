@@ -19,6 +19,9 @@ pre-commit:
     test:
       run: cargo test
       fail_text: "Tests must pass before committing"
+    coverage-ratchet:
+      run: scripts/coverage-ratchet.sh
+      fail_text: "Coverage dropped below the threshold in .coverage-threshold"
 
 commit-msg:
   commands:
