@@ -10,9 +10,9 @@ import {
     existsSync,
     unlinkSync,
     rmSync,
-} from './fs.ts';
+} from './fs';
 
-import type { StatResult } from './fs.ts';
+import type { StatResult } from './fs';
 
 export function readFile(path: string, options?: string | { encoding?: string }): Promise<string | Uint8Array> {
     return Promise.resolve(readFileSync(path, options));
