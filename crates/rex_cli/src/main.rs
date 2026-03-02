@@ -122,7 +122,16 @@ async fn main() -> Result<()> {
 
             if tui_enabled {
                 let log_buffer = init_tui_tracing();
-                cmd_dev(root, port, true, Some(log_buffer)).await
+                let log_buffer_fallback = log_buffer.clone();
+                let result = cmd_dev(root, port, true, Some(log_buffer)).await;
+                if result.is_err() {
+                    // The TUI never started — dump buffered logs to stderr
+                    // so the user can see what happened before the error.
+                    for entry in log_buffer_fallback.snapshot() {
+                        eprintln!("[{}] {}", entry.level, entry.message);
+                    }
+                }
+                result
             } else {
                 init_plain_tracing();
                 cmd_dev(root, port, false, None).await
