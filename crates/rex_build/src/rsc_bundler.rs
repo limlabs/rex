@@ -273,7 +273,7 @@ async fn build_rsc_server_bundle(
     entry.push_str("\n// --- RSC Flight Runtime ---\n");
     entry.push_str(flight_runtime);
 
-    let entry_path = entries_dir.join("rsc-server-entry.js");
+    let entry_path = entries_dir.join("rsc-server-entry.ts");
     fs::write(&entry_path, &entry)?;
 
     // CSS → empty module
@@ -438,7 +438,7 @@ async fn build_rsc_ssr_bundle(
     entry.push_str("\n// --- RSC SSR Pass Runtime ---\n");
     entry.push_str(ssr_runtime);
 
-    let entry_path = entries_dir.join("rsc-ssr-entry.js");
+    let entry_path = entries_dir.join("rsc-ssr-entry.ts");
     fs::write(&entry_path, &entry)?;
 
     // CSS → empty module

@@ -4,7 +4,7 @@
 // and hydrate the server-rendered HTML with interactive client components.
 //
 // This file is bundled by rolldown as an ESM entry alongside client component
-// chunks. It replaces the old custom rsc-runtime.js parser.
+// chunks. It replaces the old custom rsc-runtime.ts parser.
 //
 // Module loading strategy:
 //   The flight I rows use ref_id hashes as module identifiers with empty chunks
@@ -23,25 +23,25 @@ import ReactDOM from 'react-dom/client';
 // factory initialization, before our module-level code can run.
 //
 // We just reference the shared module cache for pre-loading:
-var moduleCache = window.__rexModuleCache || {};
+var moduleCache: Record<string, unknown> = window.__rexModuleCache || {};
 
 // --- Pre-load client modules ---
 // Load all client component modules into the webpack cache before hydrating.
 // The module map maps ref_id → { chunk_url, export_name }.
 // After loading, __webpack_require__(ref_id) returns the module.
 
-function preloadClientModules() {
+function preloadClientModules(): Promise<void | unknown[]> {
   var rawMap = window.__REX_RSC_MODULE_MAP__ || {};
-  var entries = rawMap.entries || rawMap;
-  var promises = [];
+  var entries = (rawMap.entries || rawMap) as Record<string, RexRscModuleMapEntry>;
+  var promises: Promise<void>[] = [];
 
   for (var refId in entries) {
     if (!Object.prototype.hasOwnProperty.call(entries, refId)) continue;
     var entry = entries[refId];
     // Use an IIFE to capture refId in closure
-    (function(id, url) {
+    (function(id: string, url: string) {
       promises.push(
-        import(url).then(function(mod) {
+        import(url).then(function(mod: Record<string, unknown>) {
           moduleCache[id] = mod;
         })
       );
@@ -55,15 +55,15 @@ function preloadClientModules() {
 // Transform __REX_RSC_MODULE_MAP__ into the webpack consumer manifest format
 // that React's flight decoder expects: { [refId]: { [exportName]: { id, chunks, name } } }
 
-function buildSSRManifest() {
+function buildSSRManifest(): Record<string, Record<string, { id: string; chunks: string[]; name: string }>> {
   var rawMap = window.__REX_RSC_MODULE_MAP__ || {};
-  var entries = rawMap.entries || rawMap;
-  var moduleMap = {};
+  var entries = (rawMap.entries || rawMap) as Record<string, RexRscModuleMapEntry>;
+  var moduleMap: Record<string, Record<string, { id: string; chunks: string[]; name: string }>> = {};
 
   for (var refId in entries) {
     if (!Object.prototype.hasOwnProperty.call(entries, refId)) continue;
     var entry = entries[refId];
-    var exportMap = {};
+    var exportMap: Record<string, { id: string; chunks: string[]; name: string }> = {};
     exportMap[entry.export_name] = {
       id: refId,
       chunks: [],
@@ -83,19 +83,19 @@ function buildSSRManifest() {
 
 // --- Hydration ---
 
-var rscRoot = null;
+var rscRoot: ReturnType<typeof ReactDOM.hydrateRoot> | ReturnType<typeof ReactDOM.createRoot> | null = null;
 
-function stringToReadableStream(str) {
+function stringToReadableStream(str: string): ReadableStream<Uint8Array> {
   var encoder = new TextEncoder();
   return new ReadableStream({
-    start: function(controller) {
+    start: function(controller: ReadableStreamDefaultController<Uint8Array>) {
       controller.enqueue(encoder.encode(str));
       controller.close();
     }
   });
 }
 
-function hydrateFromInlineData() {
+function hydrateFromInlineData(): void {
   var dataEl = document.getElementById('__REX_RSC_DATA__');
   if (!dataEl) return;
 
@@ -128,17 +128,17 @@ function hydrateFromInlineData() {
         rscRoot = ReactDOM.createRoot(document.body);
         rscRoot.render(tree);
       }
-    }).catch(function(e) {
+    }).catch(function(e: unknown) {
       console.error('[Rex RSC] Failed to process flight data:', e);
     });
-  }).catch(function(e) {
+  }).catch(function(e: unknown) {
     console.error('[Rex RSC] Module preload failed:', e);
   });
 }
 
 // --- Client-side navigation ---
 
-function navigateRsc(pathname) {
+function navigateRsc(pathname: string): Promise<void> {
   var manifest = window.__REX_MANIFEST__;
   if (!manifest) return Promise.reject(new Error('No manifest'));
 
@@ -155,7 +155,7 @@ function navigateRsc(pathname) {
   return treePromise.then(function(tree) {
     if (rscRoot) {
       React.startTransition(function() {
-        rscRoot.render(
+        rscRoot!.render(
           React.createElement(React.Suspense, { fallback: null }, tree)
         );
       });
