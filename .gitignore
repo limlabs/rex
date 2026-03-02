@@ -12,6 +12,6 @@ __marimo__/
 benchmarks/results*.json
 .tanstack
 .env
+.env*
 .claude/
 dist/
-!runtime/dist/

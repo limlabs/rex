@@ -39,6 +39,7 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent
 REX_BIN = Path(os.environ.get("REX_BIN", PROJECT_ROOT / "target/release/rex"))
 REX_FIXTURE = Path(os.environ.get("REX_FIXTURE", PROJECT_ROOT / "fixtures/basic"))
+REX_APP_FIXTURE = PROJECT_ROOT / "fixtures/app-router"
 NEXT_DIR = SCRIPT_DIR / "next-basic"
 NEXT_APP_DIR = SCRIPT_DIR / "next-app-basic"
 TANSTACK_DIR = SCRIPT_DIR / "tanstack-basic"
@@ -91,6 +92,7 @@ def yellow(s: str) -> str:
 
 FW_COLOR = {
     "rex": magenta,
+    "rex_app": magenta,
     "nextjs": cyan,
     "nextjs_app": cyan,
     "tanstack": yellow,
@@ -99,7 +101,8 @@ FW_COLOR = {
     "tanstack_tw": yellow,
 }
 FW_LABEL = {
-    "rex": "Rex",
+    "rex": "Rex (Pages)",
+    "rex_app": "Rex (App)",
     "nextjs": "Next.js (Pages)",
     "nextjs_app": "Next.js (App)",
     "tanstack": "TanStack Start",
@@ -247,6 +250,19 @@ def start_rex(mode: str, port: int) -> Optional[ServerProcess]:
     if not wait_for_port(port, timeout=30):
         proc.kill()
         print(f"  {yellow('SKIP')}: Rex failed to start on port {port}")
+        return None
+    return ServerProcess(proc, port)
+
+
+def start_rex_app(mode: str, port: int) -> Optional[ServerProcess]:
+    if not REX_BIN.exists():
+        print(f"  {yellow('SKIP')}: Rex binary not found at {REX_BIN}")
+        return None
+    cmd = [str(REX_BIN), mode, "--root", str(REX_APP_FIXTURE), "--port", str(port)]
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if not wait_for_port(port, timeout=30):
+        proc.kill()
+        print(f"  {yellow('SKIP')}: Rex (App) failed to start on port {port}")
         return None
     return ServerProcess(proc, port)
 
@@ -659,6 +675,14 @@ def run_dx(frameworks: list[str], iterations: int = 1):
             iterations,
             lint_cmd=[str(REX_BIN), "lint", "--root", str(REX_FIXTURE)],
         )
+    if "rex_app" in frameworks:
+        dx_framework(
+            "rex_app",
+            REX_APP_FIXTURE,
+            start_rex_app,
+            REX_APP_FIXTURE / "app/about/page.tsx",
+            iterations,
+        )
     if "nextjs" in frameworks:
         dx_framework(
             "nextjs",
@@ -860,6 +884,30 @@ def run_server(
             iterations,
         )
 
+    if "rex_app" in frameworks:
+
+        def build_rex_app():
+            if not REX_BIN.exists():
+                print(f"  {yellow('SKIP')}: Rex binary not found")
+                return False
+            subprocess.run(
+                [str(REX_BIN), "build", "--root", str(REX_APP_FIXTURE)],
+                capture_output=True,
+                timeout=60,
+            )
+            return True
+
+        server_framework(
+            "rex_app",
+            build_rex_app,
+            start_rex_app,
+            REX_APP_FIXTURE / ".rex/build",
+            requests,
+            concurrency,
+            warmup,
+            iterations,
+        )
+
     if "nextjs" in frameworks:
 
         def build_next():
@@ -1036,8 +1084,38 @@ def client_bundle_sizes(fw: str, build_dir: Path):
     print()
 
 
+LIGHTHOUSE_PAGES = {
+    "rex": [
+        ("/", "index"),
+        ("/about", "about"),
+        ("/blog/hello-world", "blog"),
+        ("/gallery", "gallery"),
+    ],
+    "rex_app": [
+        ("/", "index"),
+        ("/about", "about"),
+        ("/blog/hello-world", "blog"),
+        ("/dashboard", "dashboard"),
+    ],
+    "nextjs": [
+        ("/", "index"),
+        ("/about", "about"),
+        ("/blog/hello-world", "blog"),
+        ("/gallery", "gallery"),
+    ],
+    "nextjs_app": [("/", "index"), ("/about", "about"), ("/blog/hello-world", "blog")],
+    "tanstack": [
+        ("/", "index"),
+        ("/about", "about"),
+        ("/blog/hello-world", "blog"),
+        ("/gallery", "gallery"),
+    ],
+}
+
+
 def lighthouse_audit(fw: str, port: int):
-    """Run Lighthouse on key pages if available."""
+    """Run Lighthouse on key pages if available. Uses no throttling for local
+    benchmarks so raw server/client differences are visible."""
     if not shutil.which("lighthouse") and not shutil.which("npx"):
         return
 
@@ -1045,12 +1123,7 @@ def lighthouse_audit(fw: str, port: int):
     color = FW_COLOR.get(fw, dim)
     print(f"\n  {color(f'Lighthouse — {fw_label}')}", flush=True)
 
-    pages = [
-        ("/", "index"),
-        ("/about", "about"),
-        ("/blog/hello-world", "blog"),
-        ("/gallery", "gallery"),
-    ]
+    pages = LIGHTHOUSE_PAGES.get(fw, [("/", "index"), ("/about", "about")])
 
     for ep, label in pages:
         url = f"http://127.0.0.1:{port}{ep}"
@@ -1064,7 +1137,7 @@ def lighthouse_audit(fw: str, port: int):
                     "--output=json",
                     "--chrome-flags=--headless --no-sandbox",
                     "--only-categories=performance",
-                    "--throttling-method=devtools",
+                    "--throttling-method=provided",
                     "--quiet",
                 ],
                 stderr=subprocess.DEVNULL,
@@ -1122,6 +1195,13 @@ def run_client(frameworks: list[str]):
             subprocess.run([str(REX_BIN), "build", "--root", str(REX_FIXTURE)], capture_output=True)
         client_bundle_sizes("rex", REX_FIXTURE / ".rex/build/client")
 
+    if "rex_app" in frameworks:
+        if not (REX_APP_FIXTURE / ".rex/build").exists() and REX_BIN.exists():
+            subprocess.run(
+                [str(REX_BIN), "build", "--root", str(REX_APP_FIXTURE)], capture_output=True
+            )
+        client_bundle_sizes("rex_app", REX_APP_FIXTURE / ".rex/build/client")
+
     if "nextjs" in frameworks:
         if not (NEXT_DIR / ".next").exists():
             subprocess.run(["npx", "next", "build"], cwd=NEXT_DIR, capture_output=True)
@@ -1164,6 +1244,13 @@ def run_client(frameworks: list[str]):
             if server:
                 with server:
                     lighthouse_audit("rex", port)
+
+        if "rex_app" in frameworks and REX_BIN.exists():
+            port = find_free_port()
+            server = start_rex_app("start", port)
+            if server:
+                with server:
+                    lighthouse_audit("rex_app", port)
 
         if "nextjs" in frameworks and (NEXT_DIR / "node_modules").exists():
             port = find_free_port()
@@ -1220,8 +1307,8 @@ def main():
     )
     parser.add_argument(
         "--framework",
-        default="rex,nextjs,nextjs_app,tanstack,rex_tw,nextjs_tw,tanstack_tw",
-        help="Comma-separated: rex, nextjs, nextjs_app, tanstack, rex_tw, nextjs_tw, tanstack_tw (default: all)",
+        default="rex,rex_app,nextjs,nextjs_app,tanstack,rex_tw,nextjs_tw,tanstack_tw",
+        help="Comma-separated: rex, rex_app, nextjs, nextjs_app, tanstack, rex_tw, nextjs_tw, tanstack_tw (default: all)",
     )
     parser.add_argument("--json", dest="json_file", help="Write results to JSON file")
     parser.add_argument(

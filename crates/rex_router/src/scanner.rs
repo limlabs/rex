@@ -1,3 +1,4 @@
+use rex_core::app_route::AppScanResult;
 use rex_core::{DynamicSegment, McpToolRoute, PageType, Route};
 use std::path::Path;
 use tracing::debug;
@@ -13,6 +14,8 @@ pub struct ScanResult {
     pub not_found: Option<Route>,
     /// Path to middleware file at project root (middleware.ts/js/tsx/jsx)
     pub middleware: Option<std::path::PathBuf>,
+    /// App router scan result (if app/ directory exists)
+    pub app_scan: Option<AppScanResult>,
     /// MCP tool files found in the mcp/ directory
     pub mcp_tools: Vec<McpToolRoute>,
 }
@@ -52,6 +55,7 @@ pub fn scan_pages(pages_dir: &Path) -> anyhow::Result<ScanResult> {
         error,
         not_found,
         middleware: None,
+        app_scan: None,
         mcp_tools: Vec::new(),
     })
 }
@@ -108,9 +112,34 @@ pub fn scan_mcp_tools(project_root: &Path) -> Vec<McpToolRoute> {
 }
 
 /// Scan pages and detect middleware. Convenience wrapper for callers that have the project root.
+///
+/// Also scans app/ directory if present for RSC/App Router support.
 pub fn scan_project(project_root: &Path, pages_dir: &Path) -> anyhow::Result<ScanResult> {
-    let mut scan = scan_pages(pages_dir)?;
+    let mut scan = if pages_dir.exists() {
+        scan_pages(pages_dir)?
+    } else {
+        // No pages/ dir — return empty scan result (app-only project)
+        ScanResult {
+            routes: Vec::new(),
+            api_routes: Vec::new(),
+            app: None,
+            document: None,
+            error: None,
+            not_found: None,
+            middleware: None,
+            app_scan: None,
+            mcp_tools: Vec::new(),
+        }
+    };
     scan.middleware = find_middleware(project_root);
+
+    // Scan app/ directory for RSC routes
+    let app_dir = project_root.join("app");
+    if let Some(app_scan) = crate::app_scanner::scan_app(&app_dir)? {
+        debug!(routes = app_scan.routes.len(), "App router routes scanned");
+        scan.app_scan = Some(app_scan);
+    }
+
     scan.mcp_tools = scan_mcp_tools(project_root);
     Ok(scan)
 }

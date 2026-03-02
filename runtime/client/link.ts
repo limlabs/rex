@@ -1,3 +1,4 @@
+"use client";
 // Rex Link Component - Client-side navigation
 // Equivalent to next/link: renders <a> with client-side nav on click.
 import React from "react";

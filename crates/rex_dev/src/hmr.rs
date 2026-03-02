@@ -22,6 +22,19 @@ pub enum HmrMessage {
         message: String,
         file: Option<String>,
     },
+    #[serde(rename = "tsc-error")]
+    TscError { errors: Vec<TscDiagnostic> },
+    #[serde(rename = "tsc-clear")]
+    TscClear {},
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TscDiagnostic {
+    pub file: String,
+    pub line: u32,
+    pub col: u32,
+    pub code: String,
+    pub message: String,
 }
 
 /// Broadcast channel for HMR messages
@@ -64,6 +77,14 @@ impl HmrBroadcast {
             message: message.to_string(),
             file: file.map(|s| s.to_string()),
         });
+    }
+
+    pub fn send_tsc_errors(&self, errors: Vec<TscDiagnostic>) {
+        let _ = self.tx.send(HmrMessage::TscError { errors });
+    }
+
+    pub fn send_tsc_clear(&self) {
+        let _ = self.tx.send(HmrMessage::TscClear {});
     }
 }
 

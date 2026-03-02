@@ -22,6 +22,16 @@ anyhow = { workspace = true }
 futures = { workspace = true }
 url = "2"
 
+[build-dependencies]
+oxc_allocator = "0.115"
+oxc_codegen = "0.115"
+oxc_parser = "0.115"
+oxc_semantic = "0.115"
+oxc_span = "0.115"
+oxc_transformer = "0.115"
+
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+url = "2"

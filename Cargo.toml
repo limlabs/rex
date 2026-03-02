@@ -20,6 +20,7 @@ v8 = "146"
 # Bundler
 rolldown = { git = "https://github.com/rolldown/rolldown", branch = "main" }
 rolldown_common = { git = "https://github.com/rolldown/rolldown", branch = "main" }
+rolldown_utils = { git = "https://github.com/rolldown/rolldown", branch = "main" }
 
 # HTTP
 axum = { version = "0.8", features = ["ws"] }
@@ -34,7 +35,7 @@ notify-debouncer-mini = "0.5"
 crossbeam-channel = "0.5"
 
 # HTTP client
-reqwest = { version = "0.12", features = ["blocking"] }
+reqwest = { version = "0.12", features = ["blocking", "json"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

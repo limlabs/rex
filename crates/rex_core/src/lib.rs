@@ -1,3 +1,4 @@
+pub mod app_route;
 pub mod config;
 pub mod error;
 pub mod route;

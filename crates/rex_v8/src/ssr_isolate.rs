@@ -10,6 +10,15 @@ pub struct RenderResult {
     pub head: String,
 }
 
+/// Result of RSC two-pass rendering: HTML body + flight data for hydration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RscRenderResult {
+    pub body: String,
+    #[serde(default)]
+    pub head: String,
+    pub flight: String,
+}
+
 /// An SSR isolate that owns a V8 isolate and can render pages.
 /// Must be used on the same OS thread that created it (V8 isolates are !Send).
 pub struct SsrIsolate {
@@ -21,10 +30,15 @@ pub struct SsrIsolate {
     api_handler_fn: Option<v8::Global<v8::Function>>,
     document_fn: Option<v8::Global<v8::Function>>,
     middleware_fn: Option<v8::Global<v8::Function>>,
+    /// RSC flight data renderer (app/ routes only)
+    rsc_flight_fn: Option<v8::Global<v8::Function>>,
+    /// RSC two-pass renderer: flight + HTML (app/ routes only)
+    rsc_to_html_fn: Option<v8::Global<v8::Function>>,
     mcp_call_fn: Option<v8::Global<v8::Function>>,
     mcp_list_fn: Option<v8::Global<v8::Function>>,
-    /// Last successfully loaded bundle, used to restore state on failed reload
-    last_bundle: String,
+    /// Last successfully loaded bundle, used to restore state on failed reload.
+    /// Uses `Arc<String>` to share memory across pool isolates instead of cloning.
+    last_bundle: std::sync::Arc<String>,
 }
 
 /// Evaluate a script in the given scope, using TryCatch for error handling.
@@ -138,6 +152,8 @@ impl SsrIsolate {
             api_handler_fn,
             document_fn,
             middleware_fn,
+            rsc_flight_fn,
+            rsc_to_html_fn,
             mcp_call_fn,
             mcp_list_fn,
         ) = {
@@ -192,6 +208,15 @@ impl SsrIsolate {
                     .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
                 global.set(scope, k.into(), global.into());
 
+                // Install globalThis.fetch
+                let t = v8::FunctionTemplate::new(scope, crate::fetch::fetch_callback);
+                let f = t
+                    .get_function(scope)
+                    .ok_or_else(|| anyhow::anyhow!("Failed to create fetch"))?;
+                let k = v8::String::new(scope, "fetch")
+                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+                global.set(scope, k.into(), f.into());
+
                 // Register fs polyfill callbacks
                 crate::fs::register_fs_callbacks(scope, global)?;
 
@@ -234,6 +259,10 @@ impl SsrIsolate {
             // Middleware is optional — only present when middleware.ts exists
             let middleware_fn = v8_get_optional_fn!(scope, global, "__rex_run_middleware");
 
+            // RSC functions — only present when app/ routes exist
+            let rsc_flight_fn = v8_get_optional_fn!(scope, global, "__rex_render_flight");
+            let rsc_to_html_fn = v8_get_optional_fn!(scope, global, "__rex_render_rsc_to_html");
+
             // MCP tools are optional — only present when mcp/ directory has tool files
             let mcp_call_fn = v8_get_optional_fn!(scope, global, "__rex_call_mcp_tool");
             let mcp_list_fn = v8_get_optional_fn!(scope, global, "__rex_list_mcp_tools");
@@ -246,6 +275,8 @@ impl SsrIsolate {
                 api_handler_fn,
                 document_fn,
                 middleware_fn,
+                rsc_flight_fn,
+                rsc_to_html_fn,
                 mcp_call_fn,
                 mcp_list_fn,
             )
@@ -260,10 +291,41 @@ impl SsrIsolate {
             api_handler_fn,
             document_fn,
             middleware_fn,
+            rsc_flight_fn,
+            rsc_to_html_fn,
             mcp_call_fn,
             mcp_list_fn,
-            last_bundle: server_bundle_js.to_string(),
+            last_bundle: std::sync::Arc::new(server_bundle_js.to_string()),
         })
+    }
+
+    /// Load RSC bundles (flight + SSR) into the V8 context.
+    ///
+    /// Both bundles are IIFEs evaluated sequentially in the same context.
+    /// The flight bundle sets `__rex_render_flight`, `__rex_render_rsc_to_html`, etc.
+    /// The SSR bundle sets `__rex_rsc_flight_to_html`, `__rex_resolve_ssr_pending`, etc.
+    pub fn load_rsc_bundles(&mut self, flight_bundle_js: &str, ssr_bundle_js: &str) -> Result<()> {
+        {
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+            // Evaluate the flight bundle (sets __rex_render_flight, etc.)
+            v8_eval!(scope, flight_bundle_js, "rsc-server-bundle.js")
+                .context("Failed to evaluate RSC flight bundle")?;
+
+            // Evaluate the SSR bundle (sets __rex_rsc_flight_to_html, etc.)
+            v8_eval!(scope, ssr_bundle_js, "rsc-ssr-bundle.js")
+                .context("Failed to evaluate RSC SSR bundle")?;
+
+            // Re-lookup RSC functions now that both bundles are loaded
+            let ctx = scope.get_current_context();
+            let global = ctx.global(scope);
+
+            self.rsc_flight_fn = v8_get_optional_fn!(scope, global, "__rex_render_flight");
+            self.rsc_to_html_fn = v8_get_optional_fn!(scope, global, "__rex_render_rsc_to_html");
+        }
+
+        debug!("RSC bundles loaded into V8 context");
+        Ok(())
     }
 
     /// Call __rex_render_page(routeKey, propsJson) and return the rendered body + head HTML.
@@ -304,8 +366,9 @@ impl SsrIsolate {
         };
 
         if result_str == "__REX_ASYNC__" {
-            // GSSP returned a promise — pump V8's microtask queue to resolve it
-            self.isolate.perform_microtask_checkpoint();
+            // GSSP returned a promise — run the fetch loop to resolve any fetch()
+            // calls, then pump microtasks to settle the promise chain.
+            crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
 
             v8::scope_with_context!(scope, &mut self.isolate, &self.context);
             let resolve_result =
@@ -337,7 +400,7 @@ impl SsrIsolate {
         };
 
         if result_str == "__REX_GSP_ASYNC__" {
-            self.isolate.perform_microtask_checkpoint();
+            crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
 
             v8::scope_with_context!(scope, &mut self.isolate, &self.context);
             let resolve_result = v8_eval!(scope, "globalThis.__rex_resolve_gsp()", "<gsp-resolve>")
@@ -373,7 +436,7 @@ impl SsrIsolate {
         };
 
         if result_str == "__REX_API_ASYNC__" {
-            self.isolate.perform_microtask_checkpoint();
+            crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
 
             v8::scope_with_context!(scope, &mut self.isolate, &self.context);
             let resolve_result = v8_eval!(scope, "globalThis.__rex_resolve_api()", "<api-resolve>")
@@ -427,7 +490,7 @@ impl SsrIsolate {
         };
 
         if result_str == "__REX_MW_ASYNC__" {
-            self.isolate.perform_microtask_checkpoint();
+            crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
 
             v8::scope_with_context!(scope, &mut self.isolate, &self.context);
             let resolve_result = v8_eval!(
@@ -440,6 +503,148 @@ impl SsrIsolate {
         } else {
             Ok(Some(result_str))
         }
+    }
+
+    /// Render RSC flight data for a route (app/ routes only).
+    /// Returns the flight data string for client-side navigation.
+    /// Handles async server components via iterative resolve loop.
+    pub fn render_rsc_flight(&mut self, route_key: &str, props_json: &str) -> Result<String> {
+        let rsc_fn = self
+            .rsc_flight_fn
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("RSC flight renderer not loaded"))?;
+
+        let result_str = {
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+            let func = v8::Local::new(scope, rsc_fn);
+            let undef = v8::undefined(scope);
+            let arg0 = v8::String::new(scope, route_key)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+            let arg1 = v8::String::new(scope, props_json)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+
+            let result = v8_call!(scope, func, undef.into(), &[arg0.into(), arg1.into()])
+                .map_err(|e| anyhow::anyhow!("RSC flight render error: {e}"))?;
+
+            result.to_rust_string_lossy(scope)
+        };
+
+        // Run fetch loop in case server components used fetch()
+        crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
+
+        if result_str == "__REX_RSC_ASYNC__" {
+            self.resolve_rsc_async()?;
+
+            let finalized = {
+                v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+                let result = v8_eval!(
+                    scope,
+                    "globalThis.__rex_finalize_rsc_flight()",
+                    "<rsc-finalize-flight>"
+                )
+                .map_err(|e| anyhow::anyhow!("RSC finalize error: {e}"))?;
+                result.to_rust_string_lossy(scope)
+            };
+            return Ok(finalized);
+        }
+
+        Ok(result_str)
+    }
+
+    /// Two-pass RSC render: flight data + HTML (app/ routes only).
+    /// Returns RenderResult with body HTML, head, and flight data.
+    /// Handles async server components via iterative resolve loop.
+    pub fn render_rsc_to_html(
+        &mut self,
+        route_key: &str,
+        props_json: &str,
+    ) -> Result<RscRenderResult> {
+        let rsc_fn = self
+            .rsc_to_html_fn
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("RSC HTML renderer not loaded"))?;
+
+        let result_str = {
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+            let func = v8::Local::new(scope, rsc_fn);
+            let undef = v8::undefined(scope);
+            let arg0 = v8::String::new(scope, route_key)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+            let arg1 = v8::String::new(scope, props_json)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+
+            let result = v8_call!(scope, func, undef.into(), &[arg0.into(), arg1.into()])
+                .map_err(|e| anyhow::anyhow!("RSC render error: {e}"))?;
+
+            result.to_rust_string_lossy(scope)
+        };
+
+        // Run fetch loop in case server components used fetch()
+        crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
+
+        if result_str == "__REX_RSC_HTML_ASYNC__" {
+            self.resolve_rsc_async()?;
+
+            let finalized = {
+                v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+                let result = v8_eval!(
+                    scope,
+                    "globalThis.__rex_finalize_rsc_to_html()",
+                    "<rsc-finalize-html>"
+                )
+                .map_err(|e| anyhow::anyhow!("RSC finalize error: {e}"))?;
+                result.to_rust_string_lossy(scope)
+            };
+
+            let parsed: RscRenderResult =
+                serde_json::from_str(&finalized).context("Failed to parse RSC finalize result")?;
+            return Ok(parsed);
+        }
+
+        let parsed: RscRenderResult =
+            serde_json::from_str(&result_str).context("Failed to parse RSC render result")?;
+        Ok(parsed)
+    }
+
+    /// Iterative resolve loop for async server components.
+    /// Runs fetch loop + microtask pump, then calls __rex_resolve_rsc_pending()
+    /// until all async slots are resolved (or timeout).
+    fn resolve_rsc_async(&mut self) -> Result<()> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            if std::time::Instant::now() > deadline {
+                return Err(anyhow::anyhow!("RSC async resolution timed out after 30s"));
+            }
+
+            crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
+
+            let status = {
+                v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+                let result = v8_eval!(
+                    scope,
+                    "globalThis.__rex_resolve_rsc_pending()",
+                    "<rsc-resolve>"
+                )
+                .map_err(|e| anyhow::anyhow!("RSC resolve error: {e}"))?;
+                result.to_rust_string_lossy(scope)
+            };
+
+            match status.as_str() {
+                "done" => break,
+                "pending" => {
+                    // Yield briefly to avoid CPU-spinning when async slots are
+                    // waiting on microtasks but no fetch requests are queued.
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                    continue;
+                }
+                other => {
+                    return Err(anyhow::anyhow!("Unexpected RSC resolve status: {}", other));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// List registered MCP tools. Returns JSON array of {name, description, parameters}.
@@ -532,11 +737,15 @@ impl SsrIsolate {
         // Re-lookup middleware (may be added/removed on reload)
         self.middleware_fn = v8_get_optional_fn!(scope, global, "__rex_run_middleware");
 
+        // Re-lookup RSC functions (may be added/removed on reload)
+        self.rsc_flight_fn = v8_get_optional_fn!(scope, global, "__rex_render_flight");
+        self.rsc_to_html_fn = v8_get_optional_fn!(scope, global, "__rex_render_rsc_to_html");
+
         // Re-lookup MCP tools (may be added/removed on reload)
         self.mcp_call_fn = v8_get_optional_fn!(scope, global, "__rex_call_mcp_tool");
         self.mcp_list_fn = v8_get_optional_fn!(scope, global, "__rex_list_mcp_tools");
 
-        self.last_bundle = server_bundle_js.to_string();
+        self.last_bundle = std::sync::Arc::new(server_bundle_js.to_string());
         debug!("SSR isolate reloaded");
         Ok(())
     }
