@@ -205,6 +205,14 @@ impl SsrIsolate {
                 }
             }
 
+            // Inject process.env from Rust's environment variables.
+            // This runs before the bundle so the banner polyfill's
+            // `if (typeof globalThis.process === 'undefined')` check
+            // sees it already exists and skips the stub.
+            let process_env_script = build_process_env_script();
+            v8_eval!(scope, &process_env_script, "<process-env>")
+                .context("Failed to inject process.env")?;
+
             // Evaluate the self-contained server bundle
             v8_eval!(scope, server_bundle_js, "server-bundle.js")
                 .context("Failed to evaluate server bundle")?;
@@ -532,6 +540,26 @@ impl SsrIsolate {
         debug!("SSR isolate reloaded");
         Ok(())
     }
+}
+
+/// Build a JS snippet that sets `globalThis.process` with `env` populated
+/// from the current Rust process's environment variables.
+/// The env object is mutable (not frozen) to match Node.js behavior where
+/// libraries commonly assign to `process.env` at runtime.
+fn build_process_env_script() -> String {
+    use std::fmt::Write;
+
+    let mut pairs = String::new();
+    for (key, value) in std::env::vars() {
+        // JSON-encode both key and value to safely handle special characters
+        let key_json = serde_json::to_string(&key).unwrap_or_default();
+        let val_json = serde_json::to_string(&value).unwrap_or_default();
+        if !pairs.is_empty() {
+            pairs.push(',');
+        }
+        let _ = write!(pairs, "{key_json}:{val_json}");
+    }
+    format!("globalThis.process = {{ env: {{{pairs}}} }};")
 }
 
 fn format_args(scope: &mut v8::PinScope, args: &v8::FunctionCallbackArguments) -> String {
@@ -1558,5 +1586,49 @@ globalThis.__rex_resolve_gsp = function() {
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(parsed["props"]["fileGone"], true);
         assert_eq!(parsed["props"]["dirGone"], true);
+    }
+
+    #[test]
+    fn test_process_env_from_rust() {
+        // Set a known env var so we can verify it appears in V8
+        std::env::set_var("REX_TEST_POLYFILL", "hello_from_rust");
+
+        let mut iso = make_isolate(&[(
+            "envtest",
+            "function EnvTest() { return React.createElement('p', null, process.env.REX_TEST_POLYFILL || 'MISSING'); }",
+            Some("function(ctx) { return { props: { val: process.env.REX_TEST_POLYFILL } }; }"),
+        )]);
+
+        // Verify GSSP can read process.env
+        let gssp_result = iso.get_server_side_props("envtest", "{}").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&gssp_result).unwrap();
+        assert_eq!(parsed["props"]["val"], "hello_from_rust");
+
+        // Verify SSR render can read process.env
+        let render = iso.render_page("envtest", "{}").unwrap();
+        assert!(
+            render.body.contains("hello_from_rust"),
+            "SSR body should contain env var value, got: {}",
+            render.body
+        );
+
+        // Clean up
+        std::env::remove_var("REX_TEST_POLYFILL");
+    }
+
+    #[test]
+    fn test_process_env_is_writable() {
+        // Node.js allows assigning to process.env; verify we match that behavior
+        let mut iso = make_isolate(&[(
+            "writetest",
+            "function WriteTest() { process.env.DYNAMIC = 'set_at_runtime'; return React.createElement('p', null, process.env.DYNAMIC); }",
+            None,
+        )]);
+        let render = iso.render_page("writetest", "{}").unwrap();
+        assert!(
+            render.body.contains("set_at_runtime"),
+            "process.env should be writable, got: {}",
+            render.body
+        );
     }
 }
