@@ -44,7 +44,7 @@ jobs:
           node-version: 22
 
       - name: oxlint
-        run: npx oxlint runtime/ packages/rex/src/
+        run: npx oxlint --deny-warnings runtime/ packages/rex/src/
 
       - name: Verify clean working tree
         run: |

@@ -24,7 +24,7 @@ export default function Link(props) {
     try {
       var url = new URL(href, window.location.origin);
       if (url.origin !== window.location.origin) return;
-    } catch (_) {
+    } catch {
       return;
     }
 
