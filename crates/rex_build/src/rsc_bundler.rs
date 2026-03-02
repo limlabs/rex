@@ -515,6 +515,19 @@ async fn build_rsc_client_bundles(
     let mut module_types = rustc_hash::FxHashMap::default();
     module_types.insert(".css".to_string(), rolldown::ModuleType::Empty);
 
+    // Force React/ReactDOM/react-server-dom-webpack into a shared vendor chunk.
+    // Without this, they stay inlined in __rsc_hydrate because only the hydrate
+    // entry imports them (rolldown's automatic splitting needs 2+ consumers).
+    let react_vendor_group = rolldown_common::MatchGroup {
+        name: rolldown_common::MatchGroupName::Static("react-vendor".to_string()),
+        test: Some(rolldown_common::MatchGroupTest::Regex(
+            rolldown_utils::js_regex::HybridRegex::new("node_modules[\\\\/]react")
+                .expect("valid regex"),
+        )),
+        priority: Some(10),
+        ..Default::default()
+    };
+
     let options = rolldown::BundlerOptions {
         input: Some(entries),
         cwd: Some(config.project_root.clone()),
@@ -526,6 +539,10 @@ async fn build_rsc_client_bundles(
         module_types: Some(module_types),
         define: Some(define.iter().cloned().collect()),
         tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+        manual_code_splitting: Some(rolldown_common::ManualCodeSplittingOptions {
+            groups: Some(vec![react_vendor_group]),
+            ..Default::default()
+        }),
         resolve: Some(rolldown::ResolveOptions {
             extensions: Some(vec![
                 ".tsx".to_string(),

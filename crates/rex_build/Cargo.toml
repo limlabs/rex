@@ -11,6 +11,7 @@ rex_core = { path = "../rex_core" }
 rex_router = { path = "../rex_router" }
 rolldown = { workspace = true }
 rolldown_common = { workspace = true }
+rolldown_utils = { workspace = true }
 rustc-hash = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
