@@ -41,8 +41,11 @@ jobs:
       - name: Install runtime dependencies
         run: cd runtime && npm ci
 
-      - name: TypeScript strict check
+      - name: TypeScript strict check (runtime)
         run: cd runtime && npm run typecheck
+
+      - name: TypeScript strict check (fixtures)
+        run: scripts/typecheck-fixtures.sh
 
       - name: oxlint
         run: npx oxlint --deny-warnings runtime/ packages/rex/src/
