@@ -3530,12 +3530,15 @@ name = "rex_e2e"
 version = "0.5.0"
 dependencies = [
  "anyhow",
+ "base64",
  "futures",
  "libc",
  "reqwest",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-tungstenite 0.26.2",
+ "url",
 ]
 
 [[package]]

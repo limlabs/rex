@@ -135,7 +135,7 @@ fn to_json_value<T: Serialize>(value: T) -> serde_json::Value {
 
 pub async fn mcp_handler(
     State(state): State<Arc<AppState>>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
     // Check if MCP tools are available
@@ -148,6 +148,53 @@ pub async fn mcp_handler(
 
     if !hot.has_mcp_tools {
         return (StatusCode::NOT_FOUND, "No MCP tools configured").into_response();
+    }
+
+    // Auth gate: if auth is configured with MCP enabled, require a valid Bearer token
+    if let Some(ref auth) = state.auth {
+        if auth.config.mcp.enabled {
+            let token = headers
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "));
+
+            match token {
+                None => {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        [("www-authenticate", "Bearer")],
+                        "Missing or invalid Authorization header",
+                    )
+                        .into_response();
+                }
+                Some(token) => {
+                    let key_manager = auth
+                        .key_manager
+                        .as_ref()
+                        .expect("key_manager is always Some when mcp.enabled");
+                    let decoding_keys = match key_manager.decoding_keys() {
+                        Ok(keys) => keys,
+                        Err(_) => {
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Failed to load auth keys",
+                            )
+                                .into_response();
+                        }
+                    };
+                    if let Err(_e) =
+                        rex_auth::jwt::validate_access_token(token, &decoding_keys, auth.issuer())
+                    {
+                        return (
+                            StatusCode::UNAUTHORIZED,
+                            [("www-authenticate", "Bearer error=\"invalid_token\"")],
+                            "Invalid or expired token",
+                        )
+                            .into_response();
+                    }
+                }
+            }
+        }
     }
 
     // Parse JSON-RPC request

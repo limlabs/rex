@@ -8,6 +8,10 @@
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+mod auth_tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use std::net::TcpStream;
     use std::path::PathBuf;

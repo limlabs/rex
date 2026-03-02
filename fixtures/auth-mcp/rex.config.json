@@ -1,0 +1,27 @@
+{
+  "auth": {
+    "providers": [],
+
+    "session": {
+      "maxAge": 2592000,
+      "cookieName": "__rex_session"
+    },
+
+    "mcp": {
+      "enabled": true,
+      "scopes": ["tools:read", "tools:execute"],
+      "accessTokenTtl": 3600,
+      "refreshTokenTtl": 2592000,
+      "clients": {
+        "allowDynamic": true,
+        "static": [
+          {
+            "clientId": "test-client",
+            "clientName": "Test Client",
+            "redirectUris": ["http://localhost:*/callback"]
+          }
+        ]
+      }
+    }
+  }
+}
