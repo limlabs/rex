@@ -1,0 +1,15 @@
+[[redirects]]
+source = "/legacy-about"
+destination = "/about"
+permanent = true
+
+[[rewrites]]
+source = "/rewritten"
+destination = "/about"
+
+[[headers]]
+source = "/:path*"
+
+  [[headers.headers]]
+  key = "X-Powered-By"
+  value = "Rex"
