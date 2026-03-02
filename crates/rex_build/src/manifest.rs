@@ -38,6 +38,9 @@ pub struct AssetManifest {
     /// Path to the RSC server bundle
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rsc_server_bundle: Option<String>,
+    /// Path to the RSC SSR bundle
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rsc_ssr_bundle: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +76,7 @@ impl AssetManifest {
             app_routes: HashMap::new(),
             client_reference_manifest: None,
             rsc_server_bundle: None,
+            rsc_ssr_bundle: None,
         }
     }
 

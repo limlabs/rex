@@ -7,6 +7,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::net::IpAddr;
 
 /// A queued fetch request waiting to be dispatched.
 pub struct FetchRequest {
@@ -43,15 +44,12 @@ macro_rules! set_v8_prop {
 
 /// The `fetch(url, init?)` callback. Queues a request and returns a Promise.
 ///
-/// # Security: SSRF risk
+/// # Security: SSRF protection
 ///
-/// This function makes HTTP requests to **arbitrary URLs** from the server.
-/// There is currently **no filtering** of private/internal addresses (RFC 1918,
-/// link-local, cloud metadata endpoints like `169.254.169.254`). Server
-/// components can reach internal services that are not exposed publicly.
-///
-/// **TODO:** Add an allowlist/blocklist or deny private IP ranges by default
-/// before deploying to production environments with sensitive internal services.
+/// Requests are validated before dispatch: URLs that resolve to private/internal
+/// IP ranges (RFC 1918, loopback, link-local, cloud metadata `169.254.169.254`)
+/// are blocked. DNS results are also checked to prevent DNS rebinding attacks
+/// against internal services.
 ///
 /// Register on a global object with:
 /// ```ignore
@@ -182,6 +180,60 @@ pub fn execute_fetch_batch(requests: &[FetchRequest]) -> Vec<Result<FetchResult,
     })
 }
 
+/// Check whether a resolved IP address is private/internal (SSRF protection).
+/// Blocks RFC 1918, loopback, link-local, and cloud metadata ranges.
+fn is_private_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()          // 127.0.0.0/8
+                || v4.is_private()    // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+                || v4.is_link_local() // 169.254.0.0/16 (includes cloud metadata 169.254.169.254)
+                || v4.is_unspecified() // 0.0.0.0
+                || v4.is_broadcast() // 255.255.255.255
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()          // ::1
+                || v6.is_unspecified() // ::
+                // IPv4-mapped private addresses (::ffff:10.x.x.x, etc.)
+                || v6.to_ipv4_mapped().is_some_and(|v4| {
+                    v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
+                })
+        }
+    }
+}
+
+/// Validate that a URL does not resolve to a private/internal IP address.
+async fn validate_url_not_private(url: &str) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
+    let host = parsed.host_str().ok_or("URL has no host")?;
+
+    // Direct IP address check
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_private_ip(&ip) {
+            return Err(format!(
+                "fetch blocked: {host} resolves to a private address"
+            ));
+        }
+        return Ok(());
+    }
+
+    // DNS resolution check
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    let addrs = tokio::net::lookup_host(format!("{host}:{port}"))
+        .await
+        .map_err(|e| format!("DNS resolution failed for {host}: {e}"))?;
+
+    for addr in addrs {
+        if is_private_ip(&addr.ip()) {
+            return Err(format!(
+                "fetch blocked: {host} resolves to private address {}",
+                addr.ip()
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Perform a single HTTP fetch.
 async fn do_fetch(
     url: &str,
@@ -189,6 +241,9 @@ async fn do_fetch(
     headers: &HashMap<String, String>,
     body: Option<&str>,
 ) -> Result<FetchResult, String> {
+    // SSRF protection: block requests to private/internal addresses
+    validate_url_not_private(url).await?;
+
     let method_parsed = method
         .parse::<reqwest::Method>()
         .map_err(|e| format!("Invalid method: {e}"))?;
@@ -618,5 +673,48 @@ mod tests {
             "application/json"
         );
         assert_eq!(pending[0].body.as_deref(), Some("{\"key\": \"value\"}"));
+    }
+
+    #[test]
+    fn ssrf_blocks_loopback_ipv4() {
+        assert!(is_private_ip(&"127.0.0.1".parse().unwrap()));
+        assert!(is_private_ip(&"127.0.0.2".parse().unwrap()));
+    }
+
+    #[test]
+    fn ssrf_blocks_private_ranges() {
+        assert!(is_private_ip(&"10.0.0.1".parse().unwrap()));
+        assert!(is_private_ip(&"172.16.0.1".parse().unwrap()));
+        assert!(is_private_ip(&"192.168.1.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn ssrf_blocks_link_local() {
+        // Cloud metadata endpoint
+        assert!(is_private_ip(&"169.254.169.254".parse().unwrap()));
+    }
+
+    #[test]
+    fn ssrf_blocks_ipv6_loopback() {
+        assert!(is_private_ip(&"::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn ssrf_allows_public_ip() {
+        assert!(!is_private_ip(&"8.8.8.8".parse().unwrap()));
+        assert!(!is_private_ip(&"93.184.216.34".parse().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn ssrf_blocks_localhost_url() {
+        let result = validate_url_not_private("http://127.0.0.1/secret").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("private address"));
+    }
+
+    #[tokio::test]
+    async fn ssrf_blocks_metadata_url() {
+        let result = validate_url_not_private("http://169.254.169.254/latest/meta-data/").await;
+        assert!(result.is_err());
     }
 }

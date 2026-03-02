@@ -90,10 +90,6 @@
     return null;
   }
 
-  function isAppRoute(pathname) {
-    return matchAppRoute(pathname) !== null;
-  }
-
   // --- Router state ---
 
   var initialMatch = matchRoute(window.location.pathname);

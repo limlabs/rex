@@ -49,6 +49,12 @@ pub async fn handle_file_event(
                     bundle_js.push_str(&rsc_bundle);
                 }
             }
+            if let Some(ssr_path) = &build_result.manifest.rsc_ssr_bundle {
+                if let Ok(ssr_bundle) = std::fs::read_to_string(ssr_path) {
+                    bundle_js.push_str("\n;\n");
+                    bundle_js.push_str(&ssr_bundle);
+                }
+            }
             let bundle_arc = Arc::new(bundle_js);
 
             // Reload all V8 isolates
@@ -146,6 +152,12 @@ pub async fn handle_file_event(
                 if let Ok(rsc_bundle) = std::fs::read_to_string(rsc_path) {
                     bundle_js.push_str("\n;\n");
                     bundle_js.push_str(&rsc_bundle);
+                }
+            }
+            if let Some(ssr_path) = &build_result.manifest.rsc_ssr_bundle {
+                if let Ok(ssr_bundle) = std::fs::read_to_string(ssr_path) {
+                    bundle_js.push_str("\n;\n");
+                    bundle_js.push_str(&ssr_bundle);
                 }
             }
             let bundle_arc = Arc::new(bundle_js);

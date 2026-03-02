@@ -1,9 +1,13 @@
 //! RSC bundle builder.
 //!
-//! Produces two bundles from an app/ directory scan:
-//! 1. **Server RSC bundle** (IIFE): Contains all server components. At `"use client"`
-//!    boundaries, imports are replaced with client reference stubs.
-//! 2. **Client bundle** (ESM): Contains only `"use client"` components and their
+//! Produces three bundles from an app/ directory scan:
+//! 1. **Flight bundle** (IIFE, `react-server` condition): Contains all server components.
+//!    At `"use client"` boundaries, imports are replaced with client reference stubs.
+//!    Uses `renderToReadableStream` from `react-server-dom-webpack/server`.
+//! 2. **SSR bundle** (IIFE, standard conditions): Contains `createFromReadableStream`
+//!    and `renderToString` for converting flight data to HTML. Also includes client
+//!    components for SSR rendering.
+//! 3. **Client bundle** (ESM): Contains only `"use client"` components and their
 //!    dependencies, with code splitting.
 //!
 //! Also produces a `ClientReferenceManifest` mapping reference IDs to chunk URLs.
@@ -20,8 +24,10 @@ use tracing::debug;
 /// Result of the RSC bundle build.
 #[derive(Debug)]
 pub struct RscBuildResult {
-    /// Path to the server RSC bundle (IIFE).
+    /// Path to the server RSC flight bundle (IIFE, `react-server` condition).
     pub server_bundle_path: PathBuf,
+    /// Path to the SSR bundle (IIFE, standard conditions).
+    pub ssr_bundle_path: PathBuf,
     /// Client reference manifest mapping ref IDs to chunk URLs.
     pub client_manifest: ClientReferenceManifest,
     /// Client chunk files produced (relative paths from client output dir).
@@ -97,12 +103,7 @@ pub async fn build_rsc_bundles(
         }
     }
 
-    // Build server RSC bundle
-    let server_bundle_path =
-        build_rsc_server_bundle(config, app_scan, &graph, &server_dir, &stub_aliases, define)
-            .await?;
-
-    // Build client bundles for "use client" modules
+    // Build client bundles first so manifest is populated before server bundle
     let client_chunks = build_rsc_client_bundles(
         config,
         &graph,
@@ -113,11 +114,35 @@ pub async fn build_rsc_bundles(
     )
     .await?;
 
+    // Build server RSC flight bundle (after client build so manifest is populated)
+    let server_bundle_path = build_rsc_server_bundle(
+        config,
+        app_scan,
+        &graph,
+        &server_dir,
+        &stub_aliases,
+        define,
+        &client_manifest,
+    )
+    .await?;
+
+    // Build SSR bundle (after client build so manifest is populated)
+    let ssr_bundle_path = build_rsc_ssr_bundle(
+        config,
+        &graph,
+        &server_dir,
+        build_id,
+        define,
+        &client_manifest,
+    )
+    .await?;
+
     // Clean up stubs
     let _ = fs::remove_dir_all(&stubs_dir);
 
     Ok(RscBuildResult {
         server_bundle_path,
+        ssr_bundle_path,
         client_manifest,
         client_chunks,
     })
@@ -149,10 +174,11 @@ fn generate_client_stub(rel_path: &str, exports: &[String], build_id: &str) -> S
     source
 }
 
-/// Build the server RSC bundle (IIFE).
+/// Build the server RSC flight bundle (IIFE, `react-server` condition).
 ///
 /// This bundle includes all server components, with `"use client"` modules
 /// replaced by reference stubs via rolldown aliases.
+/// Uses `renderToReadableStream` from `react-server-dom-webpack/server`.
 async fn build_rsc_server_bundle(
     config: &RexConfig,
     app_scan: &AppScanResult,
@@ -160,17 +186,18 @@ async fn build_rsc_server_bundle(
     output_dir: &Path,
     stub_aliases: &[(PathBuf, PathBuf)],
     define: &[(String, String)],
+    client_manifest: &ClientReferenceManifest,
 ) -> Result<PathBuf> {
     let entries_dir = output_dir.join("_rsc_server_entry");
     fs::create_dir_all(&entries_dir)?;
 
     let mut entry = String::new();
 
-    // React imports
+    // React imports — resolved with react-server condition
     entry.push_str("import { createElement } from 'react';\n");
-    entry.push_str("import { renderToString } from 'react-dom/server';\n");
+    entry.push_str("import { renderToReadableStream } from 'react-server-dom-webpack/server';\n");
     entry.push_str("var __rex_createElement = createElement;\n");
-    entry.push_str("var __rex_renderToString = renderToString;\n\n");
+    entry.push_str("var __rex_renderToReadableStream = renderToReadableStream;\n\n");
 
     // Register layouts
     entry.push_str("globalThis.__rex_app_layouts = {};\n");
@@ -211,7 +238,14 @@ async fn build_rsc_server_bundle(
         ));
     }
 
-    // RSC runtime: flight protocol serializer + render functions
+    // Server-side webpack bundler config for renderToReadableStream
+    let bundler_config_json = serde_json::to_string(&client_manifest.to_server_webpack_config())
+        .unwrap_or_else(|_| "{}".to_string());
+    entry.push_str(&format!(
+        "\nglobalThis.__rex_webpack_bundler_config = {bundler_config_json};\n"
+    ));
+
+    // RSC runtime: flight protocol using React's renderToReadableStream
     let flight_runtime = include_str!("../../../runtime/rsc/flight.js");
     entry.push_str("\n// --- RSC Flight Runtime ---\n");
     entry.push_str(flight_runtime);
@@ -232,6 +266,10 @@ async fn build_rsc_server_bundle(
         ));
     }
 
+    // V8 polyfills + webpack shims as banner
+    let webpack_shims = include_str!("../../../runtime/rsc/webpack-shims.js");
+    let banner = format!("{}\n{}", crate::bundler::V8_POLYFILLS, webpack_shims);
+
     let options = rolldown::BundlerOptions {
         input: Some(vec![rolldown::InputItem {
             name: Some("rsc-server-bundle".to_string()),
@@ -244,12 +282,16 @@ async fn build_rsc_server_bundle(
         platform: Some(rolldown::Platform::Browser),
         module_types: Some(module_types),
         define: Some(define.iter().cloned().collect()),
-        banner: Some(rolldown::AddonOutputOption::String(Some(
-            crate::bundler::V8_POLYFILLS.to_string(),
-        ))),
+        banner: Some(rolldown::AddonOutputOption::String(Some(banner))),
         tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(aliases),
+            condition_names: Some(vec![
+                "react-server".to_string(),
+                "browser".to_string(),
+                "import".to_string(),
+                "default".to_string(),
+            ]),
             extensions: Some(vec![
                 ".tsx".to_string(),
                 ".ts".to_string(),
@@ -281,6 +323,147 @@ async fn build_rsc_server_bundle(
 
     let bundle_path = output_dir.join("rsc-server-bundle.js");
     debug!(path = %bundle_path.display(), "RSC server bundle written");
+    Ok(bundle_path)
+}
+
+/// Build the SSR bundle (IIFE, standard conditions).
+///
+/// This bundle consumes flight data and produces HTML using:
+/// - `createFromReadableStream` from `react-server-dom-webpack/client`
+/// - `renderToString` from `react-dom/server`
+///
+/// It also includes all `"use client"` components for SSR rendering.
+async fn build_rsc_ssr_bundle(
+    config: &RexConfig,
+    graph: &ModuleGraph,
+    output_dir: &Path,
+    build_id: &str,
+    define: &[(String, String)],
+    client_manifest: &ClientReferenceManifest,
+) -> Result<PathBuf> {
+    let project_root = config.project_root.canonicalize().unwrap_or_else(|e| {
+        debug!(
+            path = %config.project_root.display(),
+            error = %e,
+            "Failed to canonicalize project root, using original path"
+        );
+        config.project_root.clone()
+    });
+
+    let entries_dir = output_dir.join("_rsc_ssr_entry");
+    fs::create_dir_all(&entries_dir)?;
+
+    let mut entry = String::new();
+
+    // React imports — standard (non-react-server) conditions
+    entry.push_str("import { createElement } from 'react';\n");
+    entry.push_str("import { renderToString } from 'react-dom/server';\n");
+    entry.push_str("import { createFromReadableStream } from 'react-server-dom-webpack/client';\n");
+    entry.push_str("var __rex_createElement = createElement;\n");
+    entry.push_str("var __rex_renderToString = renderToString;\n");
+    entry.push_str("var __rex_createFromReadableStream = createFromReadableStream;\n\n");
+
+    // Import all "use client" components for SSR rendering
+    let client_boundaries = graph.client_boundary_modules();
+    for (i, module) in client_boundaries.iter().enumerate() {
+        let module_path = module.path.to_string_lossy().replace('\\', "/");
+        entry.push_str(&format!(
+            "import * as __ssr_client_{i} from '{module_path}';\n"
+        ));
+    }
+
+    // Register client modules in __rex_ssr_modules__ for __webpack_require__
+    entry.push_str("\nglobalThis.__rex_ssr_modules__ = globalThis.__rex_ssr_modules__ || {};\n");
+    for (i, module) in client_boundaries.iter().enumerate() {
+        let rel_path = module
+            .path
+            .strip_prefix(&project_root)
+            .unwrap_or(&module.path)
+            .to_string_lossy()
+            .replace('\\', "/");
+
+        for export in &module.exports {
+            let ref_id = client_reference_id(&rel_path, export, build_id);
+            entry.push_str(&format!(
+                "globalThis.__rex_ssr_modules__[\"{ref_id}\"] = __ssr_client_{i};\n"
+            ));
+        }
+    }
+
+    // SSR webpack manifest for createFromReadableStream
+    let ssr_manifest_json = serde_json::to_string(&client_manifest.to_ssr_webpack_manifest())
+        .unwrap_or_else(|_| "{}".to_string());
+    entry.push_str(&format!(
+        "\nglobalThis.__rex_webpack_ssr_manifest = {ssr_manifest_json};\n"
+    ));
+
+    // SSR pass runtime
+    let ssr_runtime = include_str!("../../../runtime/rsc/ssr-pass.js");
+    entry.push_str("\n// --- RSC SSR Pass Runtime ---\n");
+    entry.push_str(ssr_runtime);
+
+    let entry_path = entries_dir.join("rsc-ssr-entry.js");
+    fs::write(&entry_path, &entry)?;
+
+    // CSS → empty module
+    let mut module_types = rustc_hash::FxHashMap::default();
+    module_types.insert(".css".to_string(), rolldown::ModuleType::Empty);
+
+    // V8 polyfills + webpack shims as banner
+    let webpack_shims = include_str!("../../../runtime/rsc/webpack-shims.js");
+    let banner = format!("{}\n{}", crate::bundler::V8_POLYFILLS, webpack_shims);
+
+    let options = rolldown::BundlerOptions {
+        input: Some(vec![rolldown::InputItem {
+            name: Some("rsc-ssr-bundle".to_string()),
+            import: entry_path.to_string_lossy().to_string(),
+        }]),
+        cwd: Some(config.project_root.clone()),
+        format: Some(rolldown::OutputFormat::Iife),
+        dir: Some(output_dir.to_string_lossy().to_string()),
+        entry_filenames: Some("rsc-ssr-bundle.js".to_string().into()),
+        platform: Some(rolldown::Platform::Browser),
+        module_types: Some(module_types),
+        define: Some(define.iter().cloned().collect()),
+        banner: Some(rolldown::AddonOutputOption::String(Some(banner))),
+        tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+        resolve: Some(rolldown::ResolveOptions {
+            condition_names: Some(vec![
+                "browser".to_string(),
+                "import".to_string(),
+                "default".to_string(),
+            ]),
+            extensions: Some(vec![
+                ".tsx".to_string(),
+                ".ts".to_string(),
+                ".jsx".to_string(),
+                ".js".to_string(),
+            ]),
+            modules: Some(vec![
+                config
+                    .project_root
+                    .join("node_modules")
+                    .to_string_lossy()
+                    .to_string(),
+                "node_modules".to_string(),
+            ]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let mut bundler = rolldown::Bundler::new(options)
+        .map_err(|e| anyhow::anyhow!("Failed to create RSC SSR bundler: {e}"))?;
+
+    bundler
+        .write()
+        .await
+        .map_err(|e| anyhow::anyhow!("RSC SSR bundle failed: {e:?}"))?;
+
+    let _ = fs::remove_dir_all(&entries_dir);
+
+    let bundle_path = output_dir.join("rsc-ssr-bundle.js");
+    debug!(path = %bundle_path.display(), "RSC SSR bundle written");
     Ok(bundle_path)
 }
 
@@ -592,6 +775,17 @@ mod tests {
             !server_content.is_empty(),
             "Server bundle should not be empty"
         );
+
+        // SSR bundle file exists
+        assert!(
+            result.ssr_bundle_path.exists(),
+            "SSR bundle should exist at {:?}",
+            result.ssr_bundle_path
+        );
+
+        // SSR bundle is non-empty
+        let ssr_content = fs::read_to_string(&result.ssr_bundle_path).unwrap();
+        assert!(!ssr_content.is_empty(), "SSR bundle should not be empty");
 
         // Client manifest was created (may be empty if no "use client" modules in entries)
         // Verify the manifest struct exists and is accessible

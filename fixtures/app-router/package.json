@@ -6,7 +6,8 @@
   "dependencies": {
     "@limlabs/rex": "file:../../packages/rex",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "react-server-dom-webpack": "^19.2.4"
   },
   "devDependencies": {
     "@types/react": "^19.2.14",

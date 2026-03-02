@@ -119,12 +119,18 @@ impl Rex {
 
         let mut server_bundle = std::fs::read_to_string(&build_result.server_bundle_path)?;
 
-        // If RSC server bundle exists, append it so RSC functions are available in V8
+        // If RSC bundles exist, append them so RSC functions are available in V8
         if let Some(rsc_path) = &build_result.manifest.rsc_server_bundle {
             let rsc_bundle = std::fs::read_to_string(rsc_path)?;
             server_bundle.push_str("\n;\n");
             server_bundle.push_str(&rsc_bundle);
-            debug!("RSC server bundle appended to V8 bundle");
+            debug!("RSC flight bundle appended to V8 bundle");
+        }
+        if let Some(ssr_path) = &build_result.manifest.rsc_ssr_bundle {
+            let ssr_bundle = std::fs::read_to_string(ssr_path)?;
+            server_bundle.push_str("\n;\n");
+            server_bundle.push_str(&ssr_bundle);
+            debug!("RSC SSR bundle appended to V8 bundle");
         }
 
         let pool_size = std::thread::available_parallelism()
@@ -168,11 +174,17 @@ impl Rex {
 
         let mut server_bundle = std::fs::read_to_string(config.server_bundle_path())?;
 
-        // If RSC server bundle exists, append it
+        // If RSC bundles exist, append them
         if let Some(rsc_path) = &manifest.rsc_server_bundle {
             if let Ok(rsc_bundle) = std::fs::read_to_string(rsc_path) {
                 server_bundle.push_str("\n;\n");
                 server_bundle.push_str(&rsc_bundle);
+            }
+        }
+        if let Some(ssr_path) = &manifest.rsc_ssr_bundle {
+            if let Ok(ssr_bundle) = std::fs::read_to_string(ssr_path) {
+                server_bundle.push_str("\n;\n");
+                server_bundle.push_str(&ssr_bundle);
             }
         }
 

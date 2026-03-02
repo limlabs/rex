@@ -248,6 +248,7 @@ globalThis.__rex_resolve_api = function() {
         manifest.client_reference_manifest = Some(rsc_result.client_manifest);
         manifest.rsc_server_bundle =
             Some(rsc_result.server_bundle_path.to_string_lossy().to_string());
+        manifest.rsc_ssr_bundle = Some(rsc_result.ssr_bundle_path.to_string_lossy().to_string());
 
         debug!(app_routes = manifest.app_routes.len(), "RSC bundles built");
     }
@@ -331,6 +332,78 @@ if (typeof globalThis.URL === 'undefined') {
         if (qi !== -1) this.search = this.href.substring(qi).split('#')[0];
     };
     globalThis.URL.prototype.toString = function() { return this.href; };
+}
+if (typeof globalThis.ReadableStream === 'undefined') {
+    globalThis.ReadableStream = function ReadableStream(underlyingSource) {
+        this._queue = [];
+        this._closed = false;
+        this._errored = false;
+        this._error = undefined;
+        this._reader = null;
+        this._readerResolve = null;
+        var self = this;
+        var controller = {
+            enqueue: function(chunk) {
+                if (self._closed || self._errored) return;
+                if (self._readerResolve) {
+                    var resolve = self._readerResolve;
+                    self._readerResolve = null;
+                    resolve({ value: chunk, done: false });
+                } else {
+                    self._queue.push(chunk);
+                }
+            },
+            close: function() {
+                if (self._closed || self._errored) return;
+                self._closed = true;
+                if (self._readerResolve) {
+                    var resolve = self._readerResolve;
+                    self._readerResolve = null;
+                    resolve({ value: undefined, done: true });
+                }
+            },
+            error: function(e) {
+                if (self._closed || self._errored) return;
+                self._errored = true;
+                self._error = e;
+                if (self._readerResolve) {
+                    var resolve = self._readerResolve;
+                    self._readerResolve = null;
+                    resolve(Promise.reject(e));
+                }
+            },
+            desiredSize: 1
+        };
+        if (underlyingSource && typeof underlyingSource.start === 'function') {
+            underlyingSource.start(controller);
+        }
+    };
+    globalThis.ReadableStream.prototype.getReader = function() {
+        var stream = this;
+        stream._reader = true;
+        return {
+            read: function() {
+                if (stream._errored) return Promise.reject(stream._error);
+                if (stream._queue.length > 0) {
+                    return Promise.resolve({ value: stream._queue.shift(), done: false });
+                }
+                if (stream._closed) {
+                    return Promise.resolve({ value: undefined, done: true });
+                }
+                return new Promise(function(resolve) {
+                    stream._readerResolve = resolve;
+                });
+            },
+            cancel: function() {
+                stream._closed = true;
+                stream._queue = [];
+                return Promise.resolve();
+            },
+            releaseLock: function() {
+                stream._reader = null;
+            }
+        };
+    };
 }
 "#;
 

@@ -276,6 +276,35 @@ impl SsrIsolate {
         })
     }
 
+    /// Load RSC bundles (flight + SSR) into the V8 context.
+    ///
+    /// Both bundles are IIFEs evaluated sequentially in the same context.
+    /// The flight bundle sets `__rex_render_flight`, `__rex_render_rsc_to_html`, etc.
+    /// The SSR bundle sets `__rex_rsc_flight_to_html`, `__rex_resolve_ssr_pending`, etc.
+    pub fn load_rsc_bundles(&mut self, flight_bundle_js: &str, ssr_bundle_js: &str) -> Result<()> {
+        {
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+            // Evaluate the flight bundle (sets __rex_render_flight, etc.)
+            v8_eval!(scope, flight_bundle_js, "rsc-server-bundle.js")
+                .context("Failed to evaluate RSC flight bundle")?;
+
+            // Evaluate the SSR bundle (sets __rex_rsc_flight_to_html, etc.)
+            v8_eval!(scope, ssr_bundle_js, "rsc-ssr-bundle.js")
+                .context("Failed to evaluate RSC SSR bundle")?;
+
+            // Re-lookup RSC functions now that both bundles are loaded
+            let ctx = scope.get_current_context();
+            let global = ctx.global(scope);
+
+            self.rsc_flight_fn = v8_get_optional_fn!(scope, global, "__rex_render_flight");
+            self.rsc_to_html_fn = v8_get_optional_fn!(scope, global, "__rex_render_rsc_to_html");
+        }
+
+        debug!("RSC bundles loaded into V8 context");
+        Ok(())
+    }
+
     /// Call __rex_render_page(routeKey, propsJson) and return the rendered body + head HTML.
     pub fn render_page(&mut self, route_key: &str, props_json: &str) -> Result<RenderResult> {
         v8::scope_with_context!(scope, &mut self.isolate, &self.context);
@@ -581,7 +610,12 @@ impl SsrIsolate {
 
             match status.as_str() {
                 "done" => break,
-                "pending" => continue,
+                "pending" => {
+                    // Yield briefly to avoid CPU-spinning when async slots are
+                    // waiting on microtasks but no fetch requests are queued.
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                    continue;
+                }
                 other => {
                     return Err(anyhow::anyhow!("Unexpected RSC resolve status: {}", other));
                 }

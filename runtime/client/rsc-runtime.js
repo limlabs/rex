@@ -185,7 +185,7 @@
     var entry = moduleMap[refId];
     if (!entry) {
       // Fallback: return a placeholder
-      var Placeholder = function (props) {
+      var Placeholder = function (_props) {
         return React.createElement('div', {
           'data-rsc-missing': refId,
           style: { border: '2px dashed red', padding: '8px' }

@@ -39,6 +39,55 @@ impl ClientReferenceManifest {
             },
         );
     }
+
+    /// Produce the server-side webpack bundler config for `renderToReadableStream`.
+    ///
+    /// React's server looks up `config[$$id]` → `{ id, name, chunks }`.
+    /// We use the reference ID as both the `$$id` and the module `id`.
+    pub fn to_server_webpack_config(&self) -> serde_json::Value {
+        let mut config = serde_json::Map::new();
+        for (ref_id, entry) in &self.entries {
+            config.insert(
+                ref_id.clone(),
+                serde_json::json!({
+                    "id": ref_id,
+                    "name": &entry.export_name,
+                    "chunks": []
+                }),
+            );
+        }
+        serde_json::Value::Object(config)
+    }
+
+    /// Produce the SSR-side webpack module map for `createFromReadableStream`.
+    ///
+    /// React's client looks up `config[moduleId][exportName]` → `{ id, name, chunks }`.
+    /// The `moduleId` and `exportName` come from the flight data emitted by the server.
+    pub fn to_ssr_webpack_manifest(&self) -> serde_json::Value {
+        let mut manifest = serde_json::Map::new();
+        for (ref_id, entry) in &self.entries {
+            let mut export_map = serde_json::Map::new();
+            export_map.insert(
+                entry.export_name.clone(),
+                serde_json::json!({
+                    "id": ref_id,
+                    "chunks": [],
+                    "name": &entry.export_name
+                }),
+            );
+            // Wildcard fallback
+            export_map.insert(
+                "*".to_string(),
+                serde_json::json!({
+                    "id": ref_id,
+                    "chunks": [],
+                    "name": ""
+                }),
+            );
+            manifest.insert(ref_id.clone(), serde_json::Value::Object(export_map));
+        }
+        serde_json::Value::Object(manifest)
+    }
 }
 
 /// Generate a stable reference ID for a client component export.
@@ -98,5 +147,46 @@ mod tests {
         let entry = manifest.entries.get("abc123").unwrap();
         assert_eq!(entry.chunk_url, "/Counter-xyz.js");
         assert_eq!(entry.export_name, "default");
+    }
+
+    #[test]
+    fn server_webpack_config_format() {
+        let mut manifest = ClientReferenceManifest::new();
+        manifest.add("ref1", "/Counter.js".to_string(), "default".to_string());
+        manifest.add("ref2", "/Input.js".to_string(), "Input".to_string());
+
+        let config = manifest.to_server_webpack_config();
+        let obj = config.as_object().unwrap();
+
+        let entry1 = obj.get("ref1").unwrap();
+        assert_eq!(entry1["id"], "ref1");
+        assert_eq!(entry1["name"], "default");
+        assert!(entry1["chunks"].as_array().unwrap().is_empty());
+
+        let entry2 = obj.get("ref2").unwrap();
+        assert_eq!(entry2["id"], "ref2");
+        assert_eq!(entry2["name"], "Input");
+    }
+
+    #[test]
+    fn ssr_webpack_manifest_format() {
+        let mut manifest = ClientReferenceManifest::new();
+        manifest.add("ref1", "/Counter.js".to_string(), "default".to_string());
+
+        let ssr = manifest.to_ssr_webpack_manifest();
+        let obj = ssr.as_object().unwrap();
+
+        // Has entry keyed by ref_id
+        let ref1 = obj.get("ref1").unwrap().as_object().unwrap();
+
+        // Has export name entry
+        let default_entry = ref1.get("default").unwrap();
+        assert_eq!(default_entry["id"], "ref1");
+        assert_eq!(default_entry["name"], "default");
+
+        // Has wildcard fallback
+        let wildcard = ref1.get("*").unwrap();
+        assert_eq!(wildcard["id"], "ref1");
+        assert_eq!(wildcard["name"], "");
     }
 }
