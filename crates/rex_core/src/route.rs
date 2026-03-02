@@ -142,7 +142,7 @@ pub struct MiddlewareResult {
 
 // --- Middleware config types (rex.config.json / rex.config.toml) ---
 
-/// A redirect rule from rex.config.json
+/// A redirect rule from the project config
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RedirectRule {
     /// Source path pattern (supports :param for dynamic segments)
@@ -161,7 +161,7 @@ fn default_redirect_rule_status() -> u16 {
     307
 }
 
-/// A rewrite rule from rex.config.json
+/// A rewrite rule from the project config
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RewriteRule {
     /// Source path pattern (supports :param for dynamic segments)
@@ -170,7 +170,7 @@ pub struct RewriteRule {
     pub destination: String,
 }
 
-/// A custom header rule from rex.config.json
+/// A custom header rule from the project config
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeaderRule {
     /// Path pattern to match (supports :param for dynamic segments)
@@ -186,7 +186,7 @@ pub struct HeaderEntry {
     pub value: String,
 }
 
-/// Build-time configuration from rex.config.json
+/// Build-time configuration from the project config
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BuildConfig {
     /// Additional module aliases (e.g. `"@components": "./src/components"`)
@@ -211,7 +211,7 @@ impl BuildConfig {
     }
 }
 
-/// Dev server configuration from rex.config.json
+/// Dev server configuration from the project config
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DevConfig {
     #[serde(default)]
