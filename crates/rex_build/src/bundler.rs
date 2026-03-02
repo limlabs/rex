@@ -203,7 +203,11 @@ globalThis.__rex_resolve_api = function() {
                 ]),
                 ..Default::default()
             }),
-            sourcemap: Some(rolldown::SourceMapType::File),
+            sourcemap: if project_config.build.sourcemap {
+                Some(rolldown::SourceMapType::File)
+            } else {
+                None
+            },
             ..Default::default()
         };
 
@@ -1122,7 +1126,11 @@ async fn build_server_bundle(
             ]),
             ..Default::default()
         }),
-        sourcemap: Some(rolldown::SourceMapType::File),
+        sourcemap: if project_config.build.sourcemap {
+            Some(rolldown::SourceMapType::File)
+        } else {
+            None
+        },
         ..Default::default()
     };
 
@@ -1372,7 +1380,11 @@ if (!window.__REX_NAVIGATING__) {{
             ]),
             ..Default::default()
         }),
-        sourcemap: Some(rolldown::SourceMapType::File),
+        sourcemap: if project_config.build.sourcemap {
+            Some(rolldown::SourceMapType::File)
+        } else {
+            None
+        },
         ..Default::default()
     };
 
