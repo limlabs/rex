@@ -70,10 +70,15 @@ struct TuiApp {
     search_query: String,
     searching: bool,
     auto_scroll: bool,
+    /// Countdown ticks for the tail-flick animation on HMR rebuild.
+    tail_flick_ticks: u8,
+    /// Last log message we saw, used to detect new rebuild events.
+    last_seen_msg: String,
 }
 
 impl TuiApp {
     fn new(log_buffer: LogBuffer, startup_info: StartupInfo) -> Self {
+        let last_seen_msg = log_buffer.last().map(|e| e.message).unwrap_or_default();
         Self {
             screen: Screen::Home,
             log_buffer,
@@ -83,7 +88,22 @@ impl TuiApp {
             search_query: String::new(),
             searching: false,
             auto_scroll: true,
+            tail_flick_ticks: 0,
+            last_seen_msg,
         }
+    }
+
+    /// Advance animation state and detect HMR rebuilds.
+    fn tick(&mut self) {
+        if let Some(entry) = self.log_buffer.last() {
+            if entry.message != self.last_seen_msg {
+                if entry.message.starts_with("Rebuild complete") {
+                    self.tail_flick_ticks = 4; // shows flick for ~300ms (3 render frames)
+                }
+                self.last_seen_msg = entry.message;
+            }
+        }
+        self.tail_flick_ticks = self.tail_flick_ticks.saturating_sub(1);
     }
 
     fn render(&self, f: &mut Frame<'_>) {
@@ -122,13 +142,23 @@ impl TuiApp {
     }
 
     fn render_mascot(&self, f: &mut Frame<'_>, area: Rect) {
-        let mascot_lines = [
-            "        ▄████▄       ",
-            "        █ ◦ █▀█▄    ",
-            "  ▄▄▄▄▄▄█████▀▀     ",
-            "    ▀▀▀▀██████       ",
-            "        █▀ █▀        ",
-        ];
+        let mascot_lines: [&str; 5] = if self.tail_flick_ticks > 0 {
+            [
+                "        ▄████▄       ",
+                "  ▄     █ ◦ █▀█▄    ",
+                "   ▀▄▄▄▄█████▀▀     ",
+                "    ▀▀▀▀██████       ",
+                "        █▀ █▀        ",
+            ]
+        } else {
+            [
+                "        ▄████▄       ",
+                "        █ ◦ █▀█▄    ",
+                "  ▄▄▄▄▄▄█████▀▀     ",
+                "    ▀▀▀▀██████       ",
+                "        █▀ █▀        ",
+            ]
+        };
 
         let mut lines = Vec::new();
         for ml in &mascot_lines {
@@ -592,6 +622,7 @@ pub async fn run_tui(log_buffer: LogBuffer, startup_info: StartupInfo) -> anyhow
     let mut tick = tokio::time::interval(Duration::from_millis(100));
 
     loop {
+        app.tick();
         terminal.draw(|f| app.render(f))?;
 
         tokio::select! {

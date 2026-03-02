@@ -5,6 +5,7 @@ use std::path::PathBuf;
 pub struct RexConfig {
     pub project_root: PathBuf,
     pub pages_dir: PathBuf,
+    pub app_dir: PathBuf,
     pub output_dir: PathBuf,
     pub port: u16,
     pub dev: bool,
@@ -13,14 +14,26 @@ pub struct RexConfig {
 impl RexConfig {
     pub fn new(project_root: PathBuf) -> Self {
         let pages_dir = project_root.join("pages");
+        let app_dir = project_root.join("app");
         let output_dir = project_root.join(".rex");
         Self {
             project_root,
             pages_dir,
+            app_dir,
             output_dir,
             port: 3000,
             dev: false,
         }
+    }
+
+    /// Whether this project has an app/ directory (RSC/App Router).
+    pub fn has_app_dir(&self) -> bool {
+        self.app_dir.exists()
+    }
+
+    /// Whether this project has a pages/ directory (Pages Router).
+    pub fn has_pages_dir(&self) -> bool {
+        self.pages_dir.exists()
     }
 
     pub fn with_dev(mut self, dev: bool) -> Self {
@@ -49,12 +62,12 @@ impl RexConfig {
         self.output_dir.join("build").join("manifest.json")
     }
 
-    /// Check if the pages directory exists
+    /// Check that at least one of pages/ or app/ directories exists.
     pub fn validate(&self) -> Result<(), crate::RexError> {
-        if !self.pages_dir.exists() {
+        if !self.pages_dir.exists() && !self.app_dir.exists() {
             return Err(crate::RexError::Config(format!(
-                "Pages directory not found: {}",
-                self.pages_dir.display()
+                "Neither pages/ nor app/ directory found in {}",
+                self.project_root.display()
             )));
         }
         Ok(())

@@ -7,10 +7,16 @@ declare global {
     css?: string[];
   }
 
+  /** Manifest entry for an app route */
+  interface RexManifestAppRoute {
+    client_chunks: string[];
+  }
+
   /** Client manifest embedded in SSR HTML */
   interface RexManifest {
     build_id: string;
     pages: Record<string, RexManifestPage>;
+    app_routes?: Record<string, RexManifestAppRoute>;
   }
 
   /** Router state exposed on window.__REX_ROUTER */
@@ -63,6 +69,9 @@ declare global {
       props: Record<string, unknown>,
     ) => void;
     __REX_NAVIGATING__?: boolean;
+    __REX_RSC_NAVIGATE?: (pathname: string) => Promise<void>;
+    __REX_RSC_INIT?: () => void;
+    __rexModuleCache?: Record<string, unknown>;
   }
 
   // Server-side globals (V8 SSR environment)

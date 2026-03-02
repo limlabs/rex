@@ -27,13 +27,11 @@ pub async fn build_bundles(
     let server_dir = config.server_build_dir();
     let client_dir = config.client_build_dir();
 
-    // Clean output directories to remove stale artifacts from previous builds
-    if server_dir.exists() {
-        fs::remove_dir_all(&server_dir)?;
-    }
-    if client_dir.exists() {
-        fs::remove_dir_all(&client_dir)?;
-    }
+    // Clean output directories to remove stale artifacts from previous builds.
+    // Use let _ to ignore errors — on macOS, remove_dir_all can race with
+    // Spotlight/fsevents and fail with ENOTEMPTY (os error 66).
+    let _ = fs::remove_dir_all(&server_dir);
+    let _ = fs::remove_dir_all(&client_dir);
     fs::create_dir_all(&server_dir)?;
     fs::create_dir_all(&client_dir)?;
 
@@ -51,34 +49,209 @@ pub async fn build_bundles(
     };
     let define = vec![("process.env.NODE_ENV".to_string(), node_env.to_string())];
 
-    // Build server and client bundles in parallel
-    let server_fut = build_server_bundle(
-        config,
-        scan,
-        &server_dir,
-        &css_modules.page_overrides,
-        &define,
-        project_config,
-    )
-    .instrument(info_span!("build_server_bundle"));
-    let client_fut = build_client_bundles(
-        config,
-        scan,
-        &client_dir,
-        &build_id,
-        &css_modules,
-        &define,
-        &tailwind_outputs,
-        project_config,
-    )
-    .instrument(info_span!("build_client_bundles"));
+    let has_pages = !scan.routes.is_empty() || scan.app.is_some();
 
-    let (server_bundle_path, mut manifest) = tokio::try_join!(server_fut, client_fut)?;
+    let (server_bundle_path, mut manifest) = if has_pages {
+        // Build server and client bundles in parallel
+        let server_fut = build_server_bundle(
+            config,
+            scan,
+            &server_dir,
+            &css_modules.page_overrides,
+            &define,
+            project_config,
+        )
+        .instrument(info_span!("build_server_bundle"));
+        let client_fut = build_client_bundles(
+            config,
+            scan,
+            &client_dir,
+            &build_id,
+            &css_modules,
+            &define,
+            &tailwind_outputs,
+            project_config,
+        )
+        .instrument(info_span!("build_client_bundles"));
+
+        tokio::try_join!(server_fut, client_fut)?
+    } else {
+        // App-only project: create a minimal server bundle with V8 polyfills + React + stubs
+        debug!("No pages/ routes — creating minimal server bundle");
+        let entry_dir = server_dir.join("_server_entry");
+        fs::create_dir_all(&entry_dir)?;
+
+        let mut entry = String::from(
+            r#"import { createElement } from 'react';
+import { renderToString } from 'react-dom/server';
+globalThis.__rex_pages = {};
+var __rex_createElement = createElement;
+var __rex_renderToString = renderToString;
+
+// Stub render functions for V8 isolate compatibility (app-only project)
+globalThis.__rex_render_page = function() { return JSON.stringify({ body: '', head: '' }); };
+globalThis.__rex_get_server_side_props = function() { return JSON.stringify({ props: {} }); };
+globalThis.__rex_get_static_props = function() { return JSON.stringify({ props: {} }); };
+globalThis.__rex_render_document = function() { return JSON.stringify({ html: '', head: '' }); };
+"#,
+        );
+
+        // Include API routes in the minimal bundle (pages/api/ can coexist with app/)
+        if !scan.api_routes.is_empty() {
+            entry.push_str("\nglobalThis.__rex_api_handlers = {};\n");
+            for (i, route) in scan.api_routes.iter().enumerate() {
+                let api_path = route.abs_path.to_string_lossy().replace('\\', "/");
+                let module_name = route.module_name();
+                entry.push_str(&format!("import * as __api{i} from '{api_path}';\n"));
+                entry.push_str(&format!(
+                    "globalThis.__rex_api_handlers['{module_name}'] = __api{i};\n"
+                ));
+            }
+            // Add the API handler runtime functions (same as in build_server_bundle)
+            entry.push_str(
+                r#"
+globalThis.__rex_call_api_handler = function(routeKey, reqJson) {
+    var handlers = globalThis.__rex_api_handlers;
+    if (!handlers) throw new Error('No API handlers registered');
+    var handler = handlers[routeKey];
+    if (!handler) throw new Error('API handler not found: ' + routeKey);
+    var handlerFn = handler.default;
+    if (!handlerFn) throw new Error('No default export for API route: ' + routeKey);
+
+    var reqData = JSON.parse(reqJson);
+    var res = {
+        _statusCode: 200, _headers: {}, _body: '',
+        status: function(code) { this._statusCode = code; return this; },
+        setHeader: function(name, value) { this._headers[name.toLowerCase()] = value; return this; },
+        json: function(data) { this._headers['content-type'] = 'application/json'; this._body = JSON.stringify(data); return this; },
+        send: function(body) { if (typeof body === 'object' && !this._headers['content-type']) return this.json(body); this._body = typeof body === 'string' ? body : String(body); return this; },
+        end: function(body) { if (body !== undefined) this._body = String(body); return this; },
+        redirect: function(statusOrUrl, maybeUrl) { if (typeof statusOrUrl === 'string') { this._statusCode = 307; this._headers['location'] = statusOrUrl; } else { this._statusCode = statusOrUrl; this._headers['location'] = maybeUrl; } return this; }
+    };
+    var req = { method: reqData.method, url: reqData.url, headers: reqData.headers || {}, query: reqData.query || {}, body: reqData.body, cookies: reqData.cookies || {} };
+
+    var result = handlerFn(req, res);
+    if (result && typeof result.then === 'function') {
+        globalThis.__rex_api_resolved = null;
+        globalThis.__rex_api_rejected = null;
+        result.then(function() { globalThis.__rex_api_resolved = { statusCode: res._statusCode, headers: res._headers, body: res._body }; }, function(e) { globalThis.__rex_api_rejected = e; });
+        return '__REX_API_ASYNC__';
+    }
+    return JSON.stringify({ statusCode: res._statusCode, headers: res._headers, body: res._body });
+};
+
+globalThis.__rex_resolve_api = function() {
+    if (globalThis.__rex_api_rejected) throw globalThis.__rex_api_rejected;
+    if (globalThis.__rex_api_resolved !== null) return JSON.stringify(globalThis.__rex_api_resolved);
+    throw new Error('API handler promise did not resolve');
+};
+"#,
+            );
+        }
+        let entry_path = entry_dir.join("server-entry.js");
+        fs::write(&entry_path, entry)?;
+
+        let runtime_dir = runtime_server_dir()?;
+        let mut module_types = rustc_hash::FxHashMap::default();
+        module_types.insert(".css".to_string(), rolldown::ModuleType::Empty);
+
+        let options = rolldown::BundlerOptions {
+            input: Some(vec![rolldown::InputItem {
+                name: Some("server-bundle".to_string()),
+                import: entry_path.to_string_lossy().to_string(),
+            }]),
+            cwd: Some(config.project_root.clone()),
+            format: Some(rolldown::OutputFormat::Iife),
+            dir: Some(server_dir.to_string_lossy().to_string()),
+            entry_filenames: Some("server-bundle.js".to_string().into()),
+            platform: Some(rolldown::Platform::Browser),
+            module_types: Some(module_types),
+            define: Some(define.iter().cloned().collect()),
+            banner: Some(rolldown::AddonOutputOption::String(Some(
+                V8_POLYFILLS.to_string(),
+            ))),
+            tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+            treeshake: crate::rsc_bundler::react_treeshake_options(),
+            resolve: Some(rolldown::ResolveOptions {
+                extensions: Some(vec![
+                    ".tsx".to_string(),
+                    ".ts".to_string(),
+                    ".jsx".to_string(),
+                    ".js".to_string(),
+                ]),
+                modules: Some(vec![
+                    config
+                        .project_root
+                        .join("node_modules")
+                        .to_string_lossy()
+                        .to_string(),
+                    "node_modules".to_string(),
+                ]),
+                alias: Some(vec![
+                    (
+                        "rex/head".to_string(),
+                        vec![Some(
+                            runtime_dir.join("head.js").to_string_lossy().to_string(),
+                        )],
+                    ),
+                    (
+                        "rex/link".to_string(),
+                        vec![Some(
+                            runtime_dir.join("link.js").to_string_lossy().to_string(),
+                        )],
+                    ),
+                ]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let mut bundler = rolldown::Bundler::new(options)
+            .map_err(|e| anyhow::anyhow!("Failed to create server bundler: {e}"))?;
+        bundler
+            .write()
+            .await
+            .map_err(|e| anyhow::anyhow!("Server bundle failed: {e:?}"))?;
+
+        let _ = fs::remove_dir_all(&entry_dir);
+
+        let bundle_path = server_dir.join("server-bundle.js");
+        let manifest = AssetManifest::new(build_id.clone());
+        (bundle_path, manifest)
+    };
 
     // Set middleware matchers on manifest (if middleware exists)
     if let Some(mw_path) = &scan.middleware {
         let source = fs::read_to_string(mw_path)?;
         manifest.middleware_matchers = Some(extract_middleware_matchers(&source));
+    }
+
+    // Build RSC bundles if app/ scan is present
+    if let Some(app_scan) = &scan.app_scan {
+        let rsc_result =
+            crate::rsc_bundler::build_rsc_bundles(config, app_scan, &build_id, &define).await?;
+
+        // Populate app_routes in manifest
+        for route in &app_scan.routes {
+            manifest.app_routes.insert(
+                route.pattern.clone(),
+                crate::manifest::AppRouteAssets {
+                    client_chunks: rsc_result.client_chunks.clone(),
+                    layout_chain: route
+                        .layout_chain
+                        .iter()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect(),
+                },
+            );
+        }
+
+        manifest.client_reference_manifest = Some(rsc_result.client_manifest);
+        manifest.rsc_server_bundle =
+            Some(rsc_result.server_bundle_path.to_string_lossy().to_string());
+        manifest.rsc_ssr_bundle = Some(rsc_result.ssr_bundle_path.to_string_lossy().to_string());
+
+        debug!(app_routes = manifest.app_routes.len(), "RSC bundles built");
     }
 
     // Save manifest
@@ -97,7 +270,7 @@ pub async fn build_bundles(
 
 /// V8 polyfills for bare V8 environment (React 19 needs these).
 /// Injected as a rolldown banner so they run before any bundled code.
-const V8_POLYFILLS: &str = r#"
+pub(crate) const V8_POLYFILLS: &str = r#"
 if (typeof globalThis.process === 'undefined') {
     globalThis.process = { env: { NODE_ENV: 'production' } };
 }
@@ -121,14 +294,52 @@ if (typeof globalThis.MessageChannel === 'undefined') {
 if (typeof globalThis.TextEncoder === 'undefined') {
     globalThis.TextEncoder = function() {};
     globalThis.TextEncoder.prototype.encode = function(str) {
-        var arr = []; for (var i = 0; i < str.length; i++) arr.push(str.charCodeAt(i));
+        var arr = [];
+        for (var i = 0; i < str.length; i++) {
+            var c = str.charCodeAt(i);
+            if (c < 0x80) {
+                arr.push(c);
+            } else if (c < 0x800) {
+                arr.push(0xC0 | (c >> 6), 0x80 | (c & 0x3F));
+            } else if (c >= 0xD800 && c <= 0xDBFF && i + 1 < str.length) {
+                var next = str.charCodeAt(i + 1);
+                if (next >= 0xDC00 && next <= 0xDFFF) {
+                    var cp = ((c - 0xD800) << 10) + (next - 0xDC00) + 0x10000;
+                    arr.push(0xF0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3F),
+                             0x80 | ((cp >> 6) & 0x3F), 0x80 | (cp & 0x3F));
+                    i++;
+                }
+            } else {
+                arr.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 0x3F), 0x80 | (c & 0x3F));
+            }
+        }
         return new Uint8Array(arr);
     };
 }
 if (typeof globalThis.TextDecoder === 'undefined') {
     globalThis.TextDecoder = function() {};
     globalThis.TextDecoder.prototype.decode = function(buf) {
-        return String.fromCharCode.apply(null, new Uint8Array(buf));
+        var bytes = new Uint8Array(buf);
+        var out = '', i = 0;
+        while (i < bytes.length) {
+            var b = bytes[i];
+            if (b < 0x80) { out += String.fromCharCode(b); i++; }
+            else if ((b & 0xE0) === 0xC0) {
+                out += String.fromCharCode(((b & 0x1F) << 6) | (bytes[i+1] & 0x3F));
+                i += 2;
+            } else if ((b & 0xF0) === 0xE0) {
+                out += String.fromCharCode(((b & 0x0F) << 12) | ((bytes[i+1] & 0x3F) << 6)
+                    | (bytes[i+2] & 0x3F));
+                i += 3;
+            } else if ((b & 0xF8) === 0xF0) {
+                var cp = ((b & 0x07) << 18) | ((bytes[i+1] & 0x3F) << 12)
+                    | ((bytes[i+2] & 0x3F) << 6) | (bytes[i+3] & 0x3F);
+                cp -= 0x10000;
+                out += String.fromCharCode(0xD800 + (cp >> 10), 0xDC00 + (cp & 0x3FF));
+                i += 4;
+            } else { out += '\uFFFD'; i++; }
+        }
+        return out;
     };
 }
 if (typeof globalThis.performance === 'undefined') {
@@ -160,6 +371,163 @@ if (typeof globalThis.URL === 'undefined') {
         if (qi !== -1) this.search = this.href.substring(qi).split('#')[0];
     };
     globalThis.URL.prototype.toString = function() { return this.href; };
+}
+if (typeof globalThis.ReadableStream === 'undefined') {
+    globalThis.ReadableStream = function ReadableStream(underlyingSource) {
+        this._queue = [];
+        this._closed = false;
+        this._errored = false;
+        this._error = undefined;
+        this._reader = null;
+        this._readerResolve = null;
+        this._pulling = false;
+        this._pullAgain = false;
+        var self = this;
+        var controller = {
+            enqueue: function(chunk) {
+                if (self._closed || self._errored) return;
+                if (self._readerResolve) {
+                    var resolve = self._readerResolve;
+                    self._readerResolve = null;
+                    resolve({ value: chunk, done: false });
+                } else {
+                    self._queue.push(chunk);
+                }
+            },
+            close: function() {
+                if (self._closed || self._errored) return;
+                self._closed = true;
+                if (self._readerResolve) {
+                    var resolve = self._readerResolve;
+                    self._readerResolve = null;
+                    resolve({ value: undefined, done: true });
+                }
+            },
+            error: function(e) {
+                if (self._closed || self._errored) return;
+                self._errored = true;
+                self._error = e;
+                if (self._readerResolve) {
+                    var resolve = self._readerResolve;
+                    self._readerResolve = null;
+                    resolve(Promise.reject(e));
+                }
+            },
+            desiredSize: 1
+        };
+        this._controller = controller;
+        this._underlyingSource = underlyingSource || {};
+        if (typeof this._underlyingSource.start === 'function') {
+            this._underlyingSource.start(controller);
+        }
+    };
+    ReadableStream.prototype._callPull = function() {
+        if (this._pulling || this._closed || this._errored) return;
+        if (typeof this._underlyingSource.pull !== 'function') return;
+        this._pulling = true;
+        var self = this;
+        try {
+            var result = this._underlyingSource.pull(this._controller);
+            if (result && typeof result.then === 'function') {
+                result.then(function() {
+                    self._pulling = false;
+                    if (self._pullAgain) {
+                        self._pullAgain = false;
+                        self._callPull();
+                    }
+                }, function(err) {
+                    self._pulling = false;
+                    self._controller.error(err);
+                });
+            } else {
+                this._pulling = false;
+            }
+        } catch(e) {
+            this._pulling = false;
+            this._controller.error(e);
+        }
+    };
+    globalThis.ReadableStream.prototype.getReader = function() {
+        var stream = this;
+        stream._reader = true;
+        return {
+            read: function() {
+                if (stream._errored) return Promise.reject(stream._error);
+                if (stream._queue.length > 0) {
+                    var value = stream._queue.shift();
+                    stream._callPull();
+                    return Promise.resolve({ value: value, done: false });
+                }
+                if (stream._closed) {
+                    return Promise.resolve({ value: undefined, done: true });
+                }
+                // No data available — call pull (may enqueue synchronously)
+                stream._callPull();
+                // Re-check after pull in case data was enqueued synchronously
+                if (stream._queue.length > 0) {
+                    var value = stream._queue.shift();
+                    return Promise.resolve({ value: value, done: false });
+                }
+                if (stream._closed) {
+                    return Promise.resolve({ value: undefined, done: true });
+                }
+                // Still no data — wait for async enqueue
+                return new Promise(function(resolve) {
+                    stream._readerResolve = resolve;
+                });
+            },
+            cancel: function() {
+                stream._closed = true;
+                stream._queue = [];
+                return Promise.resolve();
+            },
+            releaseLock: function() {
+                stream._reader = null;
+            }
+        };
+    };
+}
+
+// AbortController/AbortSignal polyfill for bare V8
+if (typeof globalThis.AbortController === 'undefined') {
+    function AbortSignal() {
+        this.aborted = false;
+        this.reason = undefined;
+        this._listeners = [];
+    }
+    AbortSignal.prototype.addEventListener = function(type, listener) {
+        if (type === 'abort') this._listeners.push(listener);
+    };
+    AbortSignal.prototype.removeEventListener = function(type, listener) {
+        if (type === 'abort') {
+            this._listeners = this._listeners.filter(function(l) { return l !== listener; });
+        }
+    };
+    AbortSignal.prototype.throwIfAborted = function() {
+        if (this.aborted) throw this.reason;
+    };
+
+    globalThis.AbortController = function AbortController() {
+        this.signal = new AbortSignal();
+    };
+    globalThis.AbortController.prototype.abort = function(reason) {
+        if (this.signal.aborted) return;
+        this.signal.aborted = true;
+        this.signal.reason = reason || new DOMException('The operation was aborted.', 'AbortError');
+        var listeners = this.signal._listeners.slice();
+        for (var i = 0; i < listeners.length; i++) {
+            try { listeners[i]({ type: 'abort', target: this.signal }); } catch(e) {}
+        }
+    };
+
+    // DOMException polyfill if not available
+    if (typeof globalThis.DOMException === 'undefined') {
+        globalThis.DOMException = function DOMException(message, name) {
+            this.message = message || '';
+            this.name = name || 'Error';
+        };
+        globalThis.DOMException.prototype = Object.create(Error.prototype);
+    }
 }
 "#;
 
@@ -745,6 +1113,7 @@ async fn build_server_bundle(
             V8_POLYFILLS.to_string(),
         ))),
         tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+        treeshake: crate::rsc_bundler::react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(aliases),
             extensions: Some(vec![
@@ -843,14 +1212,23 @@ async fn build_client_bundles(
         });
     }
 
-    // Page entries
+    // Page entries (with server-export DCE)
+    let dce_dir = output_dir.join("_dce");
+    fs::create_dir_all(&dce_dir)?;
+
     for route in &scan.routes {
         let chunk_name = route_to_chunk_name(route);
         let effective_path = css_modules
             .page_overrides
             .get(&route.abs_path)
             .unwrap_or(&route.abs_path);
-        let page_path = effective_path.to_string_lossy().replace('\\', "/");
+
+        // Apply dead code elimination: strip getServerSideProps/getStaticProps
+        // and their server-only dependencies from the client copy.
+        let page_path = match apply_dce_to_page(effective_path, &dce_dir, &chunk_name) {
+            Ok(Some(dce_path)) => dce_path.to_string_lossy().replace('\\', "/"),
+            _ => effective_path.to_string_lossy().replace('\\', "/"),
+        };
         let entry_code = format!(
             r#"import {{ createElement }} from 'react';
 import {{ hydrateRoot }} from 'react-dom/client';
@@ -984,6 +1362,7 @@ if (!window.__REX_NAVIGATING__) {{
         minify,
         define: Some(define.iter().cloned().collect()),
         tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+        treeshake: crate::rsc_bundler::react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(client_aliases),
             extensions: Some(vec![
@@ -1041,6 +1420,7 @@ if (!window.__REX_NAVIGATING__) {{
     }
 
     let _ = fs::remove_dir_all(&entries_dir);
+    let _ = fs::remove_dir_all(&dce_dir);
 
     debug!(
         pages = scan.routes.len(),
@@ -1050,6 +1430,37 @@ if (!window.__REX_NAVIGATING__) {{
 }
 
 /// Map a route to a chunk name for rolldown entry naming.
+/// Apply DCE to a page source, stripping server-only exports.
+/// Returns the path to the DCE'd file if any code was removed, or None if unchanged.
+fn apply_dce_to_page(
+    page_path: &Path,
+    dce_dir: &Path,
+    chunk_name: &str,
+) -> Result<Option<PathBuf>> {
+    let source = fs::read_to_string(page_path)?;
+
+    let source_type = match page_path.extension().and_then(|e| e.to_str()) {
+        Some("tsx") => oxc_span::SourceType::tsx(),
+        Some("ts") => oxc_span::SourceType::ts(),
+        Some("jsx") => oxc_span::SourceType::jsx(),
+        _ => oxc_span::SourceType::mjs(),
+    };
+
+    let stripped = crate::dce::strip_server_exports(&source, source_type)?;
+    if stripped.len() == source.len() && stripped == source {
+        return Ok(None); // no changes
+    }
+
+    let ext = page_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("tsx");
+    let dce_path = dce_dir.join(format!("{chunk_name}.{ext}"));
+    fs::write(&dce_path, &stripped)?;
+    debug!(page = %page_path.display(), "DCE stripped server exports for client bundle");
+    Ok(Some(dce_path))
+}
+
 fn route_to_chunk_name(route: &rex_core::Route) -> String {
     let module_name = route.module_name();
     let cn = module_name.replace('/', "-").replace(['[', ']'], "_");
@@ -1217,7 +1628,7 @@ fn extract_string_literal(line: &str) -> Option<&str> {
 
 /// Get the path to the client runtime files.
 /// These are embedded in the source tree at runtime/client/.
-fn runtime_client_dir() -> Result<PathBuf> {
+pub(crate) fn runtime_client_dir() -> Result<PathBuf> {
     // In dev: relative to the crate source
     // The runtime files are at the workspace root under runtime/client/
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -1235,7 +1646,7 @@ fn runtime_client_dir() -> Result<PathBuf> {
 
 /// Get the path to the server runtime files.
 /// These are embedded in the source tree at runtime/server/.
-fn runtime_server_dir() -> Result<PathBuf> {
+pub(crate) fn runtime_server_dir() -> Result<PathBuf> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let runtime_dir = manifest_dir.join("../../runtime/server");
     if runtime_dir.exists() {
@@ -1773,6 +2184,7 @@ mod tests {
             error: None,
             not_found: None,
             middleware: None,
+            app_scan: None,
             mcp_tools: vec![],
         };
 
@@ -2195,6 +2607,7 @@ export function renderToString(el) { return renderEl(el); }
             error: None,
             not_found: None,
             middleware: None,
+            app_scan: None,
             mcp_tools: vec![],
         };
 
@@ -2354,6 +2767,7 @@ export default function Home() {
             error: None,
             not_found: None,
             middleware: None,
+            app_scan: None,
             mcp_tools: vec![],
         };
 
@@ -2659,6 +3073,7 @@ export default function Home() {
             error: None,
             not_found: None,
             middleware: None,
+            app_scan: None,
             mcp_tools: vec![],
         };
 

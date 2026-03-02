@@ -235,6 +235,7 @@ jobs:
       - name: Install dependencies
         run: cd packages/rex && npm install
 
+
       - name: Sync version from release tag
         run: |
           VERSION="${TAG#v}"

@@ -1,3 +1,4 @@
+use crate::client_manifest::ClientReferenceManifest;
 use rex_core::DataStrategy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -7,7 +8,7 @@ use std::path::Path;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AssetManifest {
     pub build_id: String,
-    /// route pattern -> client chunk filename
+    /// route pattern -> client chunk filename (pages/ router)
     pub pages: HashMap<String, PageAssets>,
     /// Client _app chunk filename (loaded before page scripts for hydration wrapping)
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -26,6 +27,20 @@ pub struct AssetManifest {
     /// None = no middleware, Some(empty) = run on all paths.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub middleware_matchers: Option<Vec<String>>,
+
+    // --- RSC / App Router fields ---
+    /// App route patterns -> AppRouteAssets (app/ router)
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub app_routes: HashMap<String, AppRouteAssets>,
+    /// Client reference manifest for RSC (maps ref IDs to chunk URLs)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_reference_manifest: Option<ClientReferenceManifest>,
+    /// Path to the RSC server bundle
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rsc_server_bundle: Option<String>,
+    /// Path to the RSC SSR bundle
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rsc_ssr_bundle: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +54,15 @@ pub struct PageAssets {
     pub data_strategy: DataStrategy,
 }
 
+/// Assets for an app/ route (RSC).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppRouteAssets {
+    /// Client chunks needed for this route's "use client" components
+    pub client_chunks: Vec<String>,
+    /// Layout chain patterns (for nested rendering)
+    pub layout_chain: Vec<String>,
+}
+
 impl AssetManifest {
     pub fn new(build_id: String) -> Self {
         Self {
@@ -49,6 +73,10 @@ impl AssetManifest {
             css_contents: HashMap::new(),
             shared_chunks: Vec::new(),
             middleware_matchers: None,
+            app_routes: HashMap::new(),
+            client_reference_manifest: None,
+            rsc_server_bundle: None,
+            rsc_ssr_bundle: None,
         }
     }
 

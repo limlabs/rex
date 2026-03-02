@@ -31,6 +31,8 @@ pub struct ServerConfig {
     pub project_config: ProjectConfig,
     pub has_middleware: bool,
     pub middleware_matchers: Option<Vec<String>>,
+    /// App route trie for RSC app/ routes. None if no app/ directory.
+    pub app_route_trie: Option<RouteTrie>,
     pub has_mcp_tools: bool,
 }
 
@@ -78,6 +80,7 @@ impl RexServer {
                 project_config: config.project_config,
                 manifest_json,
                 document_descriptor,
+                app_route_trie: config.app_route_trie,
                 has_mcp_tools: config.has_mcp_tools,
             })),
         });
@@ -125,10 +128,14 @@ impl RexServer {
             .route("/_rex/data/{build_id}/{*path}", get(handlers::data_handler))
             // Image optimization endpoint
             .route("/_rex/image", get(handlers::image_handler))
+            // RSC flight data endpoint (app/ router client navigation)
+            .route("/_rex/rsc/{build_id}/{*path}", get(handlers::rsc_handler))
             // MCP endpoint (JSON-RPC 2.0 over POST)
             .route("/mcp", post(crate::mcp::mcp_handler))
             // Client-side router script
             .route("/_rex/router.js", get(router_js_handler))
+            // RSC client runtime
+            .route("/_rex/rsc-runtime.js", get(rsc_runtime_js_handler))
             // Merge any extra routes (e.g., HMR websocket)
             .merge(extra_routes)
             // Static file serving
@@ -159,6 +166,13 @@ impl RexServer {
 async fn router_js_handler() -> impl axum::response::IntoResponse {
     (
         [(axum::http::header::CONTENT_TYPE, "application/javascript")],
-        include_str!("../../../runtime/dist/client/router.js"),
+        include_str!(concat!(env!("OUT_DIR"), "/router.js")),
+    )
+}
+
+async fn rsc_runtime_js_handler() -> impl axum::response::IntoResponse {
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/javascript")],
+        include_str!("../../../runtime/client/rsc-runtime.ts"),
     )
 }
