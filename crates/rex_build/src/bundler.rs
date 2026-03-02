@@ -170,7 +170,7 @@ globalThis.__rex_resolve_api = function() {
             banner: Some(rolldown::AddonOutputOption::String(Some(
                 V8_POLYFILLS.to_string(),
             ))),
-            tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+            tsconfig: Some(rolldown_common::TsConfig::Auto(false)),
             treeshake: crate::rsc_bundler::react_treeshake_options(),
             resolve: Some(rolldown::ResolveOptions {
                 extensions: Some(vec![
@@ -191,13 +191,19 @@ globalThis.__rex_resolve_api = function() {
                     (
                         "rex/head".to_string(),
                         vec![Some(
-                            runtime_dir.join("head.js").to_string_lossy().to_string(),
+                            runtime_dir.join("head.ts").to_string_lossy().to_string(),
                         )],
                     ),
                     (
                         "rex/link".to_string(),
                         vec![Some(
-                            runtime_dir.join("link.js").to_string_lossy().to_string(),
+                            runtime_dir.join("link.ts").to_string_lossy().to_string(),
+                        )],
+                    ),
+                    (
+                        "rex/router".to_string(),
+                        vec![Some(
+                            runtime_dir.join("router.ts").to_string_lossy().to_string(),
                         )],
                     ),
                 ]),
@@ -1112,7 +1118,12 @@ async fn build_server_bundle(
         banner: Some(rolldown::AddonOutputOption::String(Some(
             V8_POLYFILLS.to_string(),
         ))),
-        tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+        // Disable tsconfig path resolution for the server bundle — we provide
+        // explicit resolve.alias entries for rex/* stubs.  tsconfig.json `paths`
+        // (e.g. "rex/*" → "@limlabs/rex/src/*") would otherwise shadow the
+        // server-safe stubs with the client-only package source, causing
+        // "window is not defined" at SSR time.
+        tsconfig: Some(rolldown_common::TsConfig::Auto(false)),
         treeshake: crate::rsc_bundler::react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(aliases),
