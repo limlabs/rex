@@ -1,3 +1,4 @@
+pub mod fs;
 pub mod isolate_pool;
 pub mod platform;
 pub mod ssr_isolate;

@@ -680,6 +680,37 @@ async fn build_server_bundle(
                 runtime_dir.join("image.ts").to_string_lossy().to_string(),
             )],
         ),
+        // Node.js fs module polyfill (server-only)
+        (
+            "fs".to_string(),
+            vec![Some(
+                runtime_dir.join("fs.js").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "node:fs".to_string(),
+            vec![Some(
+                runtime_dir.join("fs.js").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "fs/promises".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("fs-promises.js")
+                    .to_string_lossy()
+                    .to_string(),
+            )],
+        ),
+        (
+            "node:fs/promises".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("fs-promises.js")
+                    .to_string_lossy()
+                    .to_string(),
+            )],
+        ),
     ];
     // Append user-defined aliases from rex.config build.alias
     aliases.extend(project_config.build.resolved_aliases(&config.project_root));
@@ -2416,7 +2447,28 @@ export default function Home() {
             .expect("build failed");
         let bundle = fs::read_to_string(&result.server_bundle_path).expect("read bundle");
         rex_v8::init_v8();
-        let pool = rex_v8::IsolatePool::new(1, std::sync::Arc::new(bundle)).expect("create pool");
+        let pool =
+            rex_v8::IsolatePool::new(1, std::sync::Arc::new(bundle), None).expect("create pool");
+        (result, pool)
+    }
+
+    /// Build and load with fs polyfill enabled (project_root passed to isolate pool).
+    async fn build_and_load_with_root(
+        config: &RexConfig,
+        scan: &ScanResult,
+    ) -> (BuildResult, rex_v8::IsolatePool) {
+        let result = build_bundles(config, scan, &ProjectConfig::default())
+            .await
+            .expect("build failed");
+        let bundle = fs::read_to_string(&result.server_bundle_path).expect("read bundle");
+        rex_v8::init_v8();
+        let root_str = config.project_root.to_string_lossy().to_string();
+        let pool = rex_v8::IsolatePool::new(
+            1,
+            std::sync::Arc::new(bundle),
+            Some(std::sync::Arc::new(root_str)),
+        )
+        .expect("create pool");
         (result, pool)
     }
 
@@ -2659,6 +2711,143 @@ export default function Home() {
             !render.body.contains("Loading..."),
             "SSR should NOT render fallback when children render normally: {}",
             render.body
+        );
+    }
+
+    #[tokio::test]
+    async fn test_integration_fs_polyfill() {
+        // Create a page that imports fs and uses readFileSync in GSSP
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                r#"
+                import fs from 'fs';
+                export default function Home({ content }) {
+                    return <div><h1>{content}</h1></div>;
+                }
+                export function getServerSideProps() {
+                    const content = fs.readFileSync('data/message.txt', 'utf8');
+                    return { props: { content } };
+                }
+                "#,
+            )],
+            None,
+        );
+
+        // Write the data file the page will read
+        let data_dir = config.project_root.join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::write(data_dir.join("message.txt"), "hello from file").unwrap();
+
+        let (_result, pool) = build_and_load_with_root(&config, &scan).await;
+
+        // Test GSSP reads the file
+        let gssp_json = pool
+            .execute(|iso| iso.get_server_side_props("index", "{\"params\":{},\"query\":{}}"))
+            .await
+            .expect("pool execute")
+            .expect("gssp");
+
+        let gssp: serde_json::Value = serde_json::from_str(&gssp_json).unwrap();
+        assert_eq!(
+            gssp["props"]["content"].as_str(),
+            Some("hello from file"),
+            "GSSP should read file content via fs polyfill: {gssp_json}"
+        );
+
+        // Test SSR renders the file content
+        let render = pool
+            .execute(|iso| iso.render_page("index", "{\"content\":\"hello from file\"}"))
+            .await
+            .expect("pool execute")
+            .expect("render_page");
+
+        assert!(
+            render.body.contains("hello from file"),
+            "SSR should render file content: {}",
+            render.body
+        );
+    }
+
+    #[tokio::test]
+    async fn test_integration_fs_promises_polyfill() {
+        // Test the fs/promises shim with async getServerSideProps
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                r#"
+                import { readFile } from 'fs/promises';
+                export default function Home({ content }) {
+                    return <div><h1>{content}</h1></div>;
+                }
+                export async function getServerSideProps() {
+                    const content = await readFile('data/async.txt', 'utf8');
+                    return { props: { content } };
+                }
+                "#,
+            )],
+            None,
+        );
+
+        // Write the data file
+        let data_dir = config.project_root.join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::write(data_dir.join("async.txt"), "async file content").unwrap();
+
+        let (_result, pool) = build_and_load_with_root(&config, &scan).await;
+
+        // Test async GSSP reads via fs/promises
+        let gssp_json = pool
+            .execute(|iso| iso.get_server_side_props("index", "{\"params\":{},\"query\":{}}"))
+            .await
+            .expect("pool execute")
+            .expect("gssp");
+
+        let gssp: serde_json::Value = serde_json::from_str(&gssp_json).unwrap();
+        assert_eq!(
+            gssp["props"]["content"].as_str(),
+            Some("async file content"),
+            "Async GSSP should read file content via fs/promises polyfill: {gssp_json}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_integration_fs_path_traversal_blocked() {
+        // Verify that path traversal is blocked through the full pipeline
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                r#"
+                import fs from 'fs';
+                export default function Home({ error }) {
+                    return <div><h1>{error}</h1></div>;
+                }
+                export function getServerSideProps() {
+                    try {
+                        fs.readFileSync('../../etc/passwd', 'utf8');
+                        return { props: { error: 'should have thrown' } };
+                    } catch (e) {
+                        return { props: { error: e.code || e.message } };
+                    }
+                }
+                "#,
+            )],
+            None,
+        );
+
+        let (_result, pool) = build_and_load_with_root(&config, &scan).await;
+
+        let gssp_json = pool
+            .execute(|iso| iso.get_server_side_props("index", "{\"params\":{},\"query\":{}}"))
+            .await
+            .expect("pool execute")
+            .expect("gssp");
+
+        let gssp: serde_json::Value = serde_json::from_str(&gssp_json).unwrap();
+        assert_eq!(
+            gssp["props"]["error"].as_str(),
+            Some("EACCES"),
+            "Path traversal should be blocked: {gssp_json}"
         );
     }
 
