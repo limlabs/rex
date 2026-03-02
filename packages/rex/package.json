@@ -25,6 +25,10 @@
       "types": "./dist/router.d.ts",
       "import": "./dist/router.js"
     },
+    "./head": {
+      "types": "./dist/head.d.ts",
+      "import": "./dist/head.js"
+    },
     "./image": {
       "types": "./dist/image.d.ts",
       "import": "./dist/image.js"
