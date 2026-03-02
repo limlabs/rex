@@ -140,7 +140,7 @@ pub struct MiddlewareResult {
     pub response_headers: HashMap<String, String>,
 }
 
-// --- Middleware config types (rex.config.json) ---
+// --- Middleware config types (rex.config.json / rex.config.toml) ---
 
 /// A redirect rule from rex.config.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -218,7 +218,7 @@ pub struct DevConfig {
     pub no_tui: bool,
 }
 
-/// Top-level project configuration from rex.config.json
+/// Top-level project configuration from rex.config.json or rex.config.toml
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectConfig {
     #[serde(default)]
@@ -234,16 +234,34 @@ pub struct ProjectConfig {
 }
 
 impl ProjectConfig {
-    /// Load from rex.config.json in the project root. Returns default if file doesn't exist.
+    /// Load project config from the project root.
+    ///
+    /// Checks for `rex.config.toml` and `rex.config.json`. If both exist, returns
+    /// an error. If neither exists, returns the default config.
     pub fn load(project_root: &std::path::Path) -> Result<Self, crate::RexError> {
-        let config_path = project_root.join("rex.config.json");
-        if !config_path.exists() {
-            return Ok(Self::default());
+        let toml_path = project_root.join("rex.config.toml");
+        let json_path = project_root.join("rex.config.json");
+
+        match (toml_path.exists(), json_path.exists()) {
+            (true, true) => Err(crate::RexError::Config(
+                "Found both rex.config.toml and rex.config.json; please use only one".to_string(),
+            )),
+            (true, false) => {
+                let content = std::fs::read_to_string(&toml_path).map_err(|e| {
+                    crate::RexError::Config(format!("Failed to read rex.config.toml: {e}"))
+                })?;
+                toml::from_str(&content)
+                    .map_err(|e| crate::RexError::Config(format!("Invalid rex.config.toml: {e}")))
+            }
+            (false, true) => {
+                let content = std::fs::read_to_string(&json_path).map_err(|e| {
+                    crate::RexError::Config(format!("Failed to read rex.config.json: {e}"))
+                })?;
+                serde_json::from_str(&content)
+                    .map_err(|e| crate::RexError::Config(format!("Invalid rex.config.json: {e}")))
+            }
+            (false, false) => Ok(Self::default()),
         }
-        let content = std::fs::read_to_string(&config_path)
-            .map_err(|e| crate::RexError::Config(format!("Failed to read rex.config.json: {e}")))?;
-        serde_json::from_str(&content)
-            .map_err(|e| crate::RexError::Config(format!("Invalid rex.config.json: {e}")))
     }
 
     /// Match a request path against a source pattern and return captured params.
@@ -375,6 +393,71 @@ mod tests {
         assert_eq!(config.rewrites.len(), 1);
         assert_eq!(config.headers.len(), 1);
         assert_eq!(config.headers[0].headers[0].key, "X-Frame-Options");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_config_load_toml() {
+        let tmp = std::env::temp_dir().join("rex_test_config_load_toml");
+        let _ = std::fs::create_dir_all(&tmp);
+        // Ensure no leftover json file from prior runs
+        let _ = std::fs::remove_file(tmp.join("rex.config.json"));
+        std::fs::write(
+            tmp.join("rex.config.toml"),
+            r#"
+[[redirects]]
+source = "/old"
+destination = "/new"
+permanent = true
+
+[[rewrites]]
+source = "/api/:path"
+destination = "/api/v2/:path"
+
+[[headers]]
+source = "/:path"
+
+  [[headers.headers]]
+  key = "X-Frame-Options"
+  value = "DENY"
+
+[build]
+[build.alias]
+"@components" = "./src/components"
+
+[dev]
+no_tui = true
+"#,
+        )
+        .unwrap();
+
+        let config = ProjectConfig::load(&tmp).unwrap();
+        assert_eq!(config.redirects.len(), 1);
+        assert_eq!(config.redirects[0].source, "/old");
+        assert_eq!(config.redirects[0].destination, "/new");
+        assert!(config.redirects[0].permanent);
+        assert_eq!(config.rewrites.len(), 1);
+        assert_eq!(config.headers.len(), 1);
+        assert_eq!(config.headers[0].headers[0].key, "X-Frame-Options");
+        assert_eq!(
+            config.build.alias.get("@components").unwrap(),
+            "./src/components"
+        );
+        assert!(config.dev.no_tui);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_config_load_both_errors() {
+        let tmp = std::env::temp_dir().join("rex_test_config_load_both");
+        let _ = std::fs::create_dir_all(&tmp);
+        std::fs::write(tmp.join("rex.config.json"), "{}").unwrap();
+        std::fs::write(tmp.join("rex.config.toml"), "").unwrap();
+
+        let err = ProjectConfig::load(&tmp).unwrap_err();
+        assert!(err.to_string().contains("please use only one"));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
