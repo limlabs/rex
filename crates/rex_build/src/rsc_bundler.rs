@@ -270,6 +270,13 @@ async fn build_rsc_server_bundle(
     let webpack_shims = include_str!("../../../runtime/rsc/webpack-shims.js");
     let banner = format!("{}\n{}", crate::bundler::V8_POLYFILLS, webpack_shims);
 
+    // Minify production builds
+    let minify = if !config.dev {
+        Some(rolldown_common::RawMinifyOptions::Bool(true))
+    } else {
+        None
+    };
+
     let options = rolldown::BundlerOptions {
         input: Some(vec![rolldown::InputItem {
             name: Some("rsc-server-bundle".to_string()),
@@ -284,6 +291,8 @@ async fn build_rsc_server_bundle(
         define: Some(define.iter().cloned().collect()),
         banner: Some(rolldown::AddonOutputOption::String(Some(banner))),
         tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+        minify,
+        treeshake: rsc_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(aliases),
             condition_names: Some(vec![
@@ -413,6 +422,13 @@ async fn build_rsc_ssr_bundle(
     let webpack_shims = include_str!("../../../runtime/rsc/webpack-shims.js");
     let banner = format!("{}\n{}", crate::bundler::V8_POLYFILLS, webpack_shims);
 
+    // Minify production builds
+    let minify = if !config.dev {
+        Some(rolldown_common::RawMinifyOptions::Bool(true))
+    } else {
+        None
+    };
+
     let options = rolldown::BundlerOptions {
         input: Some(vec![rolldown::InputItem {
             name: Some("rsc-ssr-bundle".to_string()),
@@ -427,6 +443,8 @@ async fn build_rsc_ssr_bundle(
         define: Some(define.iter().cloned().collect()),
         banner: Some(rolldown::AddonOutputOption::String(Some(banner))),
         tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+        minify,
+        treeshake: rsc_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
             condition_names: Some(vec![
                 "browser".to_string(),
@@ -515,9 +533,29 @@ async fn build_rsc_client_bundles(
     let mut module_types = rustc_hash::FxHashMap::default();
     module_types.insert(".css".to_string(), rolldown::ModuleType::Empty);
 
-    // Force React/ReactDOM/react-server-dom-webpack into a shared vendor chunk.
-    // Without this, they stay inlined in __rsc_hydrate because only the hydrate
-    // entry imports them (rolldown's automatic splitting needs 2+ consumers).
+    // Minify production builds
+    let minify = if !config.dev {
+        Some(rolldown_common::RawMinifyOptions::Bool(true))
+    } else {
+        None
+    };
+
+    // Split React packages into cacheable vendor chunks:
+    // 1. react-server-dom-webpack (flight client) — changes rarely, cached independently
+    // 2. react + react-dom (core React) — changes rarely, shared across pages
+    // Without manual splitting, rolldown inlines everything into __rsc_hydrate
+    // because only the hydrate entry imports them (automatic splitting needs 2+ consumers).
+    let rsc_flight_group = rolldown_common::MatchGroup {
+        name: rolldown_common::MatchGroupName::Static("rsc-flight".to_string()),
+        test: Some(rolldown_common::MatchGroupTest::Regex(
+            rolldown_utils::js_regex::HybridRegex::new(
+                "node_modules[\\\\/]react-server-dom-webpack",
+            )
+            .expect("valid regex"),
+        )),
+        priority: Some(20),
+        ..Default::default()
+    };
     let react_vendor_group = rolldown_common::MatchGroup {
         name: rolldown_common::MatchGroupName::Static("react-vendor".to_string()),
         test: Some(rolldown_common::MatchGroupTest::Regex(
@@ -539,8 +577,10 @@ async fn build_rsc_client_bundles(
         module_types: Some(module_types),
         define: Some(define.iter().cloned().collect()),
         tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+        minify,
+        treeshake: rsc_treeshake_options(),
         manual_code_splitting: Some(rolldown_common::ManualCodeSplittingOptions {
-            groups: Some(vec![react_vendor_group]),
+            groups: Some(vec![rsc_flight_group, react_vendor_group]),
             ..Default::default()
         }),
         resolve: Some(rolldown::ResolveOptions {
@@ -642,6 +682,29 @@ async fn build_rsc_client_bundles(
         output_dir.display()
     );
     Ok(chunks)
+}
+
+/// Tree-shake options for RSC bundles.
+///
+/// Marks React packages as side-effect-free so rolldown can aggressively
+/// eliminate unused exports. React's production builds use `@__PURE__`
+/// annotations which rolldown respects when `annotations: true`.
+fn rsc_treeshake_options() -> rolldown_common::TreeshakeOptions {
+    rolldown_common::TreeshakeOptions::Option(rolldown_common::InnerOptions {
+        module_side_effects: rolldown_common::ModuleSideEffects::Rules(vec![
+            // React packages are side-effect-free in production
+            rolldown_common::ModuleSideEffectsRule {
+                test: Some(
+                    rolldown_utils::js_regex::HybridRegex::new("node_modules[\\\\/]react")
+                        .expect("valid regex"),
+                ),
+                external: None,
+                side_effects: false,
+            },
+        ]),
+        annotations: Some(true),
+        ..Default::default()
+    })
 }
 
 /// Sanitize a file path into a valid chunk name.
