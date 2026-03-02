@@ -711,6 +711,19 @@ async fn build_server_bundle(
                     .to_string(),
             )],
         ),
+        // Node.js path module polyfill (server-only)
+        (
+            "path".to_string(),
+            vec![Some(
+                runtime_dir.join("path.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "node:path".to_string(),
+            vec![Some(
+                runtime_dir.join("path.ts").to_string_lossy().to_string(),
+            )],
+        ),
     ];
     // Append user-defined aliases from rex.config build.alias
     aliases.extend(project_config.build.resolved_aliases(&config.project_root));
@@ -2849,6 +2862,137 @@ export default function Home() {
             Some("EACCES"),
             "Path traversal should be blocked: {gssp_json}"
         );
+    }
+
+    // ── path polyfill integration tests ────────────────────────
+
+    #[tokio::test]
+    async fn test_integration_path_polyfill() {
+        // Test path.join, path.basename, path.dirname, path.extname via GSSP
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                r#"
+                import path from 'path';
+                export default function Home(props) {
+                    return <div>{JSON.stringify(props)}</div>;
+                }
+                export function getServerSideProps() {
+                    return { props: {
+                        joined: path.join('a', 'b', 'c'),
+                        base: path.basename('/foo/bar.txt'),
+                        baseExt: path.basename('/foo/bar.txt', '.txt'),
+                        dir: path.dirname('/foo/bar.txt'),
+                        ext: path.extname('/foo/bar.txt'),
+                        normalized: path.join('a', '..', 'b', '.', 'c'),
+                    }};
+                }
+                "#,
+            )],
+            None,
+        );
+
+        let (_result, pool) = build_and_load(&config, &scan).await;
+
+        let gssp_json = pool
+            .execute(|iso| iso.get_server_side_props("index", "{\"params\":{},\"query\":{}}"))
+            .await
+            .expect("pool execute")
+            .expect("gssp");
+
+        let gssp: serde_json::Value = serde_json::from_str(&gssp_json).unwrap();
+        assert_eq!(gssp["props"]["joined"], "a/b/c", "path.join: {gssp_json}");
+        assert_eq!(
+            gssp["props"]["base"], "bar.txt",
+            "path.basename: {gssp_json}"
+        );
+        assert_eq!(
+            gssp["props"]["baseExt"], "bar",
+            "path.basename with ext: {gssp_json}"
+        );
+        assert_eq!(gssp["props"]["dir"], "/foo", "path.dirname: {gssp_json}");
+        assert_eq!(gssp["props"]["ext"], ".txt", "path.extname: {gssp_json}");
+        assert_eq!(
+            gssp["props"]["normalized"], "b/c",
+            "path.join normalize: {gssp_json}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_integration_path_node_prefix() {
+        // Verify `import path from 'node:path'` also resolves
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                r#"
+                import path from 'node:path';
+                export default function Home(props) {
+                    return <div>{props.joined}</div>;
+                }
+                export function getServerSideProps() {
+                    return { props: { joined: path.join('x', 'y') }};
+                }
+                "#,
+            )],
+            None,
+        );
+
+        let (_result, pool) = build_and_load(&config, &scan).await;
+
+        let gssp_json = pool
+            .execute(|iso| iso.get_server_side_props("index", "{\"params\":{},\"query\":{}}"))
+            .await
+            .expect("pool execute")
+            .expect("gssp");
+
+        let gssp: serde_json::Value = serde_json::from_str(&gssp_json).unwrap();
+        assert_eq!(
+            gssp["props"]["joined"], "x/y",
+            "node:path should work: {gssp_json}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_integration_path_named_imports() {
+        // Verify named imports work: import { join, resolve } from 'path'
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                r#"
+                import { join, basename, dirname, extname, isAbsolute } from 'path';
+                export default function Home(props) {
+                    return <div>{JSON.stringify(props)}</div>;
+                }
+                export function getServerSideProps() {
+                    return { props: {
+                        joined: join('a', 'b'),
+                        base: basename('/x/y.js'),
+                        dir: dirname('/x/y.js'),
+                        ext: extname('file.tar.gz'),
+                        abs: isAbsolute('/foo'),
+                        rel: isAbsolute('foo'),
+                    }};
+                }
+                "#,
+            )],
+            None,
+        );
+
+        let (_result, pool) = build_and_load(&config, &scan).await;
+
+        let gssp_json = pool
+            .execute(|iso| iso.get_server_side_props("index", "{\"params\":{},\"query\":{}}"))
+            .await
+            .expect("pool execute")
+            .expect("gssp");
+
+        let gssp: serde_json::Value = serde_json::from_str(&gssp_json).unwrap();
+        assert_eq!(gssp["props"]["joined"], "a/b");
+        assert_eq!(gssp["props"]["base"], "y.js");
+        assert_eq!(gssp["props"]["dir"], "/x");
+        assert_eq!(gssp["props"]["ext"], ".gz");
+        assert_eq!(gssp["props"]["abs"], true);
+        assert_eq!(gssp["props"]["rel"], false);
     }
 
     // ── detect_data_strategy_from_source tests ──────────────────
