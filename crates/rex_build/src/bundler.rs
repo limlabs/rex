@@ -681,7 +681,7 @@ async fn build_server_bundle(
             )],
         ),
     ];
-    // Append user-defined aliases from rex.config.json build.alias
+    // Append user-defined aliases from rex.config build.alias
     aliases.extend(project_config.build.resolved_aliases(&config.project_root));
 
     let options = rolldown::BundlerOptions {
@@ -924,7 +924,7 @@ if (!window.__REX_NAVIGATING__) {{
             )],
         ),
     ];
-    // Append user-defined aliases from rex.config.json build.alias
+    // Append user-defined aliases from rex.config build.alias
     client_aliases.extend(project_config.build.resolved_aliases(&config.project_root));
 
     let options = rolldown::BundlerOptions {
