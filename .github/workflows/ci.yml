@@ -38,6 +38,15 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install runtime dependencies
+        run: cd runtime && npm ci
+
+      - name: TypeScript strict check
+        run: cd runtime && npm run typecheck
+
+      - name: Build runtime IIFE files
+        run: cd runtime && npm run build
+
       - name: oxlint
         run: npx oxlint --deny-warnings runtime/ packages/rex/src/
 

@@ -854,7 +854,7 @@ pub async fn handle_request(
                 "application/javascript".to_string(),
             )],
             body: RexBody::Full(
-                include_str!("../../../runtime/client/router.js")
+                include_str!("../../../runtime/dist/client/router.js")
                     .as_bytes()
                     .to_vec(),
             ),
