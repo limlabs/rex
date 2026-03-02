@@ -203,6 +203,7 @@ globalThis.__rex_resolve_api = function() {
                 ]),
                 ..Default::default()
             }),
+            sourcemap: Some(rolldown::SourceMapType::File),
             ..Default::default()
         };
 
@@ -1121,6 +1122,7 @@ async fn build_server_bundle(
             ]),
             ..Default::default()
         }),
+        sourcemap: Some(rolldown::SourceMapType::File),
         ..Default::default()
     };
 
@@ -1370,6 +1372,7 @@ if (!window.__REX_NAVIGATING__) {{
             ]),
             ..Default::default()
         }),
+        sourcemap: Some(rolldown::SourceMapType::File),
         ..Default::default()
     };
 
