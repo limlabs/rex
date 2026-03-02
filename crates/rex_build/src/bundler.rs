@@ -341,6 +341,8 @@ if (typeof globalThis.ReadableStream === 'undefined') {
         this._error = undefined;
         this._reader = null;
         this._readerResolve = null;
+        this._pulling = false;
+        this._pullAgain = false;
         var self = this;
         var controller = {
             enqueue: function(chunk) {
@@ -374,8 +376,36 @@ if (typeof globalThis.ReadableStream === 'undefined') {
             },
             desiredSize: 1
         };
-        if (underlyingSource && typeof underlyingSource.start === 'function') {
-            underlyingSource.start(controller);
+        this._controller = controller;
+        this._underlyingSource = underlyingSource || {};
+        if (typeof this._underlyingSource.start === 'function') {
+            this._underlyingSource.start(controller);
+        }
+    };
+    ReadableStream.prototype._callPull = function() {
+        if (this._pulling || this._closed || this._errored) return;
+        if (typeof this._underlyingSource.pull !== 'function') return;
+        this._pulling = true;
+        var self = this;
+        try {
+            var result = this._underlyingSource.pull(this._controller);
+            if (result && typeof result.then === 'function') {
+                result.then(function() {
+                    self._pulling = false;
+                    if (self._pullAgain) {
+                        self._pullAgain = false;
+                        self._callPull();
+                    }
+                }, function(err) {
+                    self._pulling = false;
+                    self._controller.error(err);
+                });
+            } else {
+                this._pulling = false;
+            }
+        } catch(e) {
+            this._pulling = false;
+            this._controller.error(e);
         }
     };
     globalThis.ReadableStream.prototype.getReader = function() {
@@ -385,11 +415,24 @@ if (typeof globalThis.ReadableStream === 'undefined') {
             read: function() {
                 if (stream._errored) return Promise.reject(stream._error);
                 if (stream._queue.length > 0) {
-                    return Promise.resolve({ value: stream._queue.shift(), done: false });
+                    var value = stream._queue.shift();
+                    stream._callPull();
+                    return Promise.resolve({ value: value, done: false });
                 }
                 if (stream._closed) {
                     return Promise.resolve({ value: undefined, done: true });
                 }
+                // No data available — call pull (may enqueue synchronously)
+                stream._callPull();
+                // Re-check after pull in case data was enqueued synchronously
+                if (stream._queue.length > 0) {
+                    var value = stream._queue.shift();
+                    return Promise.resolve({ value: value, done: false });
+                }
+                if (stream._closed) {
+                    return Promise.resolve({ value: undefined, done: true });
+                }
+                // Still no data — wait for async enqueue
                 return new Promise(function(resolve) {
                     stream._readerResolve = resolve;
                 });
@@ -404,6 +447,48 @@ if (typeof globalThis.ReadableStream === 'undefined') {
             }
         };
     };
+}
+
+// AbortController/AbortSignal polyfill for bare V8
+if (typeof globalThis.AbortController === 'undefined') {
+    function AbortSignal() {
+        this.aborted = false;
+        this.reason = undefined;
+        this._listeners = [];
+    }
+    AbortSignal.prototype.addEventListener = function(type, listener) {
+        if (type === 'abort') this._listeners.push(listener);
+    };
+    AbortSignal.prototype.removeEventListener = function(type, listener) {
+        if (type === 'abort') {
+            this._listeners = this._listeners.filter(function(l) { return l !== listener; });
+        }
+    };
+    AbortSignal.prototype.throwIfAborted = function() {
+        if (this.aborted) throw this.reason;
+    };
+
+    globalThis.AbortController = function AbortController() {
+        this.signal = new AbortSignal();
+    };
+    globalThis.AbortController.prototype.abort = function(reason) {
+        if (this.signal.aborted) return;
+        this.signal.aborted = true;
+        this.signal.reason = reason || new DOMException('The operation was aborted.', 'AbortError');
+        var listeners = this.signal._listeners.slice();
+        for (var i = 0; i < listeners.length; i++) {
+            try { listeners[i]({ type: 'abort', target: this.signal }); } catch(e) {}
+        }
+    };
+
+    // DOMException polyfill if not available
+    if (typeof globalThis.DOMException === 'undefined') {
+        globalThis.DOMException = function DOMException(message, name) {
+            this.message = message || '';
+            this.name = name || 'Error';
+        };
+        globalThis.DOMException.prototype = Object.create(Error.prototype);
+    }
 }
 "#;
 
