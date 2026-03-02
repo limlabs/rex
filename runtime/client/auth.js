@@ -7,7 +7,7 @@ let _listeners = [];
 
 function notifyListeners() {
   for (const cb of _listeners) {
-    try { cb(); } catch (_) {}
+    try { cb(); } catch { /* empty */ }
   }
 }
 
