@@ -13,8 +13,9 @@
 (function () {
   'use strict';
 
-  var React = window.React || (typeof require === 'function' && require('react')) as typeof import('react') | false;
-  var ReactDOM = window.ReactDOM || (typeof require === 'function' && require('react-dom/client')) as typeof import('react-dom/client') | false;
+  var _require = (globalThis as Record<string, unknown>).require as ((id: string) => unknown) | undefined;
+  var React = window.React || (typeof _require === 'function' && _require('react')) as typeof import('react') | false;
+  var ReactDOM = window.ReactDOM || (typeof _require === 'function' && _require('react-dom/client')) as typeof import('react-dom/client') | false;
 
   if (!React || !ReactDOM) {
     console.warn('[Rex RSC] React/ReactDOM not found, RSC runtime disabled');
