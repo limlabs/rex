@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/limlabs/rex/compare/v0.3.0...v0.4.0) (2026-03-02)
+
+
+### Features
+
+* configure bot identity for Claude commits and PRs ([800b0c9](https://github.com/limlabs/rex/commit/800b0c949b51b06810e58cde4e09fc139566a6af))
+* convention-based MCP tool handlers ([#6](https://github.com/limlabs/rex/issues/6)) ([31dc8a7](https://github.com/limlabs/rex/commit/31dc8a7adf38d7e23edeb970082e3ea864ae7105))
+* sandboxed agent workflow with conventional commit enforcement ([#8](https://github.com/limlabs/rex/issues/8)) ([7957e62](https://github.com/limlabs/rex/commit/7957e6231a9a3e696a4329088965e8e3d200c2c0))
+
+
+### Bug Fixes
+
+* resolve oxlint warnings and deny future warnings ([#14](https://github.com/limlabs/rex/issues/14)) ([79ed7f1](https://github.com/limlabs/rex/commit/79ed7f18999a645c71c43ad6a5b5b28b7b6ad486))
+
 ## [0.3.0](https://github.com/limlabs/rex/compare/v0.2.1...v0.3.0) (2026-03-01)
 
 
