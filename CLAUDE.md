@@ -1,5 +1,13 @@
 # Rex — Development Guide for Claude
 
+## Worktree Workflow
+
+**ALWAYS use a git worktree when making any changes.** Never create branches or make commits directly on the current worktree.
+
+1. At the start of any task that involves code changes, use the `EnterWorktree` tool to create an isolated worktree.
+2. All edits, commits, and pushes must happen inside the worktree — never on the main checkout.
+3. After finishing, create a PR from the worktree branch.
+
 ## Git Identity
 
 At the start of every session, configure the bot identity for commits and pushes. The PAT is stored in 1Password and read via the `op` CLI:
