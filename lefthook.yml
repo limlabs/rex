@@ -10,6 +10,9 @@ pre-commit:
     clippy:
       run: cargo clippy --all-targets -- -D warnings
       fail_text: "Fix clippy warnings before committing"
+    no-js:
+      run: "! git diff --cached --name-only --diff-filter=ACR | grep -q '\\.js$'"
+      fail_text: "Do not commit .js files — use TypeScript (.ts/.tsx) instead"
     oxlint:
       run: npx oxlint --deny-warnings runtime/ packages/rex/src/
       fail_text: "Fix oxlint warnings before committing"
