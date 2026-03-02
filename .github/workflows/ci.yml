@@ -20,15 +20,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache cargo registry & build
-        uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git/db
-            target/
-          key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-check-
+          shared-key: ci
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: cargo fmt
         run: cargo fmt --check
@@ -42,6 +37,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Install runtime dependencies
+        run: cd runtime && npm ci
+
+      - name: TypeScript strict check
+        run: cd runtime && npm run typecheck
+
+      - name: Build runtime IIFE files
+        run: cd runtime && npm run build
 
       - name: oxlint
         run: npx oxlint --deny-warnings runtime/ packages/rex/src/
@@ -62,15 +66,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache cargo registry & build
-        uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git/db
-            target/
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-test-
+          shared-key: ci
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov

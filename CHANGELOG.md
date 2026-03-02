@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.6.0](https://github.com/limlabs/rex/compare/v0.5.1...v0.6.0) (2026-03-02)
+
+
+### Features
+
+* **v8:** add Node.js fs module polyfill for server-side code ([#20](https://github.com/limlabs/rex/issues/20)) ([efb85d6](https://github.com/limlabs/rex/commit/efb85d6ea785f9d74bbec19ac11b16a4187f881e))
+
+## [0.5.1](https://github.com/limlabs/rex/compare/v0.5.0...v0.5.1) (2026-03-02)
+
+
+### Bug Fixes
+
+* add missing rex/head module ([#24](https://github.com/limlabs/rex/issues/24)) ([194329b](https://github.com/limlabs/rex/commit/194329bc34b89ff001b852c0d24c9ee7c3b9b6b4))
+* **ci:** filter artifact download to exclude docker metadata ([#21](https://github.com/limlabs/rex/issues/21)) ([c9a1900](https://github.com/limlabs/rex/commit/c9a1900e16783954ca61dddae3a78588c7691ad9))
+
+## [0.5.0](https://github.com/limlabs/rex/compare/v0.4.0...v0.5.0) (2026-03-02)
+
+
+### Features
+
+* **core:** support TOML config as alternative to JSON ([#18](https://github.com/limlabs/rex/issues/18)) ([2246fd9](https://github.com/limlabs/rex/commit/2246fd96ce0c491948e4b110f8a47a0bfce71b7c))
+
+## [0.4.0](https://github.com/limlabs/rex/compare/v0.3.0...v0.4.0) (2026-03-02)
+
+
+### Features
+
+* configure bot identity for Claude commits and PRs ([800b0c9](https://github.com/limlabs/rex/commit/800b0c949b51b06810e58cde4e09fc139566a6af))
+* convention-based MCP tool handlers ([#6](https://github.com/limlabs/rex/issues/6)) ([31dc8a7](https://github.com/limlabs/rex/commit/31dc8a7adf38d7e23edeb970082e3ea864ae7105))
+* sandboxed agent workflow with conventional commit enforcement ([#8](https://github.com/limlabs/rex/issues/8)) ([7957e62](https://github.com/limlabs/rex/commit/7957e6231a9a3e696a4329088965e8e3d200c2c0))
+
+
+### Bug Fixes
+
+* resolve oxlint warnings and deny future warnings ([#14](https://github.com/limlabs/rex/issues/14)) ([79ed7f1](https://github.com/limlabs/rex/commit/79ed7f18999a645c71c43ad6a5b5b28b7b6ad486))
+
 ## [0.3.0](https://github.com/limlabs/rex/compare/v0.2.1...v0.3.0) (2026-03-01)
 
 

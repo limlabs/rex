@@ -1,6 +1,6 @@
 [package]
 name = "rex_v8"
-version = "0.3.0" # x-release-please-version
+version = "0.6.0" # x-release-please-version
 edition = "2021"
 
 [lints]
@@ -17,3 +17,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 futures = "0.3"
+
+[dev-dependencies]
+tempfile = "3"

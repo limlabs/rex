@@ -1381,7 +1381,8 @@ globalThis.__rex_resolve_gsp = function() {
     fn build_test_app(routes: Vec<Route>, pages: &[(&str, &str, Option<&str>)]) -> Router {
         rex_v8::init_v8();
         let bundle = format!("{}\n{}", MOCK_REACT_RUNTIME, make_server_bundle(pages));
-        let pool = rex_v8::IsolatePool::new(1, Arc::new(bundle)).expect("failed to create pool");
+        let pool =
+            rex_v8::IsolatePool::new(1, Arc::new(bundle), None).expect("failed to create pool");
 
         let trie = RouteTrie::from_routes(&routes);
         let mut manifest = rex_build::AssetManifest::new("test-build-id".to_string());
@@ -1652,7 +1653,8 @@ globalThis.__rex_resolve_gsp = function() {
     ) -> Router {
         rex_v8::init_v8();
         let bundle = format!("{}\n{}", MOCK_REACT_RUNTIME, make_server_bundle(pages));
-        let pool = rex_v8::IsolatePool::new(1, Arc::new(bundle)).expect("failed to create pool");
+        let pool =
+            rex_v8::IsolatePool::new(1, Arc::new(bundle), None).expect("failed to create pool");
 
         let trie = RouteTrie::from_routes(&routes);
         let mut manifest = rex_build::AssetManifest::new("test-build-id".to_string());
@@ -1867,7 +1869,8 @@ globalThis.__rex_resolve_gsp = function() {
         rex_v8::init_v8();
         let mut bundle = format!("{}\n{}", MOCK_REACT_RUNTIME, make_server_bundle(pages));
         bundle.push_str(middleware_js);
-        let pool = rex_v8::IsolatePool::new(1, Arc::new(bundle)).expect("failed to create pool");
+        let pool =
+            rex_v8::IsolatePool::new(1, Arc::new(bundle), None).expect("failed to create pool");
 
         let trie = RouteTrie::from_routes(&routes);
         let mut manifest = rex_build::AssetManifest::new("test-build-id".to_string());

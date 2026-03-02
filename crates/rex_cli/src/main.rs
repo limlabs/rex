@@ -776,7 +776,7 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
 }
 
 async fn hmr_client_handler() -> impl axum::response::IntoResponse {
-    let js = include_str!("../../../runtime/hmr_client.js");
+    let js = include_str!(concat!(env!("OUT_DIR"), "/hmr_client.js"));
     (
         [(axum::http::header::CONTENT_TYPE, "application/javascript")],
         js,

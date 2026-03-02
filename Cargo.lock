@@ -2933,12 +2933,9 @@ dependencies = [
 
 [[package]]
 name = "pxfm"
-version = "0.1.27"
+version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7186d3822593aa4393561d186d1393b3923e9d6163d3fbfd6e825e3e6cf3e6a8"
-dependencies = [
- "num-traits",
-]
+checksum = "b5a041e753da8b807c9255f28de81879c78c876392ff2469cde94799b2896b9d"
 
 [[package]]
 name = "quick-error"
@@ -3232,7 +3229,7 @@ dependencies = [
 
 [[package]]
 name = "rex_build"
-version = "0.3.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "hex",
@@ -3247,6 +3244,7 @@ dependencies = [
  "rex_v8",
  "rolldown",
  "rolldown_common",
+ "rolldown_utils",
  "rustc-hash",
  "serde",
  "serde_json",
@@ -3258,13 +3256,17 @@ dependencies = [
 
 [[package]]
 name = "rex_cli"
-version = "0.3.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "axum",
  "clap",
  "crossterm",
  "futures",
+ "oxc_allocator",
+ "oxc_codegen",
+ "oxc_parser",
+ "oxc_span",
  "ratatui",
  "rex_build",
  "rex_core",
@@ -3279,16 +3281,17 @@ dependencies = [
 
 [[package]]
 name = "rex_core"
-version = "0.3.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "toml",
 ]
 
 [[package]]
 name = "rex_dev"
-version = "0.3.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -3307,7 +3310,7 @@ dependencies = [
 
 [[package]]
 name = "rex_e2e"
-version = "0.3.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -3320,7 +3323,7 @@ dependencies = [
 
 [[package]]
 name = "rex_image"
-version = "0.3.0"
+version = "0.6.0"
 dependencies = [
  "base64",
  "hex",
@@ -3333,7 +3336,7 @@ dependencies = [
 
 [[package]]
 name = "rex_napi"
-version = "0.3.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "napi",
@@ -3354,7 +3357,7 @@ dependencies = [
 
 [[package]]
 name = "rex_router"
-version = "0.3.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "rex_core",
@@ -3364,12 +3367,16 @@ dependencies = [
 
 [[package]]
 name = "rex_server"
-version = "0.3.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "axum",
  "futures",
  "http-body-util",
+ "oxc_allocator",
+ "oxc_codegen",
+ "oxc_parser",
+ "oxc_span",
  "rex_build",
  "rex_core",
  "rex_image",
@@ -3386,7 +3393,7 @@ dependencies = [
 
 [[package]]
 name = "rex_v8"
-version = "0.3.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -3395,6 +3402,7 @@ dependencies = [
  "rex_core",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "v8",
@@ -3417,7 +3425,7 @@ dependencies = [
 [[package]]
 name = "rolldown"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "anyhow",
  "append-only-vec",
@@ -3507,7 +3515,7 @@ checksum = "1931923a28e14c01a27ca56669669eb3e3de4068859c34e17b96c93ba3a61afe"
 [[package]]
 name = "rolldown_common"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "anyhow",
  "arcstr",
@@ -3538,7 +3546,7 @@ dependencies = [
 [[package]]
 name = "rolldown_dev_common"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "derive_more",
  "rolldown_common",
@@ -3548,7 +3556,7 @@ dependencies = [
 [[package]]
 name = "rolldown_devtools"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "blake3",
  "dashmap",
@@ -3563,7 +3571,7 @@ dependencies = [
 [[package]]
 name = "rolldown_devtools_action"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "serde",
  "ts-rs",
@@ -3572,7 +3580,7 @@ dependencies = [
 [[package]]
 name = "rolldown_ecmascript"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "arcstr",
  "oxc",
@@ -3584,7 +3592,7 @@ dependencies = [
 [[package]]
 name = "rolldown_ecmascript_utils"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "memchr",
  "oxc",
@@ -3596,7 +3604,7 @@ dependencies = [
 [[package]]
 name = "rolldown_error"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "anyhow",
  "arcstr",
@@ -3614,7 +3622,7 @@ dependencies = [
 [[package]]
 name = "rolldown_fs"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "oxc_resolver",
  "vfs",
@@ -3623,7 +3631,7 @@ dependencies = [
 [[package]]
 name = "rolldown_plugin"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "anyhow",
  "arcstr",
@@ -3653,7 +3661,7 @@ dependencies = [
 [[package]]
 name = "rolldown_plugin_chunk_import_map"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "arcstr",
  "rolldown_common",
@@ -3667,7 +3675,7 @@ dependencies = [
 [[package]]
 name = "rolldown_plugin_copy_module"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "anyhow",
  "arcstr",
@@ -3684,7 +3692,7 @@ dependencies = [
 [[package]]
 name = "rolldown_plugin_data_url"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "arcstr",
  "base64-simd",
@@ -3698,7 +3706,7 @@ dependencies = [
 [[package]]
 name = "rolldown_plugin_hmr"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "rolldown_common",
  "rolldown_plugin",
@@ -3707,7 +3715,7 @@ dependencies = [
 [[package]]
 name = "rolldown_plugin_lazy_compilation"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "anyhow",
  "arcstr",
@@ -3720,7 +3728,7 @@ dependencies = [
 [[package]]
 name = "rolldown_plugin_oxc_runtime"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "arcstr",
  "phf",
@@ -3731,7 +3739,7 @@ dependencies = [
 [[package]]
 name = "rolldown_resolver"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "anyhow",
  "arcstr",
@@ -3747,7 +3755,7 @@ dependencies = [
 [[package]]
 name = "rolldown_sourcemap"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "memchr",
  "oxc",
@@ -3759,7 +3767,7 @@ dependencies = [
 [[package]]
 name = "rolldown_std_utils"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "regex",
 ]
@@ -3767,7 +3775,7 @@ dependencies = [
 [[package]]
 name = "rolldown_tracing"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "tracing",
  "tracing-chrome",
@@ -3777,7 +3785,7 @@ dependencies = [
 [[package]]
 name = "rolldown_utils"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "anyhow",
  "arcstr",
@@ -4041,6 +4049,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_spanned"
+version = "0.6.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4211,7 +4228,7 @@ dependencies = [
 [[package]]
 name = "string_wizard"
 version = "0.0.27"
-source = "git+https://github.com/rolldown/rolldown?branch=main#20bce3942b1f2db7d649c74b0eaf273fae0ae089"
+source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
 dependencies = [
  "memchr",
  "oxc_index",
@@ -4552,6 +4569,47 @@ dependencies = [
  "pin-project-lite",
  "tokio",
 ]
+
+[[package]]
+name = "toml"
+version = "0.8.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362"
+dependencies = [
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_edit",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "0.6.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.22.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_write",
+ "winnow",
+]
+
+[[package]]
+name = "toml_write"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "tower"
@@ -5453,6 +5511,15 @@ name = "windows_x86_64_msvc"
 version = "0.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
+
+[[package]]
+name = "winnow"
+version = "0.7.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a5364e9d77fcdeeaa6062ced926ee3381faa2ee02d3eb83a5c27a8825540829"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "winsafe"

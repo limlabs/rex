@@ -1,6 +1,6 @@
 [package]
 name = "rex_cli"
-version = "0.3.0" # x-release-please-version
+version = "0.6.0" # x-release-please-version
 edition = "2021"
 
 [lints]
@@ -26,3 +26,9 @@ axum = { workspace = true }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 futures = { workspace = true }
+
+[build-dependencies]
+oxc_allocator = "0.115"
+oxc_codegen = "0.115"
+oxc_parser = "0.115"
+oxc_span = "0.115"

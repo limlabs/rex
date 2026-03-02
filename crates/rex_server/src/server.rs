@@ -166,7 +166,7 @@ impl RexServer {
 async fn router_js_handler() -> impl axum::response::IntoResponse {
     (
         [(axum::http::header::CONTENT_TYPE, "application/javascript")],
-        include_str!("../../../runtime/client/router.js"),
+        include_str!(concat!(env!("OUT_DIR"), "/router.js")),
     )
 }
 

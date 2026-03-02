@@ -223,8 +223,10 @@ fn analyze<'a>(program: &'a Program<'a>, _source: &str) -> Vec<Span> {
     // Sort and deduplicate.
     remove_spans.sort_by_key(|s| s.start);
     remove_spans.dedup_by(|a, b| {
-        // Merge overlapping spans
-        if b.start <= a.end {
+        // Merge overlapping/adjacent spans.
+        // In dedup_by, `a` is the later element, `b` is the earlier retained one.
+        // They overlap if the later span starts within (or right after) the earlier span.
+        if a.start <= b.end {
             b.end = b.end.max(a.end);
             true
         } else {
@@ -526,5 +528,26 @@ export default function Page({ posts }) {
         assert!(!result.contains("fetchPosts"));
         assert!(!result.contains("database"));
         assert!(result.contains("export default function Page"));
+    }
+
+    #[test]
+    fn strips_fs_import_preserves_default_export() {
+        let source = r#"
+                import fs from 'fs';
+                export default function Home({ content }) {
+                    return <div><h1>{content}</h1></div>;
+                }
+                export function getServerSideProps() {
+                    const content = fs.readFileSync('data/message.txt', 'utf8');
+                    return { props: { content } };
+                }
+                "#;
+        let result = strip(source);
+        assert!(!result.contains("getServerSideProps"));
+        assert!(!result.contains("import fs from 'fs'"));
+        assert!(
+            result.contains("export default function Home"),
+            "Default export should be preserved"
+        );
     }
 }

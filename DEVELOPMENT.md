@@ -44,7 +44,7 @@ cargo test
 
 Tests live alongside their source files in `#[cfg(test)]` modules. Current test coverage:
 
-- **rex_core** (7) — config pattern matching, `rex.config.json` loading/parsing
+- **rex_core** (7) — config pattern matching, `rex.config.toml`/`rex.config.json` loading/parsing
 - **rex_router** (9) — scanner parses filenames into route patterns, matcher resolves URLs with correct priority
 - **rex_build** (18) — bundler output structure, CSS modules, integration tests (build → V8 SSR)
 - **rex_server** (14) — page/data/API handlers, GSSP props/redirect/notFound, config redirects/rewrites/headers
@@ -125,8 +125,8 @@ GET /blog/hello-world
   │
   ├─ Axum fallback handler (rex_server/src/handlers.rs)
   │
-  ├─ Check rex.config.json redirects → 301/307 if matched
-  ├─ Check rex.config.json rewrites → transparently rewrite path
+  ├─ Check rex.config redirects → 301/307 if matched
+  ├─ Check rex.config rewrites → transparently rewrite path
   │
   ├─ Route matching: trie.match_path("/blog/hello-world")
   │   → RouteMatch { pattern: "/blog/:slug", params: { slug: "hello-world" } }

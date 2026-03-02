@@ -21,13 +21,19 @@ pub struct IsolatePool {
 impl IsolatePool {
     /// Create a new pool with `size` isolates.
     /// Each isolate is initialized with the self-contained server bundle JS.
-    pub fn new(size: usize, server_bundle_js: Arc<String>) -> Result<Self> {
+    /// If `project_root` is provided, fs polyfill callbacks are sandboxed to it.
+    pub fn new(
+        size: usize,
+        server_bundle_js: Arc<String>,
+        project_root: Option<Arc<String>>,
+    ) -> Result<Self> {
         let mut senders = Vec::with_capacity(size);
         let mut threads = Vec::with_capacity(size);
 
         for i in 0..size {
             let (tx, rx) = bounded::<WorkItem>(64);
             let bundle_js = server_bundle_js.clone();
+            let root = project_root.clone();
 
             let handle = thread::Builder::new()
                 .name(format!("rex-v8-isolate-{i}"))
@@ -35,7 +41,10 @@ impl IsolatePool {
                     // Initialize V8 on this thread (safe to call multiple times)
                     crate::init_v8();
 
-                    let mut isolate = match crate::SsrIsolate::new(&bundle_js) {
+                    let mut isolate = match crate::SsrIsolate::new(
+                        &bundle_js,
+                        root.as_deref().map(|s| s.as_str()),
+                    ) {
                         Ok(iso) => iso,
                         Err(e) => {
                             error!("Failed to create V8 isolate {i}: {e:#}");

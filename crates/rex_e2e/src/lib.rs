@@ -680,4 +680,53 @@ mod tests {
             "Unknown JSON-RPC method should return an error"
         );
     }
+
+    // -------------------------------------------------------
+    // Config (rex.config.toml) tests
+    // -------------------------------------------------------
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_config_redirect() {
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let url = format!("{}/legacy-about", base_url());
+        let resp = client.get(&url).send().await.unwrap();
+
+        assert_eq!(resp.status(), 308, "Permanent redirect should return 308");
+        let location = resp.headers().get("location").unwrap().to_str().unwrap();
+        assert_eq!(location, "/about", "Should redirect to /about");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_config_rewrite() {
+        let url = format!("{}/rewritten", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 200, "Rewritten path should return 200");
+
+        let body = resp.text().await.unwrap();
+        assert!(
+            body.contains("About"),
+            "Rewritten path should serve the about page content"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_config_custom_header() {
+        let url = format!("{}/", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        let powered_by = resp
+            .headers()
+            .get("X-Powered-By")
+            .expect("X-Powered-By header should be present")
+            .to_str()
+            .unwrap();
+        assert_eq!(powered_by, "Rex", "X-Powered-By should be 'Rex'");
+    }
 }
