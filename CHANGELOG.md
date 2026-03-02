@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/limlabs/rex/compare/v0.6.0...v0.7.0) (2026-03-02)
+
+
+### Features
+
+* **ci:** add coverage ratchet pre-commit hook ([#28](https://github.com/limlabs/rex/issues/28)) ([cba5ed2](https://github.com/limlabs/rex/commit/cba5ed207d8da9c3d76f3a1bc690ec7fecb61d0d))
+* **v8:** polyfill process.env from Rust environment variables ([#27](https://github.com/limlabs/rex/issues/27)) ([dd90c78](https://github.com/limlabs/rex/commit/dd90c78a89653b5bdf0fad3e61e7817964504305))
+
 ## [0.6.0](https://github.com/limlabs/rex/compare/v0.5.1...v0.6.0) (2026-03-02)
 
 
