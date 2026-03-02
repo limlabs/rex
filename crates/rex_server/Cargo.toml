@@ -26,7 +26,9 @@ url = "2"
 oxc_allocator = "0.115"
 oxc_codegen = "0.115"
 oxc_parser = "0.115"
+oxc_semantic = "0.115"
 oxc_span = "0.115"
+oxc_transformer = "0.115"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

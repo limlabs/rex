@@ -1615,7 +1615,7 @@ fn extract_string_literal(line: &str) -> Option<&str> {
 
 /// Get the path to the client runtime files.
 /// These are embedded in the source tree at runtime/client/.
-fn runtime_client_dir() -> Result<PathBuf> {
+pub(crate) fn runtime_client_dir() -> Result<PathBuf> {
     // In dev: relative to the crate source
     // The runtime files are at the workspace root under runtime/client/
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -1633,7 +1633,7 @@ fn runtime_client_dir() -> Result<PathBuf> {
 
 /// Get the path to the server runtime files.
 /// These are embedded in the source tree at runtime/server/.
-fn runtime_server_dir() -> Result<PathBuf> {
+pub(crate) fn runtime_server_dir() -> Result<PathBuf> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let runtime_dir = manifest_dir.join("../../runtime/server");
     if runtime_dir.exists() {

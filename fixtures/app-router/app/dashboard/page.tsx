@@ -1,4 +1,5 @@
 import React from 'react';
+import Link from 'rex/link';
 
 // Server component — dashboard home
 export default function Dashboard() {
@@ -6,7 +7,7 @@ export default function Dashboard() {
     <div>
       <h1>Dashboard</h1>
       <p>Welcome to your dashboard.</p>
-      <a href="/dashboard/settings">Settings</a>
+      <Link href="/dashboard/settings">Settings</Link>
     </div>
   );
 }

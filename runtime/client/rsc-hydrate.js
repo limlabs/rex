@@ -144,15 +144,22 @@ function navigateRsc(pathname) {
 
   var buildId = manifest.build_id;
   var url = '/_rex/rsc/' + buildId + pathname;
+  var ssrManifest = buildSSRManifest();
 
-  var treePromise = createFromFetch(fetch(url));
+  var treePromise = Promise.resolve(
+    createFromFetch(fetch(url), {
+      ssrManifest: { moduleMap: ssrManifest, moduleLoading: null }
+    })
+  );
 
   return treePromise.then(function(tree) {
     if (rscRoot) {
-      var wrapped = React.createElement(React.Suspense, { fallback: null }, tree);
-      rscRoot.render(wrapped);
+      React.startTransition(function() {
+        rscRoot.render(
+          React.createElement(React.Suspense, { fallback: null }, tree)
+        );
+      });
     }
-    return tree;
   });
 }
 

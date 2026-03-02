@@ -1,4 +1,5 @@
 import React from 'react';
+import Link from 'rex/link';
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -6,13 +7,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <div>
           <nav>
-            <a href="/">Home</a>
+            <Link href="/">Home</Link>
             {' | '}
-            <a href="/about">About</a>
+            <Link href="/about">About</Link>
             {' | '}
-            <a href="/blog/hello">Blog</a>
+            <Link href="/blog/hello">Blog</Link>
             {' | '}
-            <a href="/dashboard">Dashboard</a>
+            <Link href="/dashboard">Dashboard</Link>
           </nav>
           <main>{children}</main>
         </div>

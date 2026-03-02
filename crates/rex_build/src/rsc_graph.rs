@@ -132,8 +132,23 @@ fn analyze_module(path: &Path, root: &Path) -> Result<ModuleInfo> {
 ///
 /// Handles: relative paths (`./Foo`, `../Foo`), with extension guessing
 /// for `.tsx`, `.ts`, `.jsx`, `.js`, and `/index.tsx` etc.
-/// Does NOT resolve bare specifiers (e.g., `react`) — those are external.
-fn resolve_import(from: &Path, specifier: &str, _root: &Path) -> Option<PathBuf> {
+/// Also resolves `rex/*` built-in aliases via node_modules so that
+/// `"use client"` directives on e.g. `rex/link` are detected.
+/// Does NOT resolve other bare specifiers (e.g., `react`) — those are external.
+fn resolve_import(from: &Path, specifier: &str, root: &Path) -> Option<PathBuf> {
+    // Handle rex/* built-in aliases — resolve through node_modules/@limlabs/rex
+    // to match rolldown's resolution (which follows the symlink from the fixture).
+    if let Some(name) = specifier.strip_prefix("rex/") {
+        let pkg_src = root.join("node_modules/@limlabs/rex/src");
+        for ext in &["tsx", "ts", "jsx", "js"] {
+            let candidate = pkg_src.join(format!("{name}.{ext}"));
+            if candidate.exists() && candidate.is_file() {
+                return candidate.canonicalize().ok();
+            }
+        }
+        return None;
+    }
+
     // Only resolve relative imports
     if !specifier.starts_with('.') {
         return None;

@@ -12,6 +12,7 @@
 //!
 //! Also produces a `ClientReferenceManifest` mapping reference IDs to chunk URLs.
 
+use crate::bundler::runtime_client_dir;
 use crate::client_manifest::{client_reference_id, ClientReferenceManifest};
 use crate::rsc_graph::{analyze_module_graph, ModuleGraph};
 use anyhow::Result;
@@ -100,6 +101,28 @@ pub async fn build_rsc_bundles(
             let ref_id = client_reference_id(&rel_path, export, build_id);
             // Placeholder chunk URL — updated after client bundle build
             client_manifest.add(&ref_id, String::new(), export.clone());
+        }
+    }
+
+    // Build rex/* → stub aliases for client boundaries discovered via rex/* imports.
+    // The stub_aliases map absolute paths, but rolldown also needs the specifier alias
+    // (e.g. "rex/link" → stub) for when source code uses `import Link from 'rex/link'`.
+    let pkg_src = project_root.join("node_modules/@limlabs/rex/src");
+    let rex_client_specifiers = ["link", "head", "router", "image"];
+    for name in &rex_client_specifiers {
+        let specifier = format!("rex/{name}");
+        for ext in &["tsx", "ts", "jsx", "js"] {
+            let candidate = pkg_src.join(format!("{name}.{ext}"));
+            if candidate.exists() {
+                if let Ok(canonical) = candidate.canonicalize() {
+                    // If this file is a client boundary (has a stub), add specifier → stub alias
+                    if let Some((_orig, stub)) = stub_aliases.iter().find(|(p, _)| *p == canonical)
+                    {
+                        stub_aliases.push((PathBuf::from(&specifier), stub.clone()));
+                    }
+                    break;
+                }
+            }
         }
     }
 
@@ -290,7 +313,11 @@ async fn build_rsc_server_bundle(
         module_types: Some(module_types),
         define: Some(define.iter().cloned().collect()),
         banner: Some(rolldown::AddonOutputOption::String(Some(banner))),
-        tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+        // Disable tsconfig auto-resolution for the RSC server bundle.
+        // tsconfig `paths` (e.g. "rex/*") would override our stub aliases,
+        // resolving to the real module instead of the client reference stub.
+        // The entry uses absolute paths, so tsconfig isn't needed here.
+        tsconfig: Some(rolldown_common::TsConfig::Auto(false)),
         minify,
         treeshake: react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
@@ -429,6 +456,9 @@ async fn build_rsc_ssr_bundle(
         None
     };
 
+    // Rex built-in aliases for SSR bundle (rex/link → client runtime, etc.)
+    let ssr_aliases = build_rex_aliases()?;
+
     let options = rolldown::BundlerOptions {
         input: Some(vec![rolldown::InputItem {
             name: Some("rsc-ssr-bundle".to_string()),
@@ -446,6 +476,7 @@ async fn build_rsc_ssr_bundle(
         minify,
         treeshake: react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
+            alias: Some(ssr_aliases),
             condition_names: Some(vec![
                 "browser".to_string(),
                 "import".to_string(),
@@ -540,6 +571,9 @@ async fn build_rsc_client_bundles(
         None
     };
 
+    // Rex built-in aliases for client bundle (rex/link → client runtime, etc.)
+    let client_aliases = build_rex_aliases()?;
+
     // Split React packages into cacheable vendor chunks:
     // 1. react-server-dom-webpack (flight client) — changes rarely, cached independently
     // 2. react + react-dom (core React) — changes rarely, shared across pages
@@ -584,6 +618,7 @@ async fn build_rsc_client_bundles(
             ..Default::default()
         }),
         resolve: Some(rolldown::ResolveOptions {
+            alias: Some(client_aliases),
             extensions: Some(vec![
                 ".tsx".to_string(),
                 ".ts".to_string(),
@@ -682,6 +717,37 @@ async fn build_rsc_client_bundles(
         output_dir.display()
     );
     Ok(chunks)
+}
+
+/// Build rolldown resolve aliases for `rex/*` built-in imports.
+///
+/// Maps `rex/link`, `rex/head`, `rex/router`, `rex/image` to their
+/// corresponding runtime files in `runtime/client/`.
+fn build_rex_aliases() -> Result<Vec<(String, Vec<Option<String>>)>> {
+    let client_dir = runtime_client_dir()?;
+    let mut aliases = Vec::new();
+
+    let mappings = [
+        ("rex/link", "link"),
+        ("rex/head", "head"),
+        ("rex/router", "use-router"),
+        ("rex/image", "image"),
+    ];
+
+    for (specifier, file_stem) in &mappings {
+        for ext in &["ts", "tsx", "js", "jsx"] {
+            let candidate = client_dir.join(format!("{file_stem}.{ext}"));
+            if candidate.exists() {
+                aliases.push((
+                    specifier.to_string(),
+                    vec![Some(candidate.to_string_lossy().to_string())],
+                ));
+                break;
+            }
+        }
+    }
+
+    Ok(aliases)
 }
 
 /// Tree-shake options that mark React packages as side-effect-free.

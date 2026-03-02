@@ -1,4 +1,5 @@
 import React from 'react';
+import Link from 'rex/link';
 
 // Nested layout for dashboard section
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -7,9 +8,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div style={{ padding: '8px', background: '#f0f0f0' }}>
         <strong>Dashboard</strong>
         {' — '}
-        <a href="/dashboard">Home</a>
+        <Link href="/dashboard">Home</Link>
         {' | '}
-        <a href="/dashboard/settings">Settings</a>
+        <Link href="/dashboard/settings">Settings</Link>
       </div>
       <div>{children}</div>
     </div>
