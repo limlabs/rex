@@ -43,7 +43,12 @@ impl ClientReferenceManifest {
     /// Produce the server-side webpack bundler config for `renderToReadableStream`.
     ///
     /// React's server looks up `config[$$id]` → `{ id, name, chunks }`.
-    /// We use the reference ID as both the `$$id` and the module `id`.
+    /// The `id` is the reference ID (stable hash) used as the module identifier
+    /// in both SSR (`__webpack_require__`) and the client (pre-loaded into cache).
+    ///
+    /// The `chunks` array is empty because:
+    /// - SSR: modules are already bundled inline in the SSR IIFE
+    /// - Client: the hydration entry pre-loads modules from `__REX_RSC_MODULE_MAP__`
     pub fn to_server_webpack_config(&self) -> serde_json::Value {
         let mut config = serde_json::Map::new();
         for (ref_id, entry) in &self.entries {
@@ -62,7 +67,9 @@ impl ClientReferenceManifest {
     /// Produce the SSR-side webpack module map for `createFromReadableStream`.
     ///
     /// React's client looks up `config[moduleId][exportName]` → `{ id, name, chunks }`.
-    /// The `moduleId` and `exportName` come from the flight data emitted by the server.
+    /// The `moduleId` comes from the flight I row (which is the chunk URL from
+    /// the server config). The SSR bundle resolves these via `__webpack_require__`
+    /// backed by `__rex_ssr_modules__`.
     pub fn to_ssr_webpack_manifest(&self) -> serde_json::Value {
         let mut manifest = serde_json::Map::new();
         for (ref_id, entry) in &self.entries {

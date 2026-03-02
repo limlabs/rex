@@ -472,25 +472,23 @@ mod rsc {
 
     #[tokio::test]
     #[ignore]
-    async fn rsc_html_loads_react_before_runtime() {
-        // The RSC runtime needs React + ReactDOM available.
-        // React must be loaded before rsc-runtime.js executes.
+    async fn rsc_html_loads_client_chunks() {
+        // The RSC hydration entry is bundled as an ESM module alongside
+        // client component chunks. Verify client chunks are present.
         let url = format!("{}/dashboard/settings", base_url());
         let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
 
-        // Either React is bundled in a client chunk that loads as type="module"
-        // (which runs before defer scripts), or React is set on window globals.
-        // At minimum, rsc-runtime.js must be present.
-        assert!(
-            body.contains("rsc-runtime.js"),
-            "Page must include rsc-runtime.js"
-        );
-
         // The page should reference client component chunks
-        let has_client_chunk = body.contains("/_rex/static/");
+        let has_client_chunk = body.contains("/_rex/static/rsc/");
         assert!(
             has_client_chunk,
             "Settings page imports Counter (use client) — must have client chunk references"
+        );
+
+        // The hydration entry should be bundled in the client chunks
+        assert!(
+            body.contains("type=\"module\""),
+            "Client chunks should be loaded as ESM modules"
         );
     }
 

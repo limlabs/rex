@@ -486,24 +486,20 @@ async fn build_rsc_client_bundles(
 
     let hash = &build_id[..8.min(build_id.len())];
 
-    // Create a hydration bootstrap entry that imports react + react-dom/client
-    // and sets window globals so rsc-runtime.js can access them.
-    // Rolldown will code-split React into shared chunks between this and component entries.
+    // Create temporary entry files for rolldown.
+    // The hydrate entry uses react-server-dom-webpack/client to parse React's
+    // flight format and hydrate the SSR'd HTML with interactive client components.
     let entries_dir = output_dir.join("_rsc_client_entries");
     fs::create_dir_all(&entries_dir)?;
 
-    let bootstrap_code = r#"import React from 'react';
-import * as ReactDOMClient from 'react-dom/client';
-window.React = React;
-window.ReactDOM = ReactDOMClient;
-"#;
-    let bootstrap_path = entries_dir.join("__rsc_bootstrap.js");
-    fs::write(&bootstrap_path, bootstrap_code)?;
+    let hydrate_code = include_str!("../../../runtime/client/rsc-hydrate.js");
+    let hydrate_path = entries_dir.join("__rsc_hydrate.js");
+    fs::write(&hydrate_path, hydrate_code)?;
 
-    // Create entries: bootstrap + each client boundary module
+    // Create entries: hydrate entry + each client boundary module
     let mut entries: Vec<rolldown::InputItem> = vec![rolldown::InputItem {
-        name: Some("__rsc_bootstrap".to_string()),
-        import: bootstrap_path.to_string_lossy().to_string(),
+        name: Some("__rsc_hydrate".to_string()),
+        import: hydrate_path.to_string_lossy().to_string(),
     }];
 
     entries.extend(client_boundaries.iter().map(|m| {
@@ -594,8 +590,8 @@ window.ReactDOM = ReactDOMClient;
                 if chunk.is_entry {
                     let name = chunk.name.to_string();
 
-                    if name == "__rsc_bootstrap" {
-                        // Bootstrap entry — loads React/ReactDOM globals
+                    if name == "__rsc_hydrate" || name == "__rsc_bootstrap" {
+                        // Hydrate/bootstrap entry — must load first
                         bootstrap_chunks.push(prefixed);
                     } else {
                         // Client component entry — update manifest via O(1) lookup

@@ -630,6 +630,7 @@ async fn render_app_route(
     let route_key_clone = route_key.clone();
     let props_clone = props_json.clone();
     let client_chunks_clone = client_chunks.clone();
+    let client_manifest_json_clone = client_manifest_json.clone();
 
     let tail_chunk = stream::once(async move {
         let rsc_result = state_clone
@@ -671,6 +672,7 @@ async fn render_app_route(
             &head_html,
             &flight_data,
             &client_chunks_clone,
+            &client_manifest_json_clone,
             is_dev,
             Some(&manifest_json),
         );

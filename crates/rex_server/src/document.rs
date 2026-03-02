@@ -307,163 +307,134 @@ pub struct RscDocumentParams<'a> {
     pub manifest_json: Option<&'a str>,
 }
 
-/// Assemble an RSC HTML document.
+/// Assemble an RSC HTML document (non-streaming path).
 ///
-/// Unlike the pages router document, this includes inline flight data
-/// (for hydration) and the client reference module map instead of
-/// serialized props.
+/// Delegates to the streaming functions for consistency.
 pub fn assemble_rsc_document(params: &RscDocumentParams<'_>) -> String {
-    let mut html = String::with_capacity(params.ssr_html.len() + 2048);
-
-    html.push_str("<!DOCTYPE html>\n<html>\n<head>\n");
-    html.push_str("  <meta charset=\"utf-8\" />\n");
-    html.push_str("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n");
-
-    if !params.head_html.is_empty() {
-        html.push_str("  ");
-        html.push_str(params.head_html);
-        html.push('\n');
-    }
-
-    // Modulepreload client component chunks
-    for chunk in params.client_chunks {
-        html.push_str(&format!(
-            "  <link rel=\"modulepreload\" href=\"/_rex/static/{chunk}\" />\n"
-        ));
-    }
-
-    html.push_str("</head>\n<body>\n");
-
-    // Main content
-    html.push_str(&format!("  <div id=\"__rex\">{}</div>\n", params.ssr_html));
-
-    // Inline flight data for hydration
-    let escaped_flight = escape_script_content(params.flight_data);
-    html.push_str(&format!(
-        "  <script id=\"__REX_RSC_DATA__\" type=\"text/rsc\">{escaped_flight}</script>\n"
+    let mut html = String::new();
+    html.push_str("<!DOCTYPE html>\n");
+    html.push_str(&assemble_rsc_body_tail(
+        params.ssr_html,
+        params.head_html,
+        params.flight_data,
+        params.client_chunks,
+        params.client_manifest_json,
+        params.is_dev,
+        params.manifest_json,
     ));
-
-    // Client reference manifest
-    let escaped_manifest = escape_script_content(params.client_manifest_json);
-    html.push_str(&format!(
-        "  <script>window.__REX_RSC_MODULE_MAP__={escaped_manifest}</script>\n"
-    ));
-
-    // Route manifest for client-side navigation
-    if let Some(manifest) = params.manifest_json {
-        let escaped = escape_script_content(manifest);
-        html.push_str(&format!(
-            "  <script>window.__REX_MANIFEST__={escaped}</script>\n"
-        ));
-    }
-
-    // Client component chunks
-    for chunk in params.client_chunks {
-        html.push_str(&format!(
-            "  <script type=\"module\" src=\"/_rex/static/{chunk}\"></script>\n"
-        ));
-    }
-
-    // RSC client runtime (must load after module map is set)
-    html.push_str("  <script defer src=\"/_rex/rsc-runtime.js\"></script>\n");
-
-    // Client-side router
-    if params.manifest_json.is_some() {
-        html.push_str("  <script defer src=\"/_rex/router.js\"></script>\n");
-    }
-
-    // HMR in dev
-    if params.is_dev {
-        html.push_str("  <script defer src=\"/_rex/hmr-client.js\"></script>\n");
-    }
-
-    html.push_str("</body>\n</html>");
     html
 }
 
 /// Assemble the RSC head shell — flushed to the browser immediately while V8 renders.
-pub fn assemble_rsc_head_shell(client_chunks: &[String], client_manifest_json: &str) -> String {
-    let mut html = String::with_capacity(2048);
-
-    html.push_str("<!DOCTYPE html>\n<html>\n<head>\n");
-    html.push_str("  <meta charset=\"utf-8\" />\n");
-    html.push_str("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n");
-
-    // Modulepreload client component chunks
-    for chunk in client_chunks {
-        html.push_str(&format!(
-            "  <link rel=\"modulepreload\" href=\"/_rex/static/{chunk}\" />\n"
-        ));
-    }
-
-    html.push_str("</head>\n<body>\n");
-
-    // Inline client reference manifest early so chunks can use it
-    let escaped_manifest = escape_script_content(client_manifest_json);
-    html.push_str(&format!(
-        "  <script>window.__REX_RSC_MODULE_MAP__={escaped_manifest}</script>\n"
-    ));
-
-    html
+///
+/// For RSC routes, the root layout renders `<html>` and `<body>`, so the SSR
+/// output IS the document. We just emit the doctype here; the body tail injects
+/// scripts/meta into the SSR HTML's `</head>` and `</body>`.
+pub fn assemble_rsc_head_shell(_client_chunks: &[String], _client_manifest_json: &str) -> String {
+    "<!DOCTYPE html>\n".to_string()
 }
 
 /// Assemble the RSC body tail — sent after V8 render completes.
+///
+/// For RSC routes, the SSR HTML from `renderToString` already contains
+/// `<html><head></head><body>...</body></html>` from the root layout.
+/// We inject Rex's meta/preloads into `</head>` and scripts into `</body>`
+/// rather than wrapping the HTML in another shell (which would create
+/// invalid nested `<html>` elements and break hydration).
 pub fn assemble_rsc_body_tail(
     ssr_html: &str,
     head_html: &str,
     flight_data: &str,
     client_chunks: &[String],
+    client_manifest_json: &str,
     is_dev: bool,
     manifest_json: Option<&str>,
 ) -> String {
-    let mut html = String::with_capacity(ssr_html.len() + 1024);
-
-    // Dynamic head elements
+    // Build head injections (meta, preloads, dynamic head elements)
+    let mut head_inject = String::new();
+    head_inject.push_str("<meta charset=\"utf-8\" />");
+    head_inject
+        .push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />");
     if !head_html.is_empty() {
-        html.push_str("  ");
-        html.push_str(head_html);
-        html.push('\n');
+        head_inject.push_str(head_html);
+    }
+    for chunk in client_chunks {
+        head_inject.push_str(&format!(
+            "<link rel=\"modulepreload\" href=\"/_rex/static/{chunk}\" />"
+        ));
     }
 
-    // Main content
-    html.push_str(&format!("  <div id=\"__rex\">{ssr_html}</div>\n"));
+    // Build body injections (scripts)
+    let mut body_inject = String::new();
+
+    // Client reference manifest
+    let escaped_manifest = escape_script_content(client_manifest_json);
+    body_inject.push_str(&format!(
+        "<script>window.__REX_RSC_MODULE_MAP__={escaped_manifest}</script>"
+    ));
+
+    // Webpack shims — must be set before <script type="module"> loads because
+    // react-server-dom-webpack/client accesses __webpack_require__ during init
+    body_inject.push_str(
+        "<script>\
+         var __rexModuleCache={};\
+         globalThis.__webpack_require__=function(id){return __rexModuleCache[id]||{}};\
+         globalThis.__webpack_require__.u=function(c){return c};\
+         globalThis.__webpack_chunk_load__=function(c){\
+           if(__rexModuleCache[c])return Promise.resolve();\
+           return import(c).then(function(m){__rexModuleCache[c]=m})\
+         };\
+         window.__rexModuleCache=__rexModuleCache;\
+         </script>",
+    );
 
     // Inline flight data for hydration
     let escaped_flight = escape_script_content(flight_data);
-    html.push_str(&format!(
-        "  <script id=\"__REX_RSC_DATA__\" type=\"text/rsc\">{escaped_flight}</script>\n"
+    body_inject.push_str(&format!(
+        "<script id=\"__REX_RSC_DATA__\" type=\"text/rsc\">{escaped_flight}</script>"
     ));
 
     // Route manifest
     if let Some(manifest) = manifest_json {
         let escaped = escape_script_content(manifest);
-        html.push_str(&format!(
-            "  <script>window.__REX_MANIFEST__={escaped}</script>\n"
+        body_inject.push_str(&format!(
+            "<script>window.__REX_MANIFEST__={escaped}</script>"
         ));
     }
 
-    // Client component chunks
+    // Client component chunks (includes the RSC hydration entry)
     for chunk in client_chunks {
-        html.push_str(&format!(
-            "  <script type=\"module\" src=\"/_rex/static/{chunk}\"></script>\n"
+        body_inject.push_str(&format!(
+            "<script type=\"module\" src=\"/_rex/static/{chunk}\"></script>"
         ));
     }
-
-    // RSC client runtime
-    html.push_str("  <script defer src=\"/_rex/rsc-runtime.js\"></script>\n");
 
     // Client-side router
     if manifest_json.is_some() {
-        html.push_str("  <script defer src=\"/_rex/router.js\"></script>\n");
+        body_inject.push_str("<script defer src=\"/_rex/router.js\"></script>");
     }
 
     // HMR in dev
     if is_dev {
-        html.push_str("  <script defer src=\"/_rex/hmr-client.js\"></script>\n");
+        body_inject.push_str("<script defer src=\"/_rex/hmr-client.js\"></script>");
     }
 
-    html.push_str("</body>\n</html>");
-    html
+    // Inject into SSR HTML if it contains <html> (RSC root layout convention)
+    if ssr_html.contains("</head>") && ssr_html.contains("</body>") {
+        ssr_html
+            .replacen("</head>", &format!("{head_inject}</head>"), 1)
+            .replacen("</body>", &format!("{body_inject}</body>"), 1)
+    } else {
+        // Fallback for layouts without <html>/<body>: wrap in a shell
+        let mut html = String::with_capacity(ssr_html.len() + 2048);
+        html.push_str("<html><head>");
+        html.push_str(&head_inject);
+        html.push_str("</head><body>");
+        html.push_str(ssr_html);
+        html.push_str(&body_inject);
+        html.push_str("</body></html>");
+        html
+    }
 }
 
 #[cfg(test)]
@@ -505,67 +476,96 @@ mod tests {
     }
 
     #[test]
-    fn rsc_head_shell_contains_modulepreload() {
+    fn rsc_head_shell_emits_doctype() {
         let chunks = vec!["rsc/chunk-react-abc123.js".to_string()];
         let manifest = r#"{"refs":{}}"#;
         let html = assemble_rsc_head_shell(&chunks, manifest);
 
         assert!(html.contains("<!DOCTYPE html>"));
-        assert!(html.contains(
-            r#"<link rel="modulepreload" href="/_rex/static/rsc/chunk-react-abc123.js""#
-        ));
-        assert!(html.contains("__REX_RSC_MODULE_MAP__"));
-        assert!(html.contains(r#"{"refs":{}}"#));
+        // Head shell is minimal — preloads are injected into SSR HTML by body tail
+        assert!(!html.contains("<head>"));
     }
 
     #[test]
-    fn rsc_head_shell_empty_chunks() {
-        let html = assemble_rsc_head_shell(&[], "{}");
-        assert!(html.contains("<head>"));
-        assert!(html.contains("<body>"));
-        assert!(!html.contains("modulepreload"));
-    }
-
-    #[test]
-    fn rsc_body_tail_contains_flight_data() {
+    fn rsc_body_tail_injects_into_ssr_html() {
+        let ssr = "<html><head></head><body><div>Hello</div></body></html>";
         let html = assemble_rsc_body_tail(
-            "<div>Hello</div>",
+            ssr,
             "",
-            "J:0:{}\nR:0",
+            "0:\"hello\"\n",
             &["rsc/component-abc.js".to_string()],
+            "{}",
             false,
             None,
         );
 
-        assert!(html.contains(r#"<div id="__rex"><div>Hello</div></div>"#));
-        assert!(html.contains(r#"id="__REX_RSC_DATA__""#));
-        assert!(html.contains("J:0:{}"));
-        assert!(html.contains(r#"<script type="module" src="/_rex/static/rsc/component-abc.js">"#));
-        assert!(html.contains("rsc-runtime.js"));
-        assert!(html.contains("</body>"));
+        // SSR HTML structure preserved (no nested <html>, no wrapper div)
+        assert!(!html.contains("<div id=\"__rex\">"));
+        // Meta tags injected into <head>
+        assert!(html.contains("<meta charset=\"utf-8\" />"));
+        // Head injection goes before </head>
+        let meta_pos = html.find("<meta charset").unwrap();
+        let head_close_pos = html.find("</head>").unwrap();
+        assert!(meta_pos < head_close_pos);
+        // Flight data injected before </body>
+        assert!(html.contains("__REX_RSC_DATA__"));
+        assert!(html.contains("0:\"hello\""));
+        // Script tags injected before </body>
+        assert!(html.contains(
+            r#"<script type="module" src="/_rex/static/rsc/component-abc.js"></script>"#
+        ));
+        assert!(html.contains("</body></html>"));
+    }
+
+    #[test]
+    fn rsc_body_tail_fallback_without_html_wrapper() {
+        // SSR HTML without <html>/<body> (e.g., layout without root element)
+        let ssr = "<div>Hello</div>";
+        let html = assemble_rsc_body_tail(ssr, "", "0:\"hi\"", &[], "{}", false, None);
+
+        // Falls back to wrapping in a shell
+        assert!(html.contains("<html><head>"));
+        assert!(html.contains("<div>Hello</div>"));
+        assert!(html.contains("</body></html>"));
     }
 
     #[test]
     fn rsc_body_tail_script_ordering() {
+        let ssr = "<html><head></head><body><p>test</p></body></html>";
         let html = assemble_rsc_body_tail(
-            "<p>test</p>",
+            ssr,
             "",
-            "J:0:{}",
+            "0:{}",
             &["rsc/comp.js".to_string()],
+            "{}",
             true,
             Some(r#"{"routes":{}}"#),
         );
 
-        // Flight data should come before component scripts
+        // All body scripts injected before </body> in correct order:
+        // module map → flight data → route manifest → component scripts → router → HMR
+        let map_pos = html.find("__REX_RSC_MODULE_MAP__").unwrap();
         let flight_pos = html.find("__REX_RSC_DATA__").unwrap();
-        let comp_pos = html.find("rsc/comp.js").unwrap();
-        let runtime_pos = html.find("rsc-runtime.js").unwrap();
+        // Find the script tag occurrence of comp.js (not the modulepreload in head)
+        let comp_script_pos = html
+            .find(r#"<script type="module" src="/_rex/static/rsc/comp.js">"#)
+            .unwrap();
         let router_pos = html.find("router.js").unwrap();
         let hmr_pos = html.find("hmr-client.js").unwrap();
 
-        assert!(flight_pos < comp_pos);
-        assert!(comp_pos < runtime_pos);
-        assert!(runtime_pos < router_pos);
+        assert!(map_pos < flight_pos);
+        assert!(flight_pos < comp_script_pos);
+        assert!(comp_script_pos < router_pos);
         assert!(router_pos < hmr_pos);
+    }
+
+    #[test]
+    fn rsc_body_tail_includes_module_map() {
+        let ssr = "<html><head></head><body><p>Hi</p></body></html>";
+        let manifest = r#"{"entries":{"abc":{"chunk_url":"/c.js","export_name":"default"}}}"#;
+        let html = assemble_rsc_body_tail(ssr, "", "0:\"x\"", &[], manifest, false, None);
+
+        assert!(html.contains("__REX_RSC_MODULE_MAP__"));
+        assert!(html.contains("abc"));
     }
 }
