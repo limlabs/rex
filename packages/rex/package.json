@@ -1,6 +1,6 @@
 {
   "name": "@limlabs/rex",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Rex - Next.js Pages Router reimplemented in Rust",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

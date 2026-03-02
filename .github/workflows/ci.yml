@@ -50,8 +50,6 @@ jobs:
   test:
     name: Test & Coverage
     runs-on: ubuntu-latest
-    env:
-      COVERAGE_THRESHOLD: 51
     steps:
       - uses: actions/checkout@v4
 
@@ -72,6 +70,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
+          COVERAGE_THRESHOLD=$(cat .coverage-threshold | tr -d '[:space:]')
           cargo llvm-cov --all --json --output-path coverage.json
           COVERAGE=$(jq '.data[0].totals.lines.percent' coverage.json | xargs printf '%.0f')
           echo "Line coverage: ${COVERAGE}% (threshold: ${COVERAGE_THRESHOLD}%)"
