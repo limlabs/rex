@@ -292,7 +292,7 @@ async fn build_rsc_server_bundle(
         banner: Some(rolldown::AddonOutputOption::String(Some(banner))),
         tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
         minify,
-        treeshake: rsc_treeshake_options(),
+        treeshake: react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(aliases),
             condition_names: Some(vec![
@@ -444,7 +444,7 @@ async fn build_rsc_ssr_bundle(
         banner: Some(rolldown::AddonOutputOption::String(Some(banner))),
         tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
         minify,
-        treeshake: rsc_treeshake_options(),
+        treeshake: react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
             condition_names: Some(vec![
                 "browser".to_string(),
@@ -578,7 +578,7 @@ async fn build_rsc_client_bundles(
         define: Some(define.iter().cloned().collect()),
         tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
         minify,
-        treeshake: rsc_treeshake_options(),
+        treeshake: react_treeshake_options(),
         manual_code_splitting: Some(rolldown_common::ManualCodeSplittingOptions {
             groups: Some(vec![rsc_flight_group, react_vendor_group]),
             ..Default::default()
@@ -684,12 +684,12 @@ async fn build_rsc_client_bundles(
     Ok(chunks)
 }
 
-/// Tree-shake options for RSC bundles.
+/// Tree-shake options that mark React packages as side-effect-free.
 ///
-/// Marks React packages as side-effect-free so rolldown can aggressively
-/// eliminate unused exports. React's production builds use `@__PURE__`
+/// Allows rolldown to aggressively eliminate unused exports from
+/// `node_modules/react*`. React's production builds use `@__PURE__`
 /// annotations which rolldown respects when `annotations: true`.
-fn rsc_treeshake_options() -> rolldown_common::TreeshakeOptions {
+pub(crate) fn react_treeshake_options() -> rolldown_common::TreeshakeOptions {
     rolldown_common::TreeshakeOptions::Option(rolldown_common::InnerOptions {
         module_side_effects: rolldown_common::ModuleSideEffects::Rules(vec![
             // React packages are side-effect-free in production

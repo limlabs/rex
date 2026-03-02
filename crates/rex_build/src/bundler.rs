@@ -171,6 +171,7 @@ globalThis.__rex_resolve_api = function() {
                 V8_POLYFILLS.to_string(),
             ))),
             tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+            treeshake: crate::rsc_bundler::react_treeshake_options(),
             resolve: Some(rolldown::ResolveOptions {
                 extensions: Some(vec![
                     ".tsx".to_string(),
@@ -1068,6 +1069,7 @@ async fn build_server_bundle(
             V8_POLYFILLS.to_string(),
         ))),
         tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+        treeshake: crate::rsc_bundler::react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(aliases),
             extensions: Some(vec![
@@ -1316,6 +1318,7 @@ if (!window.__REX_NAVIGATING__) {{
         minify,
         define: Some(define.iter().cloned().collect()),
         tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+        treeshake: crate::rsc_bundler::react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(client_aliases),
             extensions: Some(vec![
