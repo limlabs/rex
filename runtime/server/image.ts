@@ -1,0 +1,130 @@
+// Server-side Image component for rex/image
+// Renders an optimized <img> tag pointing to /_rex/image during SSR.
+import { createElement, type ReactElement } from "react";
+
+interface ImageProps {
+  src: string;
+  width?: number;
+  height?: number;
+  alt?: string;
+  quality?: number;
+  priority?: boolean;
+  placeholder?: string;
+  blurDataURL?: string;
+  fill?: boolean;
+  sizes?: string;
+  objectFit?: string;
+  className?: string;
+  id?: string;
+  onLoad?: (e: Event) => void;
+}
+
+// Device-scale widths matching next/image breakpoints
+const DEVICE_SIZES = [640, 750, 828, 1080, 1200, 1920];
+const ICON_SIZES = [16, 32, 48, 64, 96, 128, 256, 384];
+
+function buildSrc(src: string, w: number, q: number): string {
+  return (
+    "/_rex/image?url=" +
+    encodeURIComponent(src) +
+    "&w=" +
+    w +
+    "&q=" +
+    q
+  );
+}
+
+function buildSrcSet(src: string, width: number, quality: number): string {
+  // Pick widths relevant to this image's display size.
+  // For small images (<=384), use icon sizes up to 2x.
+  // For larger images, use device sizes up to 2x.
+  const all = ICON_SIZES.concat(DEVICE_SIZES);
+  const limit = width * 2;
+  const parts: string[] = [];
+  for (let i = 0; i < all.length; i++) {
+    const w = all[i];
+    // Skip widths smaller than 1/4 of display size (useless for this image)
+    if (w < Math.floor(width / 4)) continue;
+    if (w <= limit) {
+      parts.push(buildSrc(src, w, quality) + " " + w + "w");
+    }
+  }
+  // Always include the exact requested width if not already covered
+  if (parts.length === 0) {
+    parts.push(buildSrc(src, width, quality) + " " + width + "w");
+  }
+  return parts.join(", ");
+}
+
+export default function Image(props: ImageProps): ReactElement {
+  const {
+    src,
+    width,
+    height,
+    alt,
+    quality = 75,
+    priority = false,
+    placeholder,
+    blurDataURL,
+    fill = false,
+    sizes,
+  } = props;
+
+  // Base style: block display, prevent overflow, maintain aspect ratio (like next/image)
+  let style: Record<string, string | number> = {
+    display: "block",
+    maxWidth: "100%",
+    height: "auto",
+  };
+
+  const imgProps: Record<string, unknown> = {
+    alt: alt || "",
+    loading: priority ? "eager" : "lazy",
+    decoding: "async",
+  };
+
+  if (fill) {
+    style = {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      width: "100%",
+      height: "100%",
+      objectFit: props.objectFit || "cover",
+    };
+  } else {
+    imgProps.width = width;
+    imgProps.height = height;
+  }
+
+  if (priority) {
+    imgProps.fetchPriority = "high";
+  }
+
+  // Set src and srcSet
+  imgProps.src = buildSrc(src, width || 1920, quality);
+  if (width) {
+    imgProps.srcSet = buildSrcSet(src, width, quality);
+  }
+
+  if (sizes) {
+    imgProps.sizes = sizes;
+  } else if (width) {
+    imgProps.sizes = "(max-width: " + width + "px) 100vw, " + width + "px";
+  }
+
+  // Blur placeholder as background
+  if (placeholder === "blur" && blurDataURL) {
+    style.backgroundImage = "url(" + blurDataURL + ")";
+    style.backgroundSize = "cover";
+    style.backgroundRepeat = "no-repeat";
+  }
+
+  imgProps.style = style;
+
+  if (props.className) imgProps.className = props.className;
+  if (props.id) imgProps.id = props.id;
+  if (props.onLoad) imgProps.onLoad = props.onLoad;
+
+  return createElement("img", imgProps);
+}

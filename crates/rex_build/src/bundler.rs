@@ -607,26 +607,26 @@ async fn build_server_bundle(
         (
             "rex/head".to_string(),
             vec![Some(
-                runtime_dir.join("head.js").to_string_lossy().to_string(),
+                runtime_dir.join("head.ts").to_string_lossy().to_string(),
             )],
         ),
         (
             "rex/link".to_string(),
             vec![Some(
-                runtime_dir.join("link.js").to_string_lossy().to_string(),
+                runtime_dir.join("link.ts").to_string_lossy().to_string(),
             )],
         ),
         (
             "rex/router".to_string(),
             vec![Some(
-                runtime_dir.join("router.js").to_string_lossy().to_string(),
+                runtime_dir.join("router.ts").to_string_lossy().to_string(),
             )],
         ),
         (
             "rex/document".to_string(),
             vec![Some(
                 runtime_dir
-                    .join("document.js")
+                    .join("document.ts")
                     .to_string_lossy()
                     .to_string(),
             )],
@@ -634,14 +634,14 @@ async fn build_server_bundle(
         (
             "rex/image".to_string(),
             vec![Some(
-                runtime_dir.join("image.js").to_string_lossy().to_string(),
+                runtime_dir.join("image.ts").to_string_lossy().to_string(),
             )],
         ),
         (
             "rex/middleware".to_string(),
             vec![Some(
                 runtime_dir
-                    .join("middleware.js")
+                    .join("middleware.ts")
                     .to_string_lossy()
                     .to_string(),
             )],
@@ -650,26 +650,26 @@ async fn build_server_bundle(
         (
             "next/head".to_string(),
             vec![Some(
-                runtime_dir.join("head.js").to_string_lossy().to_string(),
+                runtime_dir.join("head.ts").to_string_lossy().to_string(),
             )],
         ),
         (
             "next/link".to_string(),
             vec![Some(
-                runtime_dir.join("link.js").to_string_lossy().to_string(),
+                runtime_dir.join("link.ts").to_string_lossy().to_string(),
             )],
         ),
         (
             "next/router".to_string(),
             vec![Some(
-                runtime_dir.join("router.js").to_string_lossy().to_string(),
+                runtime_dir.join("router.ts").to_string_lossy().to_string(),
             )],
         ),
         (
             "next/document".to_string(),
             vec![Some(
                 runtime_dir
-                    .join("document.js")
+                    .join("document.ts")
                     .to_string_lossy()
                     .to_string(),
             )],
@@ -677,7 +677,7 @@ async fn build_server_bundle(
         (
             "next/image".to_string(),
             vec![Some(
-                runtime_dir.join("image.js").to_string_lossy().to_string(),
+                runtime_dir.join("image.ts").to_string_lossy().to_string(),
             )],
         ),
     ];
@@ -871,20 +871,20 @@ if (!window.__REX_NAVIGATING__) {{
         (
             "rex/link".to_string(),
             vec![Some(
-                runtime_dir.join("link.js").to_string_lossy().to_string(),
+                runtime_dir.join("link.ts").to_string_lossy().to_string(),
             )],
         ),
         (
             "rex/head".to_string(),
             vec![Some(
-                runtime_dir.join("head.js").to_string_lossy().to_string(),
+                runtime_dir.join("head.ts").to_string_lossy().to_string(),
             )],
         ),
         (
             "rex/router".to_string(),
             vec![Some(
                 runtime_dir
-                    .join("use-router.js")
+                    .join("use-router.ts")
                     .to_string_lossy()
                     .to_string(),
             )],
@@ -892,27 +892,27 @@ if (!window.__REX_NAVIGATING__) {{
         (
             "rex/image".to_string(),
             vec![Some(
-                runtime_dir.join("image.js").to_string_lossy().to_string(),
+                runtime_dir.join("image.ts").to_string_lossy().to_string(),
             )],
         ),
         // Next.js compatibility shims
         (
             "next/link".to_string(),
             vec![Some(
-                runtime_dir.join("link.js").to_string_lossy().to_string(),
+                runtime_dir.join("link.ts").to_string_lossy().to_string(),
             )],
         ),
         (
             "next/head".to_string(),
             vec![Some(
-                runtime_dir.join("head.js").to_string_lossy().to_string(),
+                runtime_dir.join("head.ts").to_string_lossy().to_string(),
             )],
         ),
         (
             "next/router".to_string(),
             vec![Some(
                 runtime_dir
-                    .join("use-router.js")
+                    .join("use-router.ts")
                     .to_string_lossy()
                     .to_string(),
             )],
@@ -920,7 +920,7 @@ if (!window.__REX_NAVIGATING__) {{
         (
             "next/image".to_string(),
             vec![Some(
-                runtime_dir.join("image.js").to_string_lossy().to_string(),
+                runtime_dir.join("image.ts").to_string_lossy().to_string(),
             )],
         ),
     ];
