@@ -10,51 +10,53 @@ import {
     existsSync,
     unlinkSync,
     rmSync,
-} from './fs.js';
+} from './fs.ts';
 
-export function readFile(path, options) {
+import type { StatResult } from './fs.ts';
+
+export function readFile(path: string, options?: string | { encoding?: string }): Promise<string | Uint8Array> {
     return Promise.resolve(readFileSync(path, options));
 }
 
-export function writeFile(path, data, options) {
+export function writeFile(path: string, data: string | Uint8Array, options?: unknown): Promise<void> {
     return Promise.resolve(writeFileSync(path, data, options));
 }
 
-export function readdir(path) {
+export function readdir(path: string): Promise<string[]> {
     return Promise.resolve(readdirSync(path));
 }
 
-export function stat(path) {
+export function stat(path: string): Promise<StatResult> {
     return Promise.resolve(statSync(path));
 }
 
-export function mkdir(path, options) {
+export function mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
     return Promise.resolve(mkdirSync(path, options));
 }
 
-export function access(path) {
+export function access(path: string): Promise<void> {
     return existsSync(path)
         ? Promise.resolve()
         : Promise.reject(Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' }));
 }
 
-export function unlink(path) {
+export function unlink(path: string): Promise<void> {
     return Promise.resolve(unlinkSync(path));
 }
 
-export function rm(path, options) {
+export function rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void> {
     return Promise.resolve(rmSync(path, options));
 }
 
-var fsPromises = {
-    readFile: readFile,
-    writeFile: writeFile,
-    readdir: readdir,
-    stat: stat,
-    mkdir: mkdir,
-    access: access,
-    unlink: unlink,
-    rm: rm,
+const fsPromises = {
+    readFile,
+    writeFile,
+    readdir,
+    stat,
+    mkdir,
+    access,
+    unlink,
+    rm,
 };
 
 export default fsPromises;

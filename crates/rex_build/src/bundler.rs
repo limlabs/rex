@@ -684,20 +684,20 @@ async fn build_server_bundle(
         (
             "fs".to_string(),
             vec![Some(
-                runtime_dir.join("fs.js").to_string_lossy().to_string(),
+                runtime_dir.join("fs.ts").to_string_lossy().to_string(),
             )],
         ),
         (
             "node:fs".to_string(),
             vec![Some(
-                runtime_dir.join("fs.js").to_string_lossy().to_string(),
+                runtime_dir.join("fs.ts").to_string_lossy().to_string(),
             )],
         ),
         (
             "fs/promises".to_string(),
             vec![Some(
                 runtime_dir
-                    .join("fs-promises.js")
+                    .join("fs-promises.ts")
                     .to_string_lossy()
                     .to_string(),
             )],
@@ -706,7 +706,7 @@ async fn build_server_bundle(
             "node:fs/promises".to_string(),
             vec![Some(
                 runtime_dir
-                    .join("fs-promises.js")
+                    .join("fs-promises.ts")
                     .to_string_lossy()
                     .to_string(),
             )],
