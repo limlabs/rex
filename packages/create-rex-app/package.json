@@ -1,6 +1,6 @@
 {
   "name": "create-rex",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Create a new Rex project",
   "bin": {
     "create-rex": "./dist/index.js"
