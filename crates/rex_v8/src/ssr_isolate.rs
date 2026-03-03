@@ -1840,4 +1840,86 @@ globalThis.__rex_resolve_gsp = function() {
             render.body
         );
     }
+
+    #[test]
+    fn test_console_log_emits_tracing_event() {
+        use std::sync::{Arc, Mutex};
+        use tracing_subscriber::layer::SubscriberExt;
+
+        /// Minimal tracing layer that captures log messages.
+        struct CaptureLayer {
+            messages: Arc<Mutex<Vec<(tracing::Level, String)>>>,
+        }
+
+        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CaptureLayer {
+            fn on_event(
+                &self,
+                event: &tracing::Event<'_>,
+                _ctx: tracing_subscriber::layer::Context<'_, S>,
+            ) {
+                struct Visitor(String);
+                impl tracing::field::Visit for Visitor {
+                    fn record_debug(
+                        &mut self,
+                        field: &tracing::field::Field,
+                        value: &dyn std::fmt::Debug,
+                    ) {
+                        if field.name() == "message" {
+                            self.0 = format!("{value:?}");
+                        }
+                    }
+                }
+                let mut visitor = Visitor(String::new());
+                event.record(&mut visitor);
+                self.messages
+                    .lock()
+                    .unwrap()
+                    .push((*event.metadata().level(), visitor.0));
+            }
+        }
+
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::new("v8::console=info"))
+            .with(CaptureLayer {
+                messages: messages.clone(),
+            });
+
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let mut iso = make_isolate(&[(
+            "logpage",
+            r#"function LogPage() {
+                console.log("hello from ssr");
+                console.warn("warning from ssr");
+                console.error("error from ssr");
+                return React.createElement('p', null, 'logged');
+            }"#,
+            None,
+        )]);
+        let render = iso.render_page("logpage", "{}").unwrap();
+        assert!(render.body.contains("logged"), "page should render");
+
+        let captured = messages.lock().unwrap();
+        assert!(
+            captured
+                .iter()
+                .any(|(_, msg)| msg.contains("hello from ssr")),
+            "console.log should emit tracing event, captured: {captured:?}"
+        );
+        assert!(
+            captured
+                .iter()
+                .any(|(level, msg)| *level == tracing::Level::WARN
+                    && msg.contains("warning from ssr")),
+            "console.warn should emit WARN-level event, captured: {captured:?}"
+        );
+        assert!(
+            captured
+                .iter()
+                .any(|(level, msg)| *level == tracing::Level::ERROR
+                    && msg.contains("error from ssr")),
+            "console.error should emit ERROR-level event, captured: {captured:?}"
+        );
+    }
 }
