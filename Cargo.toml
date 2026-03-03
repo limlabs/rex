@@ -70,6 +70,9 @@ futures = "0.3"
 sha2 = "0.10"
 hex = "0.4"
 
+# Embed files at compile time
+include_dir = "0.7"
+
 # Image processing
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 base64 = "0.22"

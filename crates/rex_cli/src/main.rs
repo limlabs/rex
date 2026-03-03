@@ -100,19 +100,22 @@ enum Commands {
     },
 }
 
+const DEFAULT_LOG_FILTER: &str = "rex=info,v8::console=info";
+
 fn init_plain_tracing() {
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "rex=info".into()),
+                .unwrap_or_else(|_| DEFAULT_LOG_FILTER.into()),
         )
         .init();
 }
 
 fn init_tui_tracing() -> LogBuffer {
     let buffer = LogBuffer::new(1000);
-    let env_filter =
-        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "rex=info".into());
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| DEFAULT_LOG_FILTER.into());
 
     tracing_subscriber::registry()
         .with(env_filter)
