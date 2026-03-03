@@ -24,6 +24,46 @@
           "type": "json",
           "path": "packages/create-rex-app/package.json",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "packages/rex-darwin-arm64/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "packages/rex-darwin-x64/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "packages/rex-linux-x64/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "packages/rex-linux-arm64/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "packages/rex/package.json",
+          "jsonpath": "$.optionalDependencies['@limlabs/rex-darwin-arm64']"
+        },
+        {
+          "type": "json",
+          "path": "packages/rex/package.json",
+          "jsonpath": "$.optionalDependencies['@limlabs/rex-darwin-x64']"
+        },
+        {
+          "type": "json",
+          "path": "packages/rex/package.json",
+          "jsonpath": "$.optionalDependencies['@limlabs/rex-linux-x64']"
+        },
+        {
+          "type": "json",
+          "path": "packages/rex/package.json",
+          "jsonpath": "$.optionalDependencies['@limlabs/rex-linux-arm64']"
         }
       ]
     }
