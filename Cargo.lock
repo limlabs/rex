@@ -1699,17 +1699,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "inotify"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f37dccff2791ab604f9babef0ba14fbe0be30bd368dc541e2b08d07c8aa908f3"
-dependencies = [
- "bitflags 2.11.0",
- "inotify-sys",
- "libc",
-]
-
-[[package]]
 name = "inotify-sys"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2202,7 +2191,7 @@ dependencies = [
  "bitflags 2.11.0",
  "filetime",
  "fsevent-sys",
- "inotify 0.10.2",
+ "inotify",
  "kqueue",
  "libc",
  "log",
@@ -2294,25 +2283,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c7398b9c8b70908f6371f47ed36737907c87c52af34c268fed0bf0ceb92ead9"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "objc2-core-foundation"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
-dependencies = [
- "bitflags 2.11.0",
-]
-
-[[package]]
-name = "objc2-core-services"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "583300ad934cba24ff5292aee751ecc070f7ca6b39a574cc21b7b5e588e06a0b"
-dependencies = [
- "libc",
- "objc2-core-foundation",
 ]
 
 [[package]]
@@ -3616,7 +3586,7 @@ dependencies = [
 
 [[package]]
 name = "rex_build"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "hex",
@@ -3643,7 +3613,7 @@ dependencies = [
 
 [[package]]
 name = "rex_cli"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -3668,7 +3638,7 @@ dependencies = [
 
 [[package]]
 name = "rex_core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3678,7 +3648,7 @@ dependencies = [
 
 [[package]]
 name = "rex_dev"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -3697,7 +3667,7 @@ dependencies = [
 
 [[package]]
 name = "rex_e2e"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "futures",
@@ -3710,7 +3680,7 @@ dependencies = [
 
 [[package]]
 name = "rex_image"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "base64",
  "hex",
@@ -3723,7 +3693,7 @@ dependencies = [
 
 [[package]]
 name = "rex_napi"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "napi",
@@ -3744,7 +3714,7 @@ dependencies = [
 
 [[package]]
 name = "rex_router"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "rex_core",
@@ -3754,7 +3724,7 @@ dependencies = [
 
 [[package]]
 name = "rex_server"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -3782,7 +3752,7 @@ dependencies = [
 
 [[package]]
 name = "rex_v8"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -3814,7 +3784,7 @@ dependencies = [
 [[package]]
 name = "rolldown"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "anyhow",
  "append-only-vec",
@@ -3835,7 +3805,6 @@ dependencies = [
  "oxc_traverse",
  "petgraph",
  "rayon",
- "rolldown-notify",
  "rolldown_common",
  "rolldown_dev_common",
  "rolldown_devtools",
@@ -3877,34 +3846,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "rolldown-notify"
-version = "10.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8bf250d410b79487a6d054e6bd16ec08dddd2998f5f5e6291867a35066cfc37"
-dependencies = [
- "bitflags 2.11.0",
- "inotify 0.11.0",
- "kqueue",
- "libc",
- "mio",
- "objc2-core-foundation",
- "objc2-core-services",
- "rolldown-notify-types",
- "tracing",
- "walkdir",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "rolldown-notify-types"
-version = "2.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1931923a28e14c01a27ca56669669eb3e3de4068859c34e17b96c93ba3a61afe"
-
-[[package]]
 name = "rolldown_common"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "anyhow",
  "arcstr",
@@ -3935,7 +3879,7 @@ dependencies = [
 [[package]]
 name = "rolldown_dev_common"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "derive_more",
  "rolldown_common",
@@ -3945,7 +3889,7 @@ dependencies = [
 [[package]]
 name = "rolldown_devtools"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "blake3",
  "dashmap",
@@ -3960,7 +3904,7 @@ dependencies = [
 [[package]]
 name = "rolldown_devtools_action"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "serde",
  "ts-rs",
@@ -3969,7 +3913,7 @@ dependencies = [
 [[package]]
 name = "rolldown_ecmascript"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "arcstr",
  "oxc",
@@ -3981,7 +3925,7 @@ dependencies = [
 [[package]]
 name = "rolldown_ecmascript_utils"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "memchr",
  "oxc",
@@ -3993,7 +3937,7 @@ dependencies = [
 [[package]]
 name = "rolldown_error"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "anyhow",
  "arcstr",
@@ -4011,7 +3955,7 @@ dependencies = [
 [[package]]
 name = "rolldown_fs"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "oxc_resolver",
  "vfs",
@@ -4020,7 +3964,7 @@ dependencies = [
 [[package]]
 name = "rolldown_plugin"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "anyhow",
  "arcstr",
@@ -4050,7 +3994,7 @@ dependencies = [
 [[package]]
 name = "rolldown_plugin_chunk_import_map"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "arcstr",
  "rolldown_common",
@@ -4064,7 +4008,7 @@ dependencies = [
 [[package]]
 name = "rolldown_plugin_copy_module"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "anyhow",
  "arcstr",
@@ -4081,7 +4025,7 @@ dependencies = [
 [[package]]
 name = "rolldown_plugin_data_url"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "arcstr",
  "base64-simd",
@@ -4095,7 +4039,7 @@ dependencies = [
 [[package]]
 name = "rolldown_plugin_hmr"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "rolldown_common",
  "rolldown_plugin",
@@ -4104,7 +4048,7 @@ dependencies = [
 [[package]]
 name = "rolldown_plugin_lazy_compilation"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "anyhow",
  "arcstr",
@@ -4117,7 +4061,7 @@ dependencies = [
 [[package]]
 name = "rolldown_plugin_oxc_runtime"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "arcstr",
  "phf 0.13.1",
@@ -4128,7 +4072,7 @@ dependencies = [
 [[package]]
 name = "rolldown_resolver"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "anyhow",
  "arcstr",
@@ -4144,7 +4088,7 @@ dependencies = [
 [[package]]
 name = "rolldown_sourcemap"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "memchr",
  "oxc",
@@ -4156,7 +4100,7 @@ dependencies = [
 [[package]]
 name = "rolldown_std_utils"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "regex",
 ]
@@ -4164,7 +4108,7 @@ dependencies = [
 [[package]]
 name = "rolldown_tracing"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "tracing",
  "tracing-chrome",
@@ -4174,7 +4118,7 @@ dependencies = [
 [[package]]
 name = "rolldown_utils"
 version = "0.1.0"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "anyhow",
  "arcstr",
@@ -4617,7 +4561,7 @@ dependencies = [
 [[package]]
 name = "string_wizard"
 version = "0.0.27"
-source = "git+https://github.com/rolldown/rolldown?branch=main#6e2d82f84a4201f3217f6879681a92aec8b07527"
+source = "git+https://github.com/rolldown/rolldown?branch=main#c1fd676694881a1798306641504948f78654bcb2"
 dependencies = [
  "memchr",
  "oxc_index",
@@ -4987,9 +4931,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-macros"
-version = "2.6.0"
+version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af407857209536a95c8e56f8231ef2c2e2aff839b22e07a1ffcbc617e9db9fa5"
+checksum = "5c55a2eff8b69ce66c84f85e1da1c233edc36ceb85a2058d11b0d6a3c7e7569c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5363,9 +5307,9 @@ dependencies = [
 
 [[package]]
 name = "unicode-width"
-version = "0.2.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fc81956842c57dac11422a97c3b8195a1ff727f06e85c84ed2e8aa277c9a0fd"
+checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 
 [[package]]
 name = "unicode-xid"
@@ -6304,9 +6248,9 @@ dependencies = [
 
 [[package]]
 name = "zlib-rs"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c745c48e1007337ed136dc99df34128b9faa6ed542d80a1c673cf55a6d7236c8"
+checksum = "3be3d40e40a133f9c916ee3f9f4fa2d9d63435b5fbe1bfc6d9dae0aa0ada1513"
 
 [[package]]
 name = "zmij"
