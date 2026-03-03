@@ -14,7 +14,7 @@ pre-commit:
       run: "! git diff --cached --name-only --diff-filter=ACR | grep -q '\\.js$'"
       fail_text: "Do not commit .js files — use TypeScript (.ts/.tsx) instead"
     oxlint:
-      run: npx oxlint --deny-warnings runtime/ packages/rex/src/
+      run: oxlint --deny-warnings runtime/ packages/rex/src/
       fail_text: "Fix oxlint warnings before committing"
     typecheck:
       run: cd runtime && npm run typecheck
@@ -22,6 +22,9 @@ pre-commit:
     test:
       run: cargo test
       fail_text: "Tests must pass before committing"
+    typecheck-fixtures:
+      run: scripts/typecheck-fixtures.sh
+      fail_text: "Fix TypeScript errors in fixtures before committing"
     coverage-ratchet:
       run: scripts/coverage-ratchet.sh
       fail_text: "Coverage dropped below the threshold in .coverage-threshold"
