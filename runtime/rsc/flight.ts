@@ -104,7 +104,11 @@ globalThis.__rex_render_flight = function(routeKey: string, propsJson: string): 
     _htmlResult = null;
 
     var bundlerConfig = globalThis.__rex_webpack_bundler_config || {};
-    var stream = __rex_renderToReadableStream(element, bundlerConfig);
+    var renderOptions: Record<string, unknown> = {};
+    if (globalThis.__rex_server_actions) {
+        renderOptions.serverManifest = bundlerConfig;
+    }
+    var stream = __rex_renderToReadableStream(element, bundlerConfig, renderOptions);
     _startReading(stream.getReader());
 
     if (_streamDone) {
@@ -135,7 +139,11 @@ globalThis.__rex_render_rsc_to_html = function(routeKey: string, propsJson: stri
     _htmlResult = null;
 
     var bundlerConfig = globalThis.__rex_webpack_bundler_config || {};
-    var stream = __rex_renderToReadableStream(element, bundlerConfig);
+    var renderOptions: Record<string, unknown> = {};
+    if (globalThis.__rex_server_actions) {
+        renderOptions.serverManifest = bundlerConfig;
+    }
+    var stream = __rex_renderToReadableStream(element, bundlerConfig, renderOptions);
     _startReading(stream.getReader());
 
     if (_htmlDone) {
@@ -184,5 +192,61 @@ globalThis.__rex_finalize_rsc_to_html = function(): string {
     var result = _htmlResult || JSON.stringify({ body: '', head: '', flight: _flightString || '' });
     _flightString = null;
     _htmlResult = null;
+    return result;
+};
+
+// --- Server Action Dispatch ---
+
+var _actionResult: string | null = null;
+var _actionDone = false;
+
+globalThis.__rex_call_server_action = function(actionId: string, argsJson: string): string {
+    var actions = globalThis.__rex_server_actions || {};
+    var fn = actions[actionId];
+    if (!fn) {
+        return JSON.stringify({ error: 'Server action not found: ' + actionId });
+    }
+
+    // Reset state
+    _actionResult = null;
+    _actionDone = false;
+
+    var args: unknown[];
+    try {
+        args = JSON.parse(argsJson);
+    } catch {
+        return JSON.stringify({ error: 'Invalid arguments JSON' });
+    }
+
+    try {
+        var result = fn.apply(null, args);
+        if (result && typeof result === 'object' && typeof result.then === 'function') {
+            // Async — store promise resolution
+            result.then(
+                function(val: unknown) {
+                    _actionResult = JSON.stringify({ result: val });
+                    _actionDone = true;
+                },
+                function(err: unknown) {
+                    _actionResult = JSON.stringify({ error: String(err) });
+                    _actionDone = true;
+                }
+            );
+            return '__REX_ACTION_ASYNC__';
+        }
+        return JSON.stringify({ result: result });
+    } catch (e) {
+        return JSON.stringify({ error: String(e) });
+    }
+};
+
+globalThis.__rex_resolve_action_pending = function(): "pending" | "done" {
+    return _actionDone ? 'done' : 'pending';
+};
+
+globalThis.__rex_finalize_action = function(): string {
+    var result = _actionResult || JSON.stringify({ error: 'No action result' });
+    _actionResult = null;
+    _actionDone = false;
     return result;
 };

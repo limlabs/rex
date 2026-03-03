@@ -6,6 +6,7 @@ pub mod embedded_runtime;
 pub mod manifest;
 pub mod rsc_bundler;
 pub mod rsc_graph;
+pub mod server_action_manifest;
 
 pub use bundler::build_bundles;
 pub use bundler::{

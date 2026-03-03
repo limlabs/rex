@@ -13,6 +13,8 @@ pub struct ModuleInfo {
     pub path: PathBuf,
     /// Whether this module has `"use client"` directive.
     pub is_client: bool,
+    /// Whether this module has `"use server"` directive.
+    pub is_server: bool,
     /// Resolved import paths from this module.
     pub imports: Vec<PathBuf>,
     /// Export names from this module.
@@ -35,6 +37,22 @@ impl ModuleGraph {
     pub fn server_modules(&self) -> Vec<&ModuleInfo> {
         self.modules.values().filter(|m| !m.is_client).collect()
     }
+
+    /// Return all modules that have `"use server"` directive.
+    pub fn server_action_modules(&self) -> Vec<&ModuleInfo> {
+        self.modules.values().filter(|m| m.is_server).collect()
+    }
+}
+
+/// Check if a source file has a `"use server"` directive.
+pub fn has_use_server_directive(source: &str, source_type: oxc_span::SourceType) -> bool {
+    let allocator = oxc_allocator::Allocator::default();
+    let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
+    parsed
+        .program
+        .directives
+        .iter()
+        .any(|d| d.directive.as_str() == "use server")
 }
 
 /// Check if a source file has a `"use client"` directive.
@@ -68,6 +86,19 @@ fn analyze_module(path: &Path, root: &Path) -> Result<ModuleInfo> {
         .directives
         .iter()
         .any(|d| d.directive.as_str() == "use client");
+
+    let is_server = parsed
+        .program
+        .directives
+        .iter()
+        .any(|d| d.directive.as_str() == "use server");
+
+    if is_client && is_server {
+        anyhow::bail!(
+            "Module {} has both \"use client\" and \"use server\" directives",
+            path.display()
+        );
+    }
 
     let mut imports = Vec::new();
     let mut exports = Vec::new();
@@ -123,6 +154,7 @@ fn analyze_module(path: &Path, root: &Path) -> Result<ModuleInfo> {
     Ok(ModuleInfo {
         path: path.to_path_buf(),
         is_client,
+        is_server,
         imports,
         exports,
     })
@@ -477,5 +509,127 @@ export function format(n: number) { return `Count: ${n}`; }
             !graph.modules.contains_key(&utils_canonical),
             "client-utils.tsx should not be in the server module graph"
         );
+    }
+
+    #[test]
+    fn detects_use_server_directive() {
+        let source = r#"
+"use server";
+
+export async function increment(n: number): Promise<number> {
+    return n + 1;
+}
+"#;
+        assert!(has_use_server_directive(source, oxc_span::SourceType::ts()));
+    }
+
+    #[test]
+    fn no_use_server_for_regular_module() {
+        let source = r#"
+export function add(a: number, b: number) { return a + b; }
+"#;
+        assert!(!has_use_server_directive(
+            source,
+            oxc_span::SourceType::ts()
+        ));
+    }
+
+    #[test]
+    fn use_server_must_be_directive() {
+        // "use server" as a regular string expression (not a directive)
+        let source = r#"
+const x = "use server";
+export function add(a: number, b: number) { return a + b; }
+"#;
+        assert!(!has_use_server_directive(
+            source,
+            oxc_span::SourceType::ts()
+        ));
+    }
+
+    #[test]
+    fn use_client_and_use_server_conflict() {
+        let dir = setup_temp_dir();
+        let root = dir.path();
+
+        fs::write(
+            root.join("conflict.tsx"),
+            "\"use client\";\n\"use server\";\nexport default function Foo() { return null; }\n",
+        )
+        .unwrap();
+
+        let entries = vec![root.join("conflict.tsx")];
+        let result = analyze_module_graph(&entries, root);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("\"use client\""));
+        assert!(err_msg.contains("\"use server\""));
+    }
+
+    #[test]
+    fn graph_walk_continues_through_use_server() {
+        let dir = setup_temp_dir();
+        let root = dir.path();
+
+        // Server page imports a "use server" actions module
+        fs::write(
+            root.join("page.tsx"),
+            "import { increment } from './actions';\nexport default function Page() { return null; }\n",
+        )
+        .unwrap();
+
+        // "use server" module imports a helper
+        fs::write(
+            root.join("actions.ts"),
+            "\"use server\";\nimport { db } from './db';\nexport async function increment(n: number) { return db.inc(n); }\n",
+        )
+        .unwrap();
+
+        // Server-only helper (should be in the graph because "use server" is server code)
+        fs::write(
+            root.join("db.ts"),
+            "export const db = { inc: (n: number) => n + 1 };\n",
+        )
+        .unwrap();
+
+        let entries = vec![root.join("page.tsx")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+
+        // All three modules should be in the graph
+        assert_eq!(graph.modules.len(), 3);
+
+        let actions_canonical = root.join("actions.ts").canonicalize().unwrap();
+        let actions = graph.modules.get(&actions_canonical).unwrap();
+        assert!(actions.is_server);
+        assert!(!actions.is_client);
+
+        let db_canonical = root.join("db.ts").canonicalize().unwrap();
+        assert!(graph.modules.contains_key(&db_canonical));
+    }
+
+    #[test]
+    fn server_action_modules_method() {
+        let dir = setup_temp_dir();
+        let root = dir.path();
+
+        fs::write(
+            root.join("page.tsx"),
+            "import { inc } from './actions';\nexport default function Page() { return null; }\n",
+        )
+        .unwrap();
+
+        fs::write(
+            root.join("actions.ts"),
+            "\"use server\";\nexport async function inc(n: number) { return n + 1; }\n",
+        )
+        .unwrap();
+
+        let entries = vec![root.join("page.tsx")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+
+        let sa_modules = graph.server_action_modules();
+        assert_eq!(sa_modules.len(), 1);
+        assert!(sa_modules[0].path.ends_with("actions.ts"));
+        assert!(sa_modules[0].exports.contains(&"inc".to_string()));
     }
 }

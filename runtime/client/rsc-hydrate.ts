@@ -16,6 +16,25 @@ import { createFromReadableStream, createFromFetch } from 'react-server-dom-webp
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
+// --- callServer: server action RPC ---
+// Must be defined before module loading since stubs reference it at module scope.
+function callServer(id: string, args: unknown[]): Promise<unknown> {
+  var manifest = window.__REX_MANIFEST__;
+  var buildId = manifest ? manifest.build_id : '';
+  return fetch('/_rex/action/' + buildId + '/' + id, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args),
+  }).then(function(r: Response) {
+    return r.json();
+  }).then(function(d: { result?: unknown; error?: string }) {
+    if (d.error) throw new Error(d.error);
+    return d.result;
+  });
+}
+
+(window as any).__REX_CALL_SERVER = callServer;
+
 // --- Client-side webpack shims ---
 // The actual __webpack_require__ and __webpack_chunk_load__ are set up by an
 // inline <script> in the HTML (before this module loads) because
@@ -115,7 +134,8 @@ function hydrateFromInlineData(): void {
         ssrManifest: {
           moduleMap: ssrManifest,
           moduleLoading: null
-        }
+        },
+        callServer: callServer
       })
     );
 
@@ -148,7 +168,8 @@ function navigateRsc(pathname: string): Promise<void> {
 
   var treePromise = Promise.resolve(
     createFromFetch(fetch(url), {
-      ssrManifest: { moduleMap: ssrManifest, moduleLoading: null }
+      ssrManifest: { moduleMap: ssrManifest, moduleLoading: null },
+      callServer: callServer
     })
   );
 

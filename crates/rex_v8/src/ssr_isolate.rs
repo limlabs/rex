@@ -36,6 +36,8 @@ pub struct SsrIsolate {
     rsc_to_html_fn: Option<v8::Global<v8::Function>>,
     mcp_call_fn: Option<v8::Global<v8::Function>>,
     mcp_list_fn: Option<v8::Global<v8::Function>>,
+    /// Server action dispatch function (app/ routes only)
+    server_action_fn: Option<v8::Global<v8::Function>>,
     /// Last successfully loaded bundle, used to restore state on failed reload.
     /// Uses `Arc<String>` to share memory across pool isolates instead of cloning.
     last_bundle: std::sync::Arc<String>,
@@ -295,6 +297,7 @@ impl SsrIsolate {
             rsc_to_html_fn,
             mcp_call_fn,
             mcp_list_fn,
+            server_action_fn: None,
             last_bundle: std::sync::Arc::new(server_bundle_js.to_string()),
         })
     }
@@ -322,6 +325,7 @@ impl SsrIsolate {
 
             self.rsc_flight_fn = v8_get_optional_fn!(scope, global, "__rex_render_flight");
             self.rsc_to_html_fn = v8_get_optional_fn!(scope, global, "__rex_render_rsc_to_html");
+            self.server_action_fn = v8_get_optional_fn!(scope, global, "__rex_call_server_action");
         }
 
         debug!("RSC bundles loaded into V8 context");
@@ -702,6 +706,81 @@ impl SsrIsolate {
         }
     }
 
+    /// Call __rex_call_server_action(actionId, argsJson) and return JSON response.
+    /// Handles async actions by pumping V8's microtask queue + fetch loop.
+    pub fn call_server_action(&mut self, action_id: &str, args_json: &str) -> Result<String> {
+        let action_fn = self
+            .server_action_fn
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Server actions not loaded"))?;
+
+        let result_str = {
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+            let func = v8::Local::new(scope, action_fn);
+            let undef = v8::undefined(scope);
+            let arg0 = v8::String::new(scope, action_id)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+            let arg1 = v8::String::new(scope, args_json)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+
+            let result = v8_call!(scope, func, undef.into(), &[arg0.into(), arg1.into()])
+                .map_err(|e| anyhow::anyhow!("Server action error: {e}"))?;
+
+            result.to_rust_string_lossy(scope)
+        };
+
+        if result_str == "__REX_ACTION_ASYNC__" {
+            // Run fetch loop + microtask pump for async server actions
+            crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
+
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            loop {
+                if std::time::Instant::now() > deadline {
+                    return Err(anyhow::anyhow!("Server action timed out after 30s"));
+                }
+
+                crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
+
+                let status = {
+                    v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+                    let result = v8_eval!(
+                        scope,
+                        "globalThis.__rex_resolve_action_pending()",
+                        "<action-resolve>"
+                    )
+                    .map_err(|e| anyhow::anyhow!("Server action resolve error: {e}"))?;
+                    result.to_rust_string_lossy(scope)
+                };
+
+                match status.as_str() {
+                    "done" => break,
+                    "pending" => {
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                        continue;
+                    }
+                    other => {
+                        return Err(anyhow::anyhow!(
+                            "Unexpected action resolve status: {}",
+                            other
+                        ));
+                    }
+                }
+            }
+
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+            let resolve_result = v8_eval!(
+                scope,
+                "globalThis.__rex_finalize_action()",
+                "<action-finalize>"
+            )
+            .map_err(|e| anyhow::anyhow!("Server action finalize error: {e}"))?;
+            Ok(resolve_result.to_rust_string_lossy(scope))
+        } else {
+            Ok(result_str)
+        }
+    }
+
     /// Reload the server bundle (for dev mode hot reload)
     pub fn reload(&mut self, server_bundle_js: &str) -> Result<()> {
         v8::scope_with_context!(scope, &mut self.isolate, &self.context);
@@ -744,6 +823,9 @@ impl SsrIsolate {
         // Re-lookup MCP tools (may be added/removed on reload)
         self.mcp_call_fn = v8_get_optional_fn!(scope, global, "__rex_call_mcp_tool");
         self.mcp_list_fn = v8_get_optional_fn!(scope, global, "__rex_list_mcp_tools");
+
+        // Re-lookup server action dispatch (may be added/removed on reload)
+        self.server_action_fn = v8_get_optional_fn!(scope, global, "__rex_call_server_action");
 
         self.last_bundle = std::sync::Arc::new(server_bundle_js.to_string());
         debug!("SSR isolate reloaded");
