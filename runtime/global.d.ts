@@ -60,6 +60,18 @@ declare global {
     file?: string;
   }
 
+  /** RSC module map entry */
+  interface RexRscModuleMapEntry {
+    chunk_url: string;
+    export_name: string;
+  }
+
+  /** RSC module map embedded in HTML */
+  interface RexRscModuleMap {
+    entries?: Record<string, RexRscModuleMapEntry>;
+    [refId: string]: RexRscModuleMapEntry | Record<string, RexRscModuleMapEntry> | undefined;
+  }
+
   interface Window {
     __REX_ROUTER?: RexRouter;
     __REX_MANIFEST__?: RexManifest;
@@ -71,7 +83,11 @@ declare global {
     __REX_NAVIGATING__?: boolean;
     __REX_RSC_NAVIGATE?: (pathname: string) => Promise<void>;
     __REX_RSC_INIT?: () => void;
+    __REX_RSC_PARSE_FLIGHT?: (flight: string) => ReactElement | null;
+    __REX_RSC_MODULE_MAP__?: RexRscModuleMap;
     __rexModuleCache?: Record<string, unknown>;
+    React?: typeof React;
+    ReactDOM?: typeof import("react-dom/client");
   }
 
   // Server-side globals (V8 SSR environment)
@@ -81,6 +97,42 @@ declare global {
   var __rex_doc_head_elements: ReactElement[];
   var __rex_render_document: () => string;
   var __rex_document: { default?: React.ComponentType } | undefined;
+
+  // RSC server-side globals (V8 environment — set by virtual entry)
+  var __rex_createElement: typeof React.createElement;
+  var __rex_renderToReadableStream: (
+    element: ReactElement,
+    bundlerConfig: Record<string, unknown>,
+  ) => ReadableStream<Uint8Array>;
+  var __rex_createFromReadableStream: (
+    stream: ReadableStream<Uint8Array>,
+    options: { ssrManifest: { moduleMap: Record<string, unknown>; moduleLoading: null } },
+  ) => unknown;
+  var __rex_renderToString: (element: unknown) => string;
+
+  // RSC globalThis properties (V8 environment)
+  // eslint-disable-next-line no-var
+  var __rex_app_pages: Record<string, React.ComponentType>;
+  var __rex_app_layout_chains: Record<string, React.ComponentType[]>;
+  var __rex_webpack_bundler_config: Record<string, unknown>;
+  var __rex_webpack_ssr_manifest: Record<string, unknown>;
+  var __rex_client_modules__: Record<string, unknown>;
+  var __rex_ssr_modules__: Record<string, unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  var __webpack_require__: ((id: string) => any) & {
+    u?: (chunkId: string) => string;
+  };
+  var __webpack_chunk_load__: (chunkId: string) => Promise<void>;
+
+  // RSC flight/SSR public API (set by runtime scripts)
+  var __rex_render_flight: (routeKey: string, propsJson: string) => string;
+  var __rex_render_rsc_to_html: (routeKey: string, propsJson: string) => string;
+  var __rex_resolve_rsc_pending: () => "pending" | "done";
+  var __rex_finalize_rsc_flight: () => string;
+  var __rex_finalize_rsc_to_html: () => string;
+  var __rex_rsc_flight_to_html: (flightString: string) => string;
+  var __rex_resolve_ssr_pending: () => "pending" | "done";
+  var __rex_finalize_ssr: () => string;
 }
 
 export {};
