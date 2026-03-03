@@ -44,11 +44,10 @@ jobs:
       - name: TypeScript strict check
         run: cd runtime && npm run typecheck
 
-      - name: Install oxlint
-        run: curl -sSfL https://oxc.rs/install.sh | sh
-
-      - name: oxlint
-        run: oxlint --deny-warnings runtime/ packages/rex/src/
+      - uses: oxc-project/oxlint-action@latest
+        with:
+          deny-warnings: true
+          args: runtime/ packages/rex/src/
 
   test:
     name: Test & Coverage
