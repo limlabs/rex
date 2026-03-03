@@ -1,6 +1,6 @@
 mod tui;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use rex_build::build_bundles;
 use rex_core::{ProjectConfig, RexConfig};
@@ -122,7 +122,16 @@ async fn main() -> Result<()> {
 
             if tui_enabled {
                 let log_buffer = init_tui_tracing();
-                cmd_dev(root, port, true, Some(log_buffer)).await
+                let log_buffer_fallback = log_buffer.clone();
+                let result = cmd_dev(root, port, true, Some(log_buffer)).await;
+                if result.is_err() {
+                    // The TUI never started — dump buffered logs to stderr
+                    // so the user can see what happened before the error.
+                    for entry in log_buffer_fallback.snapshot() {
+                        eprintln!("[{}] {}", entry.level, entry.message);
+                    }
+                }
+                result
             } else {
                 init_plain_tracing();
                 cmd_dev(root, port, false, None).await
@@ -158,6 +167,12 @@ async fn cmd_dev(
     log_buffer: Option<LogBuffer>,
 ) -> Result<()> {
     let start = std::time::Instant::now();
+
+    // Bind the port early — fail fast on conflicts before the expensive build.
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .with_context(|| format!("failed to bind port {port} — is another server running?"))?;
 
     if !tui_enabled {
         print_mascot_header(env!("CARGO_PKG_VERSION"), "");
@@ -242,9 +257,6 @@ async fn cmd_dev(
     }
 
     let elapsed = start.elapsed();
-
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    let listener = tokio::net::TcpListener::bind(addr).await?;
 
     if tui_enabled {
         // Spawn the HTTP server as a background task
