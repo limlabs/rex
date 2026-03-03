@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0](https://github.com/limlabs/rex/compare/v0.8.0...v0.9.0) (2026-03-03)
+
+
+### Features
+
+* **build:** embed React for zero-config projects ([#42](https://github.com/limlabs/rex/issues/42)) ([310b73a](https://github.com/limlabs/rex/commit/310b73aac3f67916ab95f337842c0ceafebd2741))
+* **cli:** add `rex fmt` command using oxc_formatter ([#40](https://github.com/limlabs/rex/issues/40)) ([ec29bce](https://github.com/limlabs/rex/commit/ec29bce1f52008414b6db3b54f9ed5d246d26e72))
+
+
+### Bug Fixes
+
+* **build:** extract builtin React into project node_modules/ ([#47](https://github.com/limlabs/rex/issues/47)) ([ffd471c](https://github.com/limlabs/rex/commit/ffd471cd6b4612aa6174dea79a3b997dd2f6459c))
+* **cli:** include v8::console in default log filter ([#46](https://github.com/limlabs/rex/issues/46)) ([4d77b45](https://github.com/limlabs/rex/commit/4d77b4588d9330c46635b85000256cc7bec48eb3))
+
 ## [0.8.0](https://github.com/limlabs/rex/compare/v0.7.0...v0.8.0) (2026-03-03)
 
 
