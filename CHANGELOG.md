@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.1](https://github.com/limlabs/rex/compare/v0.7.0...v0.7.1) (2026-03-03)
+
+
+### Bug Fixes
+
+* **ci:** use RELEASE_PAT to trigger beta release workflow ([#38](https://github.com/limlabs/rex/issues/38)) ([1a55a54](https://github.com/limlabs/rex/commit/1a55a540ff0c5ad54c62325c3c00bf755434fa50))
+* **cli:** show logs on TUI startup failure ([#33](https://github.com/limlabs/rex/issues/33)) ([2c041d6](https://github.com/limlabs/rex/commit/2c041d65c9a76ec9a9d18cdfe126a9703f4b2d3d))
+* remove broken WorktreeCreate hook ([#31](https://github.com/limlabs/rex/issues/31)) ([02506c3](https://github.com/limlabs/rex/commit/02506c34e342180a9c2230c37b25ae659cdf5ae6))
+* replace npx oxlint with direct binary ([#37](https://github.com/limlabs/rex/issues/37)) ([e591502](https://github.com/limlabs/rex/commit/e591502a34468a848472fd56e3db355d53f6afca))
+* resolve dependabot security vulnerabilities ([#36](https://github.com/limlabs/rex/issues/36)) ([c0c7dcc](https://github.com/limlabs/rex/commit/c0c7dcc1e72e2cc360b8497f779a9133d1d7016b))
+
 ## [0.7.0](https://github.com/limlabs/rex/compare/v0.6.0...v0.7.0) (2026-03-02)
 
 
