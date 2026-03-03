@@ -10,11 +10,19 @@
 
 ## Git Identity
 
-At the start of every session, configure the bot identity for commits and pushes. The PAT is stored in 1Password and read via the `op` CLI:
+At the start of every session, configure the bot identity for commits and pushes. The PAT is stored in 1Password and read via the `op` CLI.
+
+**IMPORTANT: Never embed the PAT value directly in commands or git config.** The token must only live in a credentials file to prevent it from leaking into chat output.
 
 ```bash
-REX_PAT="$(op read 'op://claude/ClaudeLiminal-GitHub/pat')"
-git config --local credential.helper '!f() { echo "username=x-access-token"; echo "password='"$REX_PAT"'"; }; f'
+# Step 1: Read PAT and write to a credentials file (single command to avoid leaking the value)
+op read 'op://claude/ClaudeLiminal-GitHub/pat' | xargs -I{} sh -c 'echo "https://x-access-token:{}@github.com" > "$HOME/.rex-git-credentials" && chmod 600 "$HOME/.rex-git-credentials"'
+
+# Step 2: Configure git to use the file-based credential store
+git config --local credential.helper "store --file=$HOME/.rex-git-credentials"
+
+# Step 3: Export GH_TOKEN for gh CLI (read from the credentials file)
+export GH_TOKEN="$(sed -n 's|https://x-access-token:\(.*\)@github.com|\1|p' "$HOME/.rex-git-credentials")"
 ```
 
 If `op` is not available or fails, warn the user and continue without bot identity. Do not commit or push until the identity is configured.
@@ -28,7 +36,7 @@ git commit --author="claude-liminal <264858718+claude-liminal@users.noreply.gith
 When using `gh` CLI (PRs, issues), pass `GH_TOKEN`:
 
 ```bash
-GH_TOKEN="$REX_PAT" gh pr create ...
+GH_TOKEN="$GH_TOKEN" gh pr create ...
 ```
 
 ## Conventional Commits
