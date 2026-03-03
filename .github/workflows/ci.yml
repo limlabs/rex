@@ -47,8 +47,10 @@ jobs:
       - name: TypeScript strict check (fixtures)
         run: scripts/typecheck-fixtures.sh
 
-      - name: oxlint
-        run: npx oxlint --deny-warnings runtime/ packages/rex/src/
+      - uses: oxc-project/oxlint-action@latest
+        with:
+          deny-warnings: true
+          args: runtime/ packages/rex/src/
 
   test:
     name: Test & Coverage
