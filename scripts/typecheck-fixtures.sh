@@ -1,14 +1,15 @@
 #!/bin/bash
-# Runs tsc --noEmit (strict mode) on each Rex fixture that has a tsconfig.json.
-# Skips nextjs-app-router (third-party reference implementation).
+# Runs tsc --noEmit (strict mode) on Rex fixtures.
+#
+# Usage:
+#   scripts/typecheck-fixtures.sh              # check all fixtures
+#   scripts/typecheck-fixtures.sh fixtures/basic  # check one fixture
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 FIXTURES_DIR="$ROOT/fixtures"
-
 SKIP=("nextjs-app-router")
-FAILED=()
 
 # Ensure packages/rex has its dependencies installed (fixtures resolve
 # rex source files via path aliases and need @types/react available).
@@ -18,36 +19,51 @@ if [[ ! -d "$REX_PKG/node_modules" ]]; then
   (cd "$REX_PKG" && npm install --ignore-scripts --no-audit --no-fund)
 fi
 
-for dir in "$FIXTURES_DIR"/*/; do
+check_fixture() {
+  local dir="$1"
+  local name
   name="$(basename "$dir")"
 
-  # Skip excluded fixtures
-  for skip in "${SKIP[@]}"; do
-    if [[ "$name" == "$skip" ]]; then
-      continue 2
-    fi
-  done
-
-  # Only check fixtures that have a tsconfig.json
   if [[ ! -f "$dir/tsconfig.json" ]]; then
-    continue
+    return 0
   fi
 
   echo "--- Checking $name ---"
 
-  # Install deps if node_modules is missing
   if [[ ! -d "$dir/node_modules" ]]; then
     echo "  Installing dependencies..."
     (cd "$dir" && npm install --ignore-scripts --no-audit --no-fund) || {
       echo "  WARN: npm install failed for $name, skipping"
-      continue
+      return 0
     }
   fi
 
-  # Run tsc --noEmit
   if (cd "$dir" && npx tsc --noEmit); then
     echo "  OK"
+    return 0
   else
+    return 1
+  fi
+}
+
+# Single fixture mode
+if [[ $# -ge 1 ]]; then
+  dir="$(cd "$1" && pwd)"
+  check_fixture "$dir"
+  exit $?
+fi
+
+# All fixtures mode
+FAILED=()
+
+for dir in "$FIXTURES_DIR"/*/; do
+  name="$(basename "$dir")"
+
+  for skip in "${SKIP[@]}"; do
+    [[ "$name" == "$skip" ]] && continue 2
+  done
+
+  if ! check_fixture "$dir"; then
     FAILED+=("$name")
   fi
 done
