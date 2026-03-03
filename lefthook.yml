@@ -14,7 +14,7 @@ pre-commit:
       run: "! git diff --cached --name-only --diff-filter=ACR | grep -q '\\.js$'"
       fail_text: "Do not commit .js files — use TypeScript (.ts/.tsx) instead"
     oxlint:
-      run: npx oxlint --deny-warnings runtime/ packages/rex/src/
+      run: oxlint --deny-warnings runtime/ packages/rex/src/
       fail_text: "Fix oxlint warnings before committing"
     test:
       run: cargo test
