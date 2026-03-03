@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/limlabs/rex/compare/v0.9.0...v0.9.1) (2026-03-03)
+
+
+### Bug Fixes
+
+* **ci:** prevent beta release double-trigger on Cargo.lock update ([#48](https://github.com/limlabs/rex/issues/48)) ([462cb18](https://github.com/limlabs/rex/commit/462cb184fc68815de8dea480c82a4b66e79fc4bb))
+
 ## [0.9.0](https://github.com/limlabs/rex/compare/v0.8.0...v0.9.0) (2026-03-03)
 
 
