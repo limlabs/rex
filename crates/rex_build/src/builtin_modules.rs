@@ -7,8 +7,8 @@ use tracing::info;
 /// React version embedded in the binary.
 pub const EMBEDDED_REACT_VERSION: &str = "19.2.4";
 
-/// Embedded vendor/node_modules/ directory, baked into the binary at compile time.
-static VENDOR_NODE_MODULES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../vendor/node_modules");
+/// Embedded node_modules/ directory, downloaded by build.rs and baked into the binary.
+static VENDOR_NODE_MODULES: Dir<'_> = include_dir!("$OUT_DIR/node_modules");
 
 /// Returns `true` if a `package.json` exists in the project root.
 pub fn has_package_json(project_root: &Path) -> bool {
