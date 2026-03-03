@@ -173,6 +173,6 @@ async fn router_js_handler() -> impl axum::response::IntoResponse {
 async fn rsc_runtime_js_handler() -> impl axum::response::IntoResponse {
     (
         [(axum::http::header::CONTENT_TYPE, "application/javascript")],
-        include_str!("../../../runtime/client/rsc-runtime.js"),
+        include_str!("../../../runtime/client/rsc-runtime.ts"),
     )
 }

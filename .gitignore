@@ -2,6 +2,7 @@
 .rex
 node_modules
 *.node
+crates/rex_napi/index.js
 *.swp
 *.swo
 .DS_Store
