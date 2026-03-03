@@ -91,6 +91,7 @@ const DEFAULT_LOG_FILTER: &str = "rex=info,v8::console=info";
 
 fn init_plain_tracing() {
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| DEFAULT_LOG_FILTER.into()),
