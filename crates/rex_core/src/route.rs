@@ -187,11 +187,27 @@ pub struct HeaderEntry {
 }
 
 /// Build-time configuration from the project config
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildConfig {
     /// Additional module aliases (e.g. `"@components": "./src/components"`)
     #[serde(default)]
     pub alias: HashMap<String, String>,
+    /// Generate sourcemaps for server and client bundles (default: true)
+    #[serde(default = "default_true")]
+    pub sourcemap: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for BuildConfig {
+    fn default() -> Self {
+        Self {
+            alias: HashMap::default(),
+            sourcemap: true,
+        }
+    }
 }
 
 impl BuildConfig {
