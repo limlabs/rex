@@ -13,8 +13,9 @@
 (function () {
   'use strict';
 
-  var React = window.React || (typeof require === 'function' && require('react'));
-  var ReactDOM = window.ReactDOM || (typeof require === 'function' && require('react-dom/client'));
+  var _require = (globalThis as Record<string, unknown>).require as ((id: string) => unknown) | undefined;
+  var React = window.React || (typeof _require === 'function' && _require('react')) as typeof import('react') | false;
+  var ReactDOM = window.ReactDOM || (typeof _require === 'function' && _require('react-dom/client')) as typeof import('react-dom/client') | false;
 
   if (!React || !ReactDOM) {
     console.warn('[Rex RSC] React/ReactDOM not found, RSC runtime disabled');
@@ -23,19 +24,26 @@
 
   // Module map: { entries: { refId -> { chunk_url, export_name } } }
   var rawMap = window.__REX_RSC_MODULE_MAP__ || {};
-  var moduleMap = rawMap.entries || rawMap;
+  var moduleMap = ((rawMap.entries || rawMap) as Record<string, RexRscModuleMapEntry>);
 
   // Cache of loaded client component modules
-  var moduleCache = {};
+  var moduleCache: Record<string, React.ComponentType> = {};
 
   // --- Flight Data Parser ---
 
-  function parseFlightData(flightString) {
+  interface FlightData {
+    models: Record<string, unknown>;
+    modules: Record<string, { id: string; name: string }>;
+    errors: Record<string, { message: string; stack?: string }>;
+    rootId: string | null;
+  }
+
+  function parseFlightData(flightString: string): FlightData {
     var rows = flightString.split('\n');
-    var models = {};   // id -> parsed JSON
-    var modules = {};  // id -> { id, name }
-    var errors = {};   // id -> { message, stack }
-    var rootId = null;
+    var models: Record<string, unknown> = {};
+    var modules: Record<string, { id: string; name: string }> = {};
+    var errors: Record<string, { message: string; stack?: string }> = {};
+    var rootId: string | null = null;
 
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i].trim();
@@ -63,9 +71,9 @@
         if (type === 'J') {
           models[id] = parsed;
         } else if (type === 'M') {
-          modules[id] = parsed;
+          modules[id] = parsed as { id: string; name: string };
         } else if (type === 'E') {
-          errors[id] = parsed;
+          errors[id] = parsed as { message: string; stack?: string };
         }
       } catch (e) {
         console.warn('[Rex RSC] Failed to parse row:', row, e);
@@ -79,7 +87,7 @@
 
   // Resolve a value from parsed flight data into a React element tree.
   // Client module references become lazy-loaded components.
-  function resolveValue(value, flight) {
+  function resolveValue(value: unknown, flight: FlightData): unknown {
     if (value === null || value === undefined) return value;
 
     // String reference: "$<id>" or "$M<id>" or "$E<id>"
@@ -109,17 +117,18 @@
 
     // Array
     if (Array.isArray(value)) {
-      return value.map(function (item) { return resolveValue(item, flight); });
+      return value.map(function (item: unknown) { return resolveValue(item, flight); });
     }
 
     // Element node: { t: type, p: props }
-    if (value && typeof value === 'object' && value.t !== undefined) {
-      var type = value.t;
-      var props = resolveProps(value.p || {}, flight);
+    if (value && typeof value === 'object' && 't' in value) {
+      var elementNode = value as { t: string; p?: Record<string, unknown> };
+      var nodeType = elementNode.t;
+      var props = resolveProps(elementNode.p || {}, flight);
 
       // Client module reference type: "$M<id>"
-      if (typeof type === 'string' && type.length > 2 && type[0] === '$' && type[1] === 'M') {
-        var moduleRefId = type.substring(2);
+      if (typeof nodeType === 'string' && nodeType.length > 2 && nodeType[0] === '$' && nodeType[1] === 'M') {
+        var moduleRefId = nodeType.substring(2);
         var mod = flight.modules[moduleRefId];
         if (mod) {
           var Component = getClientComponent(mod.id, mod.name);
@@ -128,8 +137,8 @@
       }
 
       // HTML element
-      if (typeof type === 'string') {
-        return React.createElement(type, props);
+      if (typeof nodeType === 'string') {
+        return React.createElement(nodeType, props);
       }
 
       return null;
@@ -137,10 +146,10 @@
 
     // Plain object (props sub-object)
     if (typeof value === 'object') {
-      var result = {};
-      for (var key in value) {
+      var result: Record<string, unknown> = {};
+      for (var key in value as Record<string, unknown>) {
         if (Object.prototype.hasOwnProperty.call(value, key)) {
-          result[key] = resolveValue(value[key], flight);
+          result[key] = resolveValue((value as Record<string, unknown>)[key], flight);
         }
       }
       return result;
@@ -149,8 +158,8 @@
     return value;
   }
 
-  function resolveProps(props, flight) {
-    var resolved = {};
+  function resolveProps(props: Record<string, unknown>, flight: FlightData): Record<string, unknown> {
+    var resolved: Record<string, unknown> = {};
     for (var key in props) {
       if (!Object.prototype.hasOwnProperty.call(props, key)) continue;
       resolved[key] = resolveValue(props[key], flight);
@@ -159,23 +168,17 @@
   }
 
   // Resolve a module reference element: looks up the component, returns React element
-  function resolveModuleReference(modId, flight) {
+  function resolveModuleReference(modId: string, flight: FlightData): React.ComponentType | null {
     var mod = flight.modules[modId];
     if (!mod) return null;
 
-    // Find the corresponding J row that has this module as its type
-    // The J row contains { t: "$M<modId>", p: props }
-    // But we're being called from resolveValue when we encounter "$<jId>"
-    // where the J row IS { t: "$M<modId>", p: props }
-    // So this function is called when we see a raw "$M<id>" string reference
-    var Component = getClientComponent(mod.id, mod.name);
-    return Component;
+    return getClientComponent(mod.id, mod.name);
   }
 
   // --- Client Component Loading ---
 
   // Get (or lazy-load) a client component by reference ID and export name.
-  function getClientComponent(refId, exportName) {
+  function getClientComponent(refId: string, exportName: string): React.ComponentType {
     var cacheKey = refId + '#' + exportName;
 
     if (moduleCache[cacheKey]) {
@@ -185,7 +188,7 @@
     var entry = moduleMap[refId];
     if (!entry) {
       // Fallback: return a placeholder
-      var Placeholder = function (_props) {
+      var Placeholder: React.FC = function (_props) {
         return React.createElement('div', {
           'data-rsc-missing': refId,
           style: { border: '2px dashed red', padding: '8px' }
@@ -197,8 +200,8 @@
 
     // Create a lazy component that loads the chunk
     var LazyComponent = React.lazy(function () {
-      return import(entry.chunk_url).then(function (mod) {
-        var Component = exportName === 'default' ? mod.default : mod[exportName];
+      return import(entry.chunk_url).then(function (mod: Record<string, unknown>) {
+        var Component = (exportName === 'default' ? mod.default : mod[exportName]) as React.ComponentType | undefined;
         if (!Component) {
           Component = function () {
             return React.createElement('div', null, 'Export not found: ' + exportName);
@@ -216,7 +219,7 @@
 
   // --- Flight to React Tree ---
 
-  function flightToReactTree(flightString) {
+  function flightToReactTree(flightString: string): React.ReactElement | null {
     var flight = parseFlightData(flightString);
 
     if (!flight.rootId) {
@@ -230,14 +233,14 @@
       return null;
     }
 
-    return resolveValue(rootValue, flight);
+    return resolveValue(rootValue, flight) as React.ReactElement | null;
   }
 
   // --- Hydration ---
 
-  var rscRoot = null;
+  var rscRoot: ReturnType<typeof ReactDOM.hydrateRoot> | ReturnType<typeof ReactDOM.createRoot> | null = null;
 
-  function hydrateFromInlineData() {
+  function hydrateFromInlineData(): void {
     var dataEl = document.getElementById('__REX_RSC_DATA__');
     if (!dataEl) return;
 
@@ -264,7 +267,7 @@
 
   // --- Client Navigation ---
 
-  function navigateRsc(pathname) {
+  function navigateRsc(pathname: string): Promise<void> {
     var manifest = window.__REX_MANIFEST__;
     if (!manifest) return Promise.reject(new Error('No manifest'));
 
@@ -283,8 +286,7 @@
         rscRoot.render(wrapped);
       }
 
-      return tree;
-    });
+    }).then(function() { /* void */ });
   }
 
   // --- Public API ---

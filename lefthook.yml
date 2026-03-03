@@ -16,6 +16,9 @@ pre-commit:
     oxlint:
       run: oxlint --deny-warnings runtime/ packages/rex/src/
       fail_text: "Fix oxlint warnings before committing"
+    typecheck:
+      run: cd runtime && npm run typecheck
+      fail_text: "Fix TypeScript errors in runtime/"
     test:
       run: cargo test
       fail_text: "Tests must pass before committing"

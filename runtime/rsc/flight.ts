@@ -13,16 +13,16 @@
 //   - __rex_webpack_bundler_config: server-side bundler config for client refs
 
 // --- State ---
-var _chunks = [];
+var _chunks: (string | Uint8Array)[] = [];
 var _streamDone = false;
-var _flightString = null;
+var _flightString: string | null = null;
 var _wantHtml = false;
 var _htmlDone = false;
-var _htmlResult = null;
+var _htmlResult: string | null = null;
 
 // --- Helpers ---
 
-function _buildElement(routeKey, propsJson) {
+function _buildElement(routeKey: string, propsJson: string): React.ReactElement | null {
     var props = JSON.parse(propsJson);
     var Page = globalThis.__rex_app_pages[routeKey];
     if (!Page) return null;
@@ -32,14 +32,14 @@ function _buildElement(routeKey, propsJson) {
     // Build nested layout tree: Layout1(Layout2(Page))
     var element = __rex_createElement(Page, props);
     for (var i = layouts.length - 1; i >= 0; i--) {
-        element = __rex_createElement(layouts[i], { children: element });
+        element = __rex_createElement(layouts[i], { children: element } as React.Attributes & { children: React.ReactElement });
     }
     return element;
 }
 
-function _assembleChunks() {
+function _assembleChunks(): string {
     var decoder = new TextDecoder();
-    var parts = [];
+    var parts: string[] = [];
     for (var i = 0; i < _chunks.length; i++) {
         var c = _chunks[i];
         parts.push(typeof c === 'string' ? c : decoder.decode(c));
@@ -48,9 +48,9 @@ function _assembleChunks() {
     return parts.join('');
 }
 
-function _startReading(reader) {
-    function drain() {
-        reader.read().then(function(result) {
+function _startReading(reader: ReadableStreamDefaultReader<Uint8Array>): void {
+    function drain(): void {
+        reader.read().then(function(result: ReadableStreamReadResult<Uint8Array>) {
             if (result.done) {
                 _streamDone = true;
                 _flightString = _assembleChunks();
@@ -61,7 +61,7 @@ function _startReading(reader) {
                 _chunks.push(result.value);
                 drain();
             }
-        }, function(err) {
+        }, function(err: unknown) {
             _streamDone = true;
             // Encode error as flight data
             _flightString = '0:{"error":' + JSON.stringify(String(err)) + '}\n';
@@ -70,10 +70,10 @@ function _startReading(reader) {
     drain();
 }
 
-function _startHtmlPass() {
+function _startHtmlPass(): void {
     // Call the SSR bundle's flight-to-HTML function
     if (typeof globalThis.__rex_rsc_flight_to_html === 'function') {
-        var result = globalThis.__rex_rsc_flight_to_html(_flightString);
+        var result = globalThis.__rex_rsc_flight_to_html(_flightString!);
         if (result === '__REX_SSR_ASYNC__') {
             // SSR is async — __rex_resolve_rsc_pending will check
             return;
@@ -89,7 +89,7 @@ function _startHtmlPass() {
 
 // --- Public API: Flight-only render ---
 
-globalThis.__rex_render_flight = function(routeKey, propsJson) {
+globalThis.__rex_render_flight = function(routeKey: string, propsJson: string): string {
     var element = _buildElement(routeKey, propsJson);
     if (!element) {
         return '0:{"error":"Page not found: ' + routeKey + '"}\n';
@@ -108,7 +108,7 @@ globalThis.__rex_render_flight = function(routeKey, propsJson) {
     _startReading(stream.getReader());
 
     if (_streamDone) {
-        return _flightString;
+        return _flightString!;
     }
 
     return '__REX_RSC_ASYNC__';
@@ -116,7 +116,7 @@ globalThis.__rex_render_flight = function(routeKey, propsJson) {
 
 // --- Public API: Two-pass render (flight + HTML) ---
 
-globalThis.__rex_render_rsc_to_html = function(routeKey, propsJson) {
+globalThis.__rex_render_rsc_to_html = function(routeKey: string, propsJson: string): string {
     var element = _buildElement(routeKey, propsJson);
     if (!element) {
         return JSON.stringify({
@@ -139,7 +139,7 @@ globalThis.__rex_render_rsc_to_html = function(routeKey, propsJson) {
     _startReading(stream.getReader());
 
     if (_htmlDone) {
-        return _htmlResult;
+        return _htmlResult!;
     }
 
     return '__REX_RSC_HTML_ASYNC__';
@@ -147,7 +147,7 @@ globalThis.__rex_render_rsc_to_html = function(routeKey, propsJson) {
 
 // --- Public API: Async resolution ---
 
-globalThis.__rex_resolve_rsc_pending = function() {
+globalThis.__rex_resolve_rsc_pending = function(): "pending" | "done" {
     // Phase 1: Stream still reading
     if (!_streamDone) return 'pending';
 
@@ -174,13 +174,13 @@ globalThis.__rex_resolve_rsc_pending = function() {
     return 'done';
 };
 
-globalThis.__rex_finalize_rsc_flight = function() {
+globalThis.__rex_finalize_rsc_flight = function(): string {
     var result = _flightString || '';
     _flightString = null;
     return result;
 };
 
-globalThis.__rex_finalize_rsc_to_html = function() {
+globalThis.__rex_finalize_rsc_to_html = function(): string {
     var result = _htmlResult || JSON.stringify({ body: '', head: '', flight: _flightString || '' });
     _flightString = null;
     _htmlResult = null;
