@@ -176,13 +176,6 @@ async fn cmd_dev(
 
     if !tui_enabled {
         print_mascot_header(env!("CARGO_PKG_VERSION"), "");
-    } else {
-        eprintln!(
-            "  {} {} {}",
-            emerald("rex"),
-            dim(env!("CARGO_PKG_VERSION")),
-            dim("— building...")
-        );
     }
 
     let rex = rex_server::Rex::new(rex_server::RexOptions {
