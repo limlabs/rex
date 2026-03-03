@@ -2,6 +2,7 @@
 name = "rex_build"
 version = "0.9.0" # x-release-please-version
 edition = "2021"
+publish = false
 
 [lints]
 workspace = true
