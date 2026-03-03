@@ -1,0 +1,17 @@
+{
+  "name": "@limlabs/rex-darwin-arm64",
+  "version": "0.7.0",
+  "description": "Rex CLI binary for macOS ARM64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/limlabs/rex.git"
+  },
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "preferUnplugged": true,
+  "files": ["bin/rex"],
+  "bin": {
+    "rex": "bin/rex"
+  }
+}

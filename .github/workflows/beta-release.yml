@@ -195,7 +195,7 @@ jobs:
 
   npm-publish:
     name: npm Publish (beta)
-    needs: check-release-pr
+    needs: [check-release-pr, build-linux, build-linux-arm64, build-macos-arm64, build-macos-x86_64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -205,16 +205,90 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-      - name: Install dependencies
-        run: cd packages/rex && npm install
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rex-*
+          path: artifacts
 
-      - name: Set beta version
+      - name: Inject binaries into platform packages
+        run: |
+          # darwin-arm64
+          mkdir -p packages/rex-darwin-arm64/bin
+          tar xzf artifacts/rex-macos-arm64/rex-macos-arm64.tar.gz -C packages/rex-darwin-arm64/bin
+          chmod +x packages/rex-darwin-arm64/bin/rex
+
+          # darwin-x64
+          mkdir -p packages/rex-darwin-x64/bin
+          tar xzf artifacts/rex-macos-x86_64/rex-macos-x86_64.tar.gz -C packages/rex-darwin-x64/bin
+          chmod +x packages/rex-darwin-x64/bin/rex
+
+          # linux-x64
+          mkdir -p packages/rex-linux-x64/bin
+          tar xzf artifacts/rex-linux-x86_64/rex-linux-x86_64.tar.gz -C packages/rex-linux-x64/bin
+          chmod +x packages/rex-linux-x64/bin/rex
+
+          # linux-arm64
+          mkdir -p packages/rex-linux-arm64/bin
+          tar xzf artifacts/rex-linux-arm64/rex-linux-arm64.tar.gz -C packages/rex-linux-arm64/bin
+          chmod +x packages/rex-linux-arm64/bin/rex
+
+      - name: Set beta versions
+        run: |
+          BETA_VERSION="${{ needs.check-release-pr.outputs.beta_version }}"
+          for pkg in packages/rex-darwin-arm64 packages/rex-darwin-x64 packages/rex-linux-x64 packages/rex-linux-arm64; do
+            cd "$pkg"
+            npm version "$BETA_VERSION" --no-git-tag-version
+            cd "$GITHUB_WORKSPACE"
+          done
+          cd packages/rex
+          npm version "$BETA_VERSION" --no-git-tag-version
+
+      - name: Rewrite optionalDependencies to beta version
+        run: |
+          BETA_VERSION="${{ needs.check-release-pr.outputs.beta_version }}"
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('packages/rex/package.json', 'utf8'));
+            for (const dep of Object.keys(pkg.optionalDependencies || {})) {
+              pkg.optionalDependencies[dep] = '$BETA_VERSION';
+            }
+            fs.writeFileSync('packages/rex/package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Publish platform packages (beta)
+        run: |
+          for pkg in packages/rex-darwin-arm64 packages/rex-darwin-x64 packages/rex-linux-x64 packages/rex-linux-arm64; do
+            echo "Publishing $pkg (beta)..."
+            cd "$pkg"
+            npm publish --access public --tag beta
+            cd "$GITHUB_WORKSPACE"
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Wait for platform packages on registry
+        run: |
+          BETA_VERSION="${{ needs.check-release-pr.outputs.beta_version }}"
+          for pkg in @limlabs/rex-darwin-arm64 @limlabs/rex-darwin-x64 @limlabs/rex-linux-x64 @limlabs/rex-linux-arm64; do
+            echo "Waiting for $pkg@$BETA_VERSION..."
+            for i in $(seq 1 30); do
+              if npm view "$pkg@$BETA_VERSION" version 2>/dev/null; then
+                echo "$pkg@$BETA_VERSION is available"
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "Timed out waiting for $pkg@$BETA_VERSION"
+                exit 1
+              fi
+              sleep 10
+            done
+          done
+
+      - name: Install dependencies & publish main package (beta)
         run: |
           cd packages/rex
-          npm version "${{ needs.check-release-pr.outputs.beta_version }}" --no-git-tag-version
-
-      - name: Publish
-        run: cd packages/rex && npm publish --access public --tag beta
+          npm install
+          npm publish --access public --tag beta
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

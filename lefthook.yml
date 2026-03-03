@@ -11,7 +11,7 @@ pre-commit:
       run: cargo clippy --all-targets -- -D warnings
       fail_text: "Fix clippy warnings before committing"
     no-js:
-      run: "! git diff --cached --name-only --diff-filter=ACR | grep -q '\\.js$'"
+      run: "! git diff --cached --name-only --diff-filter=ACR | grep '\\.js$' | grep -v '^packages/rex/bin/' | grep -q ."
       fail_text: "Do not commit .js files — use TypeScript (.ts/.tsx) instead"
     oxlint:
       run: oxlint --deny-warnings runtime/ packages/rex/src/
