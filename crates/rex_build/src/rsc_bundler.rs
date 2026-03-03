@@ -269,11 +269,11 @@ async fn build_rsc_server_bundle(
     ));
 
     // RSC runtime: flight protocol using React's renderToReadableStream
-    let flight_runtime = include_str!("../../../runtime/rsc/flight.js");
+    let flight_runtime = include_str!("../../../runtime/rsc/flight.ts");
     entry.push_str("\n// --- RSC Flight Runtime ---\n");
     entry.push_str(flight_runtime);
 
-    let entry_path = entries_dir.join("rsc-server-entry.js");
+    let entry_path = entries_dir.join("rsc-server-entry.ts");
     fs::write(&entry_path, &entry)?;
 
     // CSS → empty module
@@ -290,7 +290,7 @@ async fn build_rsc_server_bundle(
     }
 
     // V8 polyfills + webpack shims as banner
-    let webpack_shims = include_str!("../../../runtime/rsc/webpack-shims.js");
+    let webpack_shims = include_str!("../../../runtime/rsc/webpack-shims.ts");
     let banner = format!("{}\n{}", crate::bundler::V8_POLYFILLS, webpack_shims);
 
     // Minify production builds
@@ -434,11 +434,11 @@ async fn build_rsc_ssr_bundle(
     ));
 
     // SSR pass runtime
-    let ssr_runtime = include_str!("../../../runtime/rsc/ssr-pass.js");
+    let ssr_runtime = include_str!("../../../runtime/rsc/ssr-pass.ts");
     entry.push_str("\n// --- RSC SSR Pass Runtime ---\n");
     entry.push_str(ssr_runtime);
 
-    let entry_path = entries_dir.join("rsc-ssr-entry.js");
+    let entry_path = entries_dir.join("rsc-ssr-entry.ts");
     fs::write(&entry_path, &entry)?;
 
     // CSS → empty module
@@ -446,7 +446,7 @@ async fn build_rsc_ssr_bundle(
     module_types.insert(".css".to_string(), rolldown::ModuleType::Empty);
 
     // V8 polyfills + webpack shims as banner
-    let webpack_shims = include_str!("../../../runtime/rsc/webpack-shims.js");
+    let webpack_shims = include_str!("../../../runtime/rsc/webpack-shims.ts");
     let banner = format!("{}\n{}", crate::bundler::V8_POLYFILLS, webpack_shims);
 
     // Minify production builds
@@ -541,7 +541,7 @@ async fn build_rsc_client_bundles(
     let entries_dir = output_dir.join("_rsc_client_entries");
     fs::create_dir_all(&entries_dir)?;
 
-    let hydrate_code = include_str!("../../../runtime/client/rsc-hydrate.js");
+    let hydrate_code = include_str!("../../../runtime/client/rsc-hydrate.ts");
     let hydrate_path = entries_dir.join("__rsc_hydrate.js");
     fs::write(&hydrate_path, hydrate_code)?;
 
@@ -780,7 +780,7 @@ fn sanitize_filename(path: &str) -> String {
         .to_string()
 }
 
-// The RSC runtime is now loaded from `runtime/rsc/flight.js` via `include_str!`.
+// The RSC runtime is now loaded from `runtime/rsc/flight.ts` via `include_str!`.
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
