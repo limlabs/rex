@@ -26,11 +26,16 @@ axum = { workspace = true }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 futures = { workspace = true }
+oxc_formatter = { workspace = true }
+oxc_allocator = { git = "https://github.com/oxc-project/oxc", branch = "main" }
+oxc_parser = { git = "https://github.com/oxc-project/oxc", branch = "main" }
+oxc_span = { git = "https://github.com/oxc-project/oxc", branch = "main" }
+rayon = { workspace = true }
 
 [build-dependencies]
-oxc_allocator = "0.115"
-oxc_codegen = "0.115"
-oxc_parser = "0.115"
-oxc_semantic = "0.115"
-oxc_span = "0.115"
-oxc_transformer = "0.115"
+oxc_allocator = { git = "https://github.com/oxc-project/oxc", branch = "main" }
+oxc_codegen = { git = "https://github.com/oxc-project/oxc", branch = "main" }
+oxc_parser = { git = "https://github.com/oxc-project/oxc", branch = "main" }
+oxc_semantic = { git = "https://github.com/oxc-project/oxc", branch = "main" }
+oxc_span = { git = "https://github.com/oxc-project/oxc", branch = "main" }
+oxc_transformer = { git = "https://github.com/oxc-project/oxc", branch = "main" }

@@ -2,11 +2,13 @@ mod tui;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use rayon::prelude::*;
 use rex_build::build_bundles;
 use rex_core::{ProjectConfig, RexConfig};
 use rex_router::scan_project;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::{debug, info};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -85,6 +87,17 @@ enum Commands {
         /// Project name (creates a new directory)
         name: String,
     },
+
+    /// Format source files with oxfmt
+    Fmt {
+        /// Project root directory
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+
+        /// Check formatting without writing (exits with error if unformatted)
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn init_plain_tracing() {
@@ -156,6 +169,10 @@ async fn main() -> Result<()> {
         Commands::Init { name } => {
             init_plain_tracing();
             cmd_init(name)
+        }
+        Commands::Fmt { root, check } => {
+            init_plain_tracing();
+            cmd_fmt(root, check)
         }
     }
 }
@@ -623,6 +640,209 @@ fn cmd_typecheck(root: PathBuf, extra_args: Vec<String>) -> Result<()> {
     }
 
     std::process::exit(status.code().unwrap_or(1));
+}
+
+fn cmd_fmt(root: PathBuf, check: bool) -> Result<()> {
+    let root = std::fs::canonicalize(&root)?;
+    let files = discover_source_files(&root);
+
+    if files.is_empty() {
+        eprintln!();
+        eprintln!("  {} {}", dim("◆ rex fmt"), dim("(oxfmt)"));
+        eprintln!();
+        eprintln!(
+            "  {} {}",
+            dim("No source files found in"),
+            dim(&root.display().to_string())
+        );
+        eprintln!();
+        return Ok(());
+    }
+
+    eprintln!();
+    eprintln!("  {} {}", magenta_bold("◆ rex fmt"), dim("(oxfmt)"));
+    eprintln!();
+
+    let options = oxc_formatter::FormatOptions {
+        quote_style: oxc_formatter::QuoteStyle::Single,
+        ..Default::default()
+    };
+
+    let changed_count = AtomicUsize::new(0);
+    let error_count = AtomicUsize::new(0);
+    let unformatted: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+    files.par_iter().for_each(|path| {
+        let source = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("  {} {}: {e}", dim("skip"), path.display());
+                error_count.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+        };
+
+        let source_type = match oxc_span::SourceType::from_path(path) {
+            Ok(st) => st,
+            Err(_) => {
+                return;
+            }
+        };
+
+        let allocator = oxc_allocator::Allocator::default();
+        let parse_options = oxc_parser::ParseOptions {
+            preserve_parens: false,
+            ..Default::default()
+        };
+        let parsed = oxc_parser::Parser::new(&allocator, &source, source_type)
+            .with_options(parse_options)
+            .parse();
+
+        if !parsed.errors.is_empty() {
+            let rel = path.strip_prefix(&root).unwrap_or(path);
+            eprintln!("  {} {} (parse error)", dim("skip"), rel.display());
+            error_count.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+
+        let formatted =
+            oxc_formatter::Formatter::new(&allocator, options.clone()).build(&parsed.program);
+
+        if formatted != source {
+            if check {
+                if let Ok(mut list) = unformatted.lock() {
+                    list.push(path.clone());
+                }
+            } else {
+                match std::fs::write(path, &formatted) {
+                    Ok(()) => {
+                        changed_count.fetch_add(1, Ordering::Relaxed);
+                        let rel = path.strip_prefix(&root).unwrap_or(path);
+                        eprintln!("  {} {}", dim("fmt"), rel.display());
+                    }
+                    Err(e) => {
+                        eprintln!("  {} {}: {e}", dim("error"), path.display());
+                        error_count.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
+        }
+    });
+
+    let changed = changed_count.load(Ordering::Relaxed);
+    let errors = error_count.load(Ordering::Relaxed);
+
+    if check {
+        let unformatted = unformatted.into_inner().unwrap_or_default();
+        if unformatted.is_empty() {
+            eprintln!(
+                "  {} {}",
+                green_bold("✓"),
+                green_bold("All files formatted")
+            );
+            eprintln!();
+            Ok(())
+        } else {
+            for path in &unformatted {
+                let rel = path.strip_prefix(&root).unwrap_or(path);
+                eprintln!("  {} {}", dim("unformatted"), rel.display());
+            }
+            eprintln!();
+            eprintln!(
+                "  {} {}",
+                bold(&format!("{} file(s) need formatting", unformatted.len())),
+                dim("(run `rex fmt` to fix)")
+            );
+            eprintln!();
+            std::process::exit(1);
+        }
+    } else {
+        if changed == 0 && errors == 0 {
+            eprintln!(
+                "  {} {}",
+                green_bold("✓"),
+                green_bold("All files formatted")
+            );
+        } else if changed > 0 {
+            eprintln!();
+            eprintln!(
+                "  {} {}",
+                green_bold("✓"),
+                green_bold(&format!("Formatted {changed} file(s)"))
+            );
+        }
+        if errors > 0 {
+            eprintln!(
+                "  {} {}",
+                dim("⚠"),
+                dim(&format!("{errors} file(s) skipped"))
+            );
+        }
+        eprintln!();
+        Ok(())
+    }
+}
+
+fn discover_source_files(root: &std::path::Path) -> Vec<PathBuf> {
+    let extensions: &[&str] = &["ts", "tsx", "js", "jsx"];
+    let skip_dirs: &[&str] = &["node_modules", ".rex", ".git", "dist", "target", ".next"];
+
+    let mut files = Vec::new();
+
+    // Scan pages/ and styles/ directories
+    let scan_dirs = ["pages", "styles", "components", "lib", "utils", "src"];
+    for dir_name in &scan_dirs {
+        let dir = root.join(dir_name);
+        if dir.is_dir() {
+            walk_dir(&dir, extensions, skip_dirs, &mut files);
+        }
+    }
+
+    // Also pick up root-level config files (e.g., next.config.js)
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if extensions.contains(&ext) {
+                        files.push(path);
+                    }
+                }
+            }
+        }
+    }
+
+    files.sort();
+    files.dedup();
+    files
+}
+
+fn walk_dir(
+    dir: &std::path::Path,
+    extensions: &[&str],
+    skip_dirs: &[&str],
+    files: &mut Vec<PathBuf>,
+) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !skip_dirs.contains(&name) {
+                walk_dir(&path, extensions, skip_dirs, files);
+            }
+        } else if path.is_file() {
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                if extensions.contains(&ext) {
+                    files.push(path);
+                }
+            }
+        }
+    }
 }
 
 fn find_oxlint(root: &std::path::Path) -> Option<PathBuf> {

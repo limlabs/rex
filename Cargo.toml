@@ -45,6 +45,12 @@ toml = "0.8"
 # CLI
 clap = { version = "4", features = ["derive"] }
 
+# OXC formatter (not published to crates.io)
+oxc_formatter = { git = "https://github.com/oxc-project/oxc", branch = "main" }
+
+# Parallelism
+rayon = "1"
+
 # Error handling
 thiserror = "2"
 anyhow = "1"
