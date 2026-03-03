@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.8.0](https://github.com/limlabs/rex/compare/v0.7.0...v0.8.0) (2026-03-03)
+
+
+### Features
+
+* **build:** embed runtime files and distribute platform binaries via npm ([#44](https://github.com/limlabs/rex/issues/44)) ([c3e4c94](https://github.com/limlabs/rex/commit/c3e4c9469efe4f0718d7143d85bd18f21af0535f))
+* **build:** enable sourcemap generation ([#34](https://github.com/limlabs/rex/issues/34)) ([12e930f](https://github.com/limlabs/rex/commit/12e930fea99e33027405b2dd1f535cbe856b7ff9))
+* **ci:** add strict TypeScript type checking for fixtures ([#35](https://github.com/limlabs/rex/issues/35)) ([bee139b](https://github.com/limlabs/rex/commit/bee139b587ca6f9abe0aa35c02dfc9185c13b519))
+* platform-specific CLI binary distribution via npm ([#41](https://github.com/limlabs/rex/issues/41)) ([d1609b4](https://github.com/limlabs/rex/commit/d1609b489b10bf8a8d72edb1d852f1a217a7c922))
+* **v8:** polyfill path module for server bundles ([#30](https://github.com/limlabs/rex/issues/30)) ([1cb9dcd](https://github.com/limlabs/rex/commit/1cb9dcd31b0dd7657d61d389f40c1c3b400d4b23))
+
+
+### Bug Fixes
+
+* **ci:** use RELEASE_PAT to trigger beta release workflow ([#38](https://github.com/limlabs/rex/issues/38)) ([1a55a54](https://github.com/limlabs/rex/commit/1a55a540ff0c5ad54c62325c3c00bf755434fa50))
+* **cli:** show logs on TUI startup failure ([#33](https://github.com/limlabs/rex/issues/33)) ([2c041d6](https://github.com/limlabs/rex/commit/2c041d65c9a76ec9a9d18cdfe126a9703f4b2d3d))
+* **cli:** strip TypeScript annotations from HMR client ([#43](https://github.com/limlabs/rex/issues/43)) ([faa6421](https://github.com/limlabs/rex/commit/faa64213b29521cac577207bc9b51903158f81e3))
+* prevent PAT from leaking into chat output ([#39](https://github.com/limlabs/rex/issues/39)) ([f1e9437](https://github.com/limlabs/rex/commit/f1e94370343441147d4a947eccdb90f348b6224c))
+* remove broken WorktreeCreate hook ([#31](https://github.com/limlabs/rex/issues/31)) ([02506c3](https://github.com/limlabs/rex/commit/02506c34e342180a9c2230c37b25ae659cdf5ae6))
+* replace npx oxlint with direct binary ([#37](https://github.com/limlabs/rex/issues/37)) ([e591502](https://github.com/limlabs/rex/commit/e591502a34468a848472fd56e3db355d53f6afca))
+* resolve dependabot security vulnerabilities ([#36](https://github.com/limlabs/rex/issues/36)) ([c0c7dcc](https://github.com/limlabs/rex/commit/c0c7dcc1e72e2cc360b8497f779a9133d1d7016b))
+
 ## [0.7.0](https://github.com/limlabs/rex/compare/v0.6.0...v0.7.0) (2026-03-02)
 
 
