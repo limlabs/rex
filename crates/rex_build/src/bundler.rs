@@ -1667,7 +1667,8 @@ pub(crate) fn runtime_client_dir() -> Result<PathBuf> {
     if cwd_runtime.exists() {
         return Ok(cwd_runtime.canonicalize()?);
     }
-    anyhow::bail!("Could not find runtime/client directory")
+    // Distributed binary: extract embedded runtime files to temp dir
+    crate::embedded_runtime::client_dir()
 }
 
 /// Get the path to the server runtime files.
@@ -1682,7 +1683,8 @@ pub(crate) fn runtime_server_dir() -> Result<PathBuf> {
     if cwd_runtime.exists() {
         return Ok(cwd_runtime.canonicalize()?);
     }
-    anyhow::bail!("Could not find runtime/server directory")
+    // Distributed binary: extract embedded runtime files to temp dir
+    crate::embedded_runtime::server_dir()
 }
 
 // --- CSS Modules ---
