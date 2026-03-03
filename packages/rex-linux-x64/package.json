@@ -1,0 +1,14 @@
+{
+  "name": "@limlabs/rex-linux-x64",
+  "version": "0.7.0",
+  "description": "Rex CLI binary for Linux x64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/limlabs/rex.git"
+  },
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "preferUnplugged": true,
+  "files": ["bin/rex"]
+}
