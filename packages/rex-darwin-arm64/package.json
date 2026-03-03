@@ -10,8 +10,5 @@
   "os": ["darwin"],
   "cpu": ["arm64"],
   "preferUnplugged": true,
-  "files": ["bin/rex"],
-  "bin": {
-    "rex": "bin/rex"
-  }
+  "files": ["bin/rex"]
 }
