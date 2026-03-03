@@ -663,11 +663,6 @@ fn cmd_fmt(root: PathBuf, check: bool) -> Result<()> {
     eprintln!("  {} {}", magenta_bold("◆ rex fmt"), dim("(oxfmt)"));
     eprintln!();
 
-    let options = oxc_formatter::FormatOptions {
-        quote_style: oxc_formatter::QuoteStyle::Single,
-        ..Default::default()
-    };
-
     let changed_count = AtomicUsize::new(0);
     let error_count = AtomicUsize::new(0);
     let unformatted: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
@@ -682,31 +677,15 @@ fn cmd_fmt(root: PathBuf, check: bool) -> Result<()> {
             }
         };
 
-        let source_type = match oxc_span::SourceType::from_path(path) {
-            Ok(st) => st,
+        let formatted = match format_source(&source, path) {
+            Ok(f) => f,
             Err(_) => {
+                let rel = path.strip_prefix(&root).unwrap_or(path);
+                eprintln!("  {} {} (parse error)", dim("skip"), rel.display());
+                error_count.fetch_add(1, Ordering::Relaxed);
                 return;
             }
         };
-
-        let allocator = oxc_allocator::Allocator::default();
-        let parse_options = oxc_parser::ParseOptions {
-            preserve_parens: false,
-            ..Default::default()
-        };
-        let parsed = oxc_parser::Parser::new(&allocator, &source, source_type)
-            .with_options(parse_options)
-            .parse();
-
-        if !parsed.errors.is_empty() {
-            let rel = path.strip_prefix(&root).unwrap_or(path);
-            eprintln!("  {} {} (parse error)", dim("skip"), rel.display());
-            error_count.fetch_add(1, Ordering::Relaxed);
-            return;
-        }
-
-        let formatted =
-            oxc_formatter::Formatter::new(&allocator, options.clone()).build(&parsed.program);
 
         if formatted != source {
             if check {
@@ -1013,4 +992,220 @@ async fn hmr_client_handler() -> impl axum::response::IntoResponse {
         [(axum::http::header::CONTENT_TYPE, "application/javascript")],
         js,
     )
+}
+
+fn format_source(source: &str, path: &std::path::Path) -> Result<String> {
+    let source_type = oxc_span::SourceType::from_path(path)
+        .map_err(|e| anyhow::anyhow!("unsupported file type: {e}"))?;
+    let allocator = oxc_allocator::Allocator::default();
+    let parse_options = oxc_parser::ParseOptions {
+        preserve_parens: false,
+        ..Default::default()
+    };
+    let parsed = oxc_parser::Parser::new(&allocator, source, source_type)
+        .with_options(parse_options)
+        .parse();
+    if !parsed.errors.is_empty() {
+        anyhow::bail!("parse error");
+    }
+    let options = oxc_formatter::FormatOptions {
+        quote_style: oxc_formatter::QuoteStyle::Single,
+        ..Default::default()
+    };
+    Ok(oxc_formatter::Formatter::new(&allocator, options).build(&parsed.program))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn test_format_source_single_quotes() {
+        let input = "const x = \"hello\";\n";
+        let result = format_source(input, Path::new("test.ts")).unwrap();
+        assert!(
+            result.contains("'hello'"),
+            "expected single quotes, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_format_source_semicolons() {
+        let input = "const x = 1\n";
+        let result = format_source(input, Path::new("test.ts")).unwrap();
+        assert!(
+            result.contains("const x = 1;"),
+            "expected semicolons, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_format_source_tsx() {
+        let input = "export default function App() { return <div>hi</div>; }\n";
+        let result = format_source(input, Path::new("test.tsx")).unwrap();
+        assert!(result.contains("<div>"), "expected JSX preserved: {result}");
+    }
+
+    #[test]
+    fn test_format_source_idempotent() {
+        let input = "const x = 'hello';\n";
+        let first = format_source(input, Path::new("test.ts")).unwrap();
+        let second = format_source(&first, Path::new("test.ts")).unwrap();
+        assert_eq!(first, second, "formatting should be idempotent");
+    }
+
+    #[test]
+    fn test_format_source_parse_error() {
+        let input = "const = ;;\n";
+        let result = format_source(input, Path::new("test.ts"));
+        assert!(result.is_err(), "should fail on invalid syntax");
+    }
+
+    #[test]
+    fn test_discover_source_files_finds_pages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pages = tmp.path().join("pages");
+        std::fs::create_dir_all(&pages).unwrap();
+        std::fs::write(pages.join("index.tsx"), "export default function() {}").unwrap();
+        std::fs::write(pages.join("readme.md"), "# hello").unwrap();
+
+        let files = discover_source_files(tmp.path());
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("index.tsx"));
+    }
+
+    #[test]
+    fn test_discover_source_files_skips_node_modules() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nm = tmp.path().join("pages/node_modules/foo");
+        std::fs::create_dir_all(&nm).unwrap();
+        std::fs::write(nm.join("bar.ts"), "const x = 1").unwrap();
+
+        let files = discover_source_files(tmp.path());
+        assert!(files.is_empty(), "should skip node_modules");
+    }
+
+    #[test]
+    fn test_discover_source_files_root_configs() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("next.config.js"), "module.exports = {}").unwrap();
+        std::fs::write(tmp.path().join("package.json"), "{}").unwrap();
+
+        let files = discover_source_files(tmp.path());
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("next.config.js"));
+    }
+
+    #[test]
+    fn test_walk_dir_extensions() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.ts"), "").unwrap();
+        std::fs::write(tmp.path().join("b.tsx"), "").unwrap();
+        std::fs::write(tmp.path().join("c.css"), "").unwrap();
+        std::fs::write(tmp.path().join("d.js"), "").unwrap();
+
+        let extensions: &[&str] = &["ts", "tsx", "js", "jsx"];
+        let skip_dirs: &[&str] = &["node_modules"];
+        let mut files = Vec::new();
+        walk_dir(tmp.path(), extensions, skip_dirs, &mut files);
+
+        assert_eq!(files.len(), 3, "should find .ts, .tsx, .js but not .css");
+    }
+
+    #[test]
+    fn test_walk_dir_recursive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nested = tmp.path().join("a/b/c");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("deep.ts"), "").unwrap();
+
+        let extensions: &[&str] = &["ts"];
+        let skip_dirs: &[&str] = &[];
+        let mut files = Vec::new();
+        walk_dir(tmp.path(), extensions, skip_dirs, &mut files);
+
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("deep.ts"));
+    }
+
+    #[test]
+    fn test_cmd_fmt_write_mode() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pages = tmp.path().join("pages");
+        std::fs::create_dir_all(&pages).unwrap();
+        std::fs::write(pages.join("index.ts"), "const x = \"hello\"\n").unwrap();
+
+        cmd_fmt(tmp.path().to_path_buf(), false).unwrap();
+
+        let content = std::fs::read_to_string(pages.join("index.ts")).unwrap();
+        assert!(
+            content.contains("'hello'"),
+            "should have formatted to single quotes: {content}"
+        );
+        assert!(
+            content.contains(';'),
+            "should have added semicolons: {content}"
+        );
+    }
+
+    #[test]
+    fn test_cmd_fmt_check_mode_passes_when_formatted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pages = tmp.path().join("pages");
+        std::fs::create_dir_all(&pages).unwrap();
+
+        // Write already-formatted content
+        let formatted = format_source("const x = \"hello\";\n", Path::new("t.ts")).unwrap();
+        std::fs::write(pages.join("index.ts"), &formatted).unwrap();
+
+        // Check mode should pass (return Ok)
+        cmd_fmt(tmp.path().to_path_buf(), true).unwrap();
+    }
+
+    #[test]
+    fn test_cmd_fmt_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        // No source files — should succeed silently
+        cmd_fmt(tmp.path().to_path_buf(), false).unwrap();
+    }
+
+    #[test]
+    fn test_cmd_fmt_skips_parse_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pages = tmp.path().join("pages");
+        std::fs::create_dir_all(&pages).unwrap();
+        std::fs::write(pages.join("broken.ts"), "const = ;;\n").unwrap();
+        std::fs::write(pages.join("good.ts"), "const x = \"hello\"\n").unwrap();
+
+        // Should succeed despite one file having parse errors
+        cmd_fmt(tmp.path().to_path_buf(), false).unwrap();
+
+        // Broken file should be unchanged
+        let broken = std::fs::read_to_string(pages.join("broken.ts")).unwrap();
+        assert_eq!(broken, "const = ;;\n");
+
+        // Good file should be formatted
+        let good = std::fs::read_to_string(pages.join("good.ts")).unwrap();
+        assert!(good.contains("'hello'"));
+    }
+
+    #[test]
+    fn test_discover_multiple_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("pages")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("components")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("lib")).unwrap();
+        std::fs::write(tmp.path().join("pages/index.tsx"), "").unwrap();
+        std::fs::write(tmp.path().join("components/btn.tsx"), "").unwrap();
+        std::fs::write(tmp.path().join("lib/utils.ts"), "").unwrap();
+
+        let files = discover_source_files(tmp.path());
+        assert_eq!(
+            files.len(),
+            3,
+            "should find files in pages, components, lib"
+        );
+    }
 }

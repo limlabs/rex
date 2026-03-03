@@ -3969,6 +3969,7 @@ dependencies = [
  "rex_router",
  "rex_server",
  "rex_v8",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

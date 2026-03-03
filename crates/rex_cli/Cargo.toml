@@ -32,6 +32,9 @@ oxc_parser = { git = "https://github.com/oxc-project/oxc", branch = "main" }
 oxc_span = { git = "https://github.com/oxc-project/oxc", branch = "main" }
 rayon = { workspace = true }
 
+[dev-dependencies]
+tempfile = "3"
+
 [build-dependencies]
 oxc_allocator = { git = "https://github.com/oxc-project/oxc", branch = "main" }
 oxc_codegen = { git = "https://github.com/oxc-project/oxc", branch = "main" }
