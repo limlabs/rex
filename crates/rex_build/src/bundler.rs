@@ -9,6 +9,39 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, info, info_span, Instrument};
 
+/// Compute the `modules` resolve dirs for rolldown.
+///
+/// If the project has a `package.json`, use the standard `node_modules/` path.
+/// Otherwise, extract the embedded React packages and use those as the primary
+/// resolve directory (zero-config mode).
+pub(crate) fn resolve_modules_dirs(config: &RexConfig) -> Result<Vec<String>> {
+    if crate::builtin_modules::has_package_json(&config.project_root) {
+        Ok(vec![
+            config
+                .project_root
+                .join("node_modules")
+                .to_string_lossy()
+                .to_string(),
+            "node_modules".to_string(),
+        ])
+    } else {
+        let builtin_dir = crate::builtin_modules::ensure_builtin_modules(&config.project_root)?;
+        info!(
+            "Using built-in React {}",
+            crate::builtin_modules::EMBEDDED_REACT_VERSION
+        );
+        Ok(vec![
+            builtin_dir.to_string_lossy().to_string(),
+            config
+                .project_root
+                .join("node_modules")
+                .to_string_lossy()
+                .to_string(),
+            "node_modules".to_string(),
+        ])
+    }
+}
+
 /// Build result containing paths to generated bundles
 #[derive(Debug, Clone)]
 pub struct BuildResult {
@@ -49,6 +82,9 @@ pub async fn build_bundles(
     };
     let define = vec![("process.env.NODE_ENV".to_string(), node_env.to_string())];
 
+    // Resolve module directories once for all bundle steps
+    let module_dirs = resolve_modules_dirs(config)?;
+
     let has_pages = !scan.routes.is_empty() || scan.app.is_some();
 
     let (server_bundle_path, mut manifest) = if has_pages {
@@ -60,6 +96,7 @@ pub async fn build_bundles(
             &css_modules.page_overrides,
             &define,
             project_config,
+            &module_dirs,
         )
         .instrument(info_span!("build_server_bundle"));
         let client_fut = build_client_bundles(
@@ -71,6 +108,7 @@ pub async fn build_bundles(
             &define,
             &tailwind_outputs,
             project_config,
+            &module_dirs,
         )
         .instrument(info_span!("build_client_bundles"));
 
@@ -179,14 +217,7 @@ globalThis.__rex_resolve_api = function() {
                     ".jsx".to_string(),
                     ".js".to_string(),
                 ]),
-                modules: Some(vec![
-                    config
-                        .project_root
-                        .join("node_modules")
-                        .to_string_lossy()
-                        .to_string(),
-                    "node_modules".to_string(),
-                ]),
+                modules: Some(module_dirs.clone()),
                 alias: Some(vec![
                     (
                         "rex/head".to_string(),
@@ -850,6 +881,7 @@ async fn build_server_bundle(
     page_overrides: &HashMap<PathBuf, PathBuf>,
     define: &[(String, String)],
     project_config: &ProjectConfig,
+    module_dirs: &[String],
 ) -> Result<PathBuf> {
     let runtime_dir = runtime_server_dir()?;
 
@@ -1109,16 +1141,7 @@ async fn build_server_bundle(
                 ".jsx".to_string(),
                 ".js".to_string(),
             ]),
-            // Ensure runtime stubs (outside project tree) can resolve 'react'
-            // from the project's node_modules
-            modules: Some(vec![
-                config
-                    .project_root
-                    .join("node_modules")
-                    .to_string_lossy()
-                    .to_string(),
-                "node_modules".to_string(),
-            ]),
+            modules: Some(module_dirs.to_vec()),
             ..Default::default()
         }),
         ..Default::default()
@@ -1154,6 +1177,7 @@ async fn build_client_bundles(
     define: &[(String, String)],
     tailwind_outputs: &HashMap<PathBuf, PathBuf>,
     project_config: &ProjectConfig,
+    module_dirs: &[String],
 ) -> Result<AssetManifest> {
     let mut manifest = AssetManifest::new(build_id.to_string());
     let hash = &build_id[..8];
@@ -1358,16 +1382,7 @@ if (!window.__REX_NAVIGATING__) {{
                 ".jsx".to_string(),
                 ".js".to_string(),
             ]),
-            // Ensure runtime stubs (outside project tree) can resolve 'react'
-            // from the project's node_modules
-            modules: Some(vec![
-                config
-                    .project_root
-                    .join("node_modules")
-                    .to_string_lossy()
-                    .to_string(),
-                "node_modules".to_string(),
-            ]),
+            modules: Some(module_dirs.to_vec()),
             ..Default::default()
         }),
         ..Default::default()
@@ -3468,5 +3483,62 @@ export const config = { runtime: 'edge' }
 "#;
         let matchers = extract_middleware_matchers(source);
         assert!(matchers.is_empty());
+    }
+
+    /// Test that a project with no package.json and no node_modules can still
+    /// build using the embedded React packages (zero-config mode).
+    #[tokio::test]
+    async fn test_build_without_package_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        // NO setup_mock_node_modules, NO package.json — pure zero-config
+        let pages_dir = root.join("pages");
+        fs::create_dir_all(&pages_dir).unwrap();
+
+        let index_path = pages_dir.join("index.tsx");
+        fs::write(
+            &index_path,
+            "export default function Home() { return <div>Hello Zero Config</div>; }",
+        )
+        .unwrap();
+
+        let config = RexConfig::new(root).with_dev(true);
+        let scan = ScanResult {
+            routes: vec![Route {
+                pattern: "/".to_string(),
+                file_path: PathBuf::from("index.tsx"),
+                abs_path: index_path,
+                dynamic_segments: vec![],
+                page_type: PageType::Regular,
+                specificity: 10,
+            }],
+            api_routes: vec![],
+            app: None,
+            document: None,
+            error: None,
+            not_found: None,
+            middleware: None,
+            app_scan: None,
+            mcp_tools: vec![],
+        };
+
+        let result = build_bundles(&config, &scan, &ProjectConfig::default())
+            .await
+            .expect("build should succeed without package.json");
+
+        // Server bundle should exist and contain React
+        let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
+        assert!(
+            bundle.contains("__rex_render_page"),
+            "should have render function"
+        );
+        assert!(bundle.contains("__rex_pages"), "should init page registry");
+
+        // Client bundles should exist
+        assert!(
+            !result.manifest.pages.is_empty(),
+            "should have page entries in manifest"
+        );
     }
 }

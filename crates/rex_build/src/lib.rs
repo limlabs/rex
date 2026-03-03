@@ -1,3 +1,4 @@
+pub mod builtin_modules;
 pub mod bundler;
 pub mod client_manifest;
 pub mod dce;

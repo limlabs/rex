@@ -58,6 +58,8 @@ pub async fn build_rsc_bundles(
     fs::create_dir_all(&server_dir)?;
     fs::create_dir_all(&client_dir)?;
 
+    let module_dirs = crate::bundler::resolve_modules_dirs(config)?;
+
     // Collect all entry points from the app scan
     let mut entries: Vec<PathBuf> = Vec::new();
     entries.push(app_scan.root_layout.clone());
@@ -134,6 +136,7 @@ pub async fn build_rsc_bundles(
         build_id,
         define,
         &mut client_manifest,
+        &module_dirs,
     )
     .await?;
 
@@ -146,6 +149,7 @@ pub async fn build_rsc_bundles(
         &stub_aliases,
         define,
         &client_manifest,
+        &module_dirs,
     )
     .await?;
 
@@ -157,6 +161,7 @@ pub async fn build_rsc_bundles(
         build_id,
         define,
         &client_manifest,
+        &module_dirs,
     )
     .await?;
 
@@ -202,6 +207,7 @@ fn generate_client_stub(rel_path: &str, exports: &[String], build_id: &str) -> S
 /// This bundle includes all server components, with `"use client"` modules
 /// replaced by reference stubs via rolldown aliases.
 /// Uses `renderToReadableStream` from `react-server-dom-webpack/server`.
+#[allow(clippy::too_many_arguments)]
 async fn build_rsc_server_bundle(
     config: &RexConfig,
     app_scan: &AppScanResult,
@@ -210,6 +216,7 @@ async fn build_rsc_server_bundle(
     stub_aliases: &[(PathBuf, PathBuf)],
     define: &[(String, String)],
     client_manifest: &ClientReferenceManifest,
+    module_dirs: &[String],
 ) -> Result<PathBuf> {
     let entries_dir = output_dir.join("_rsc_server_entry");
     fs::create_dir_all(&entries_dir)?;
@@ -334,14 +341,7 @@ async fn build_rsc_server_bundle(
                 ".jsx".to_string(),
                 ".js".to_string(),
             ]),
-            modules: Some(vec![
-                config
-                    .project_root
-                    .join("node_modules")
-                    .to_string_lossy()
-                    .to_string(),
-                "node_modules".to_string(),
-            ]),
+            modules: Some(module_dirs.to_vec()),
             ..Default::default()
         }),
         ..Default::default()
@@ -376,6 +376,7 @@ async fn build_rsc_ssr_bundle(
     build_id: &str,
     define: &[(String, String)],
     client_manifest: &ClientReferenceManifest,
+    module_dirs: &[String],
 ) -> Result<PathBuf> {
     let project_root = config.project_root.canonicalize().unwrap_or_else(|e| {
         debug!(
@@ -488,14 +489,7 @@ async fn build_rsc_ssr_bundle(
                 ".jsx".to_string(),
                 ".js".to_string(),
             ]),
-            modules: Some(vec![
-                config
-                    .project_root
-                    .join("node_modules")
-                    .to_string_lossy()
-                    .to_string(),
-                "node_modules".to_string(),
-            ]),
+            modules: Some(module_dirs.to_vec()),
             ..Default::default()
         }),
         ..Default::default()
@@ -527,6 +521,7 @@ async fn build_rsc_client_bundles(
     build_id: &str,
     define: &[(String, String)],
     client_manifest: &mut ClientReferenceManifest,
+    module_dirs: &[String],
 ) -> Result<Vec<String>> {
     let client_boundaries = graph.client_boundary_modules();
     if client_boundaries.is_empty() {
@@ -625,14 +620,7 @@ async fn build_rsc_client_bundles(
                 ".jsx".to_string(),
                 ".js".to_string(),
             ]),
-            modules: Some(vec![
-                config
-                    .project_root
-                    .join("node_modules")
-                    .to_string_lossy()
-                    .to_string(),
-                "node_modules".to_string(),
-            ]),
+            modules: Some(module_dirs.to_vec()),
             ..Default::default()
         }),
         ..Default::default()
