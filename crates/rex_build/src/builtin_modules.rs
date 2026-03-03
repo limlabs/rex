@@ -15,15 +15,15 @@ pub fn has_package_json(project_root: &Path) -> bool {
     project_root.join("package.json").exists()
 }
 
-/// Extracts the embedded React packages to `.rex/builtin_modules/node_modules/`
-/// under the project root. Returns the path to the `node_modules/` directory.
+/// Extracts the embedded React packages to `node_modules/` under the project
+/// root so that both the bundler and the IDE/TypeScript language server can
+/// resolve them via normal `node_modules` lookup.
 ///
 /// Uses a version marker file to skip re-extraction when the embedded version
 /// matches what's already on disk.
 pub fn ensure_builtin_modules(project_root: &Path) -> Result<PathBuf> {
-    let builtin_dir = project_root.join(".rex").join("builtin_modules");
-    let node_modules_dir = builtin_dir.join("node_modules");
-    let version_file = builtin_dir.join(".rex-builtin-version");
+    let node_modules_dir = project_root.join("node_modules");
+    let version_file = node_modules_dir.join(".rex-builtin-version");
 
     // Skip extraction if version matches
     if version_file.exists() {
@@ -103,7 +103,7 @@ mod tests {
         assert!(nm.join("scheduler/package.json").exists());
 
         // Should have version marker
-        let version_file = tmp.path().join(".rex/builtin_modules/.rex-builtin-version");
+        let version_file = tmp.path().join("node_modules/.rex-builtin-version");
         assert_eq!(
             fs::read_to_string(version_file).unwrap().trim(),
             EMBEDDED_REACT_VERSION

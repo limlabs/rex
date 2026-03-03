@@ -11,35 +11,25 @@ use tracing::{debug, info, info_span, Instrument};
 
 /// Compute the `modules` resolve dirs for rolldown.
 ///
-/// If the project has a `package.json`, use the standard `node_modules/` path.
-/// Otherwise, extract the embedded React packages and use those as the primary
-/// resolve directory (zero-config mode).
+/// If the project has no `package.json`, extract the embedded React packages
+/// into the project's `node_modules/` first (zero-config mode). Either way
+/// rolldown resolves from the standard `node_modules/` path.
 pub(crate) fn resolve_modules_dirs(config: &RexConfig) -> Result<Vec<String>> {
-    if crate::builtin_modules::has_package_json(&config.project_root) {
-        Ok(vec![
-            config
-                .project_root
-                .join("node_modules")
-                .to_string_lossy()
-                .to_string(),
-            "node_modules".to_string(),
-        ])
-    } else {
-        let builtin_dir = crate::builtin_modules::ensure_builtin_modules(&config.project_root)?;
+    if !crate::builtin_modules::has_package_json(&config.project_root) {
+        crate::builtin_modules::ensure_builtin_modules(&config.project_root)?;
         info!(
             "Using built-in React {}",
             crate::builtin_modules::EMBEDDED_REACT_VERSION
         );
-        Ok(vec![
-            builtin_dir.to_string_lossy().to_string(),
-            config
-                .project_root
-                .join("node_modules")
-                .to_string_lossy()
-                .to_string(),
-            "node_modules".to_string(),
-        ])
     }
+    Ok(vec![
+        config
+            .project_root
+            .join("node_modules")
+            .to_string_lossy()
+            .to_string(),
+        "node_modules".to_string(),
+    ])
 }
 
 /// Build result containing paths to generated bundles
