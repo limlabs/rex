@@ -561,6 +561,268 @@ if (typeof globalThis.AbortController === 'undefined') {
         globalThis.DOMException.prototype = Object.create(Error.prototype);
     }
 }
+
+// Buffer polyfill for bare V8 — Node.js Buffer API (base64, hex, binary data)
+if (typeof globalThis.Buffer === 'undefined') {
+    var _B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    var _B64L = new Uint8Array(256);
+    for (var _bi = 0; _bi < _B64.length; _bi++) _B64L[_B64.charCodeAt(_bi)] = _bi;
+
+    function _mkBuf(u8) {
+        var keys = Object.getOwnPropertyNames(Buffer.prototype);
+        for (var i = 0; i < keys.length; i++) {
+            if (typeof Buffer.prototype[keys[i]] === 'function') {
+                u8[keys[i]] = Buffer.prototype[keys[i]];
+            }
+        }
+        u8._isBuffer = true;
+        return u8;
+    }
+
+    function _normEnc(enc) {
+        if (!enc) return 'utf8';
+        var s = String(enc).toLowerCase();
+        if (s === 'utf-8') return 'utf8';
+        return s;
+    }
+
+    function _fromStr(str, encoding) {
+        var enc = _normEnc(encoding);
+        if (enc === 'base64') {
+            var raw = str.replace(/[^A-Za-z0-9+\/]/g, '');
+            var len = (raw.length * 3) >> 2;
+            var buf = new Uint8Array(len);
+            var p = 0;
+            for (var i = 0; i < raw.length; i += 4) {
+                var a = _B64L[raw.charCodeAt(i)];
+                var b = _B64L[raw.charCodeAt(i + 1)];
+                var c = _B64L[raw.charCodeAt(i + 2)];
+                var d = _B64L[raw.charCodeAt(i + 3)];
+                buf[p++] = (a << 2) | (b >> 4);
+                if (i + 2 < raw.length) buf[p++] = ((b & 0x0F) << 4) | (c >> 2);
+                if (i + 3 < raw.length) buf[p++] = ((c & 0x03) << 6) | d;
+            }
+            return _mkBuf(buf.subarray(0, p));
+        }
+        if (enc === 'hex') {
+            var hlen = str.length >> 1;
+            var buf = new Uint8Array(hlen);
+            for (var i = 0; i < hlen; i++) buf[i] = parseInt(str.substr(i * 2, 2), 16);
+            return _mkBuf(buf);
+        }
+        if (enc === 'latin1' || enc === 'binary' || enc === 'ascii') {
+            var buf = new Uint8Array(str.length);
+            for (var i = 0; i < str.length; i++) buf[i] = str.charCodeAt(i) & 0xFF;
+            return _mkBuf(buf);
+        }
+        // utf8 (default)
+        return _mkBuf(new globalThis.TextEncoder().encode(str));
+    }
+
+    function _toBase64(bytes) {
+        var out = '';
+        for (var i = 0; i < bytes.length; i += 3) {
+            var a = bytes[i], b = bytes[i + 1], c = bytes[i + 2];
+            out += _B64[a >> 2];
+            out += _B64[((a & 0x03) << 4) | ((b || 0) >> 4)];
+            out += (i + 1 < bytes.length) ? _B64[((b & 0x0F) << 2) | ((c || 0) >> 6)] : '=';
+            out += (i + 2 < bytes.length) ? _B64[c & 0x3F] : '=';
+        }
+        return out;
+    }
+
+    function Buffer(arg, encodingOrOffset, length) {
+        if (typeof arg === 'number') return Buffer.alloc(arg);
+        return Buffer.from(arg, encodingOrOffset, length);
+    }
+
+    Buffer.isBuffer = function(obj) { return !!(obj && obj._isBuffer); };
+
+    Buffer.isEncoding = function(encoding) {
+        return ['utf8','utf-8','ascii','latin1','binary','base64','hex','ucs2','ucs-2','utf16le','utf-16le'].indexOf(String(encoding).toLowerCase()) !== -1;
+    };
+
+    Buffer.from = function(value, encodingOrOffset, length) {
+        if (typeof value === 'string') return _fromStr(value, encodingOrOffset || 'utf8');
+        if (value instanceof ArrayBuffer) {
+            var off = encodingOrOffset || 0;
+            var len = length !== undefined ? length : value.byteLength - off;
+            return _mkBuf(new Uint8Array(value, off, len));
+        }
+        if (value instanceof Uint8Array || Array.isArray(value)) {
+            var buf = new Uint8Array(value.length);
+            for (var i = 0; i < value.length; i++) buf[i] = value[i];
+            return _mkBuf(buf);
+        }
+        if (value && value._isBuffer) {
+            var buf = new Uint8Array(value.length);
+            for (var i = 0; i < value.length; i++) buf[i] = value[i];
+            return _mkBuf(buf);
+        }
+        throw new TypeError('First argument must be a string, Buffer, ArrayBuffer, Array, or array-like object');
+    };
+
+    Buffer.alloc = function(size, fill, encoding) {
+        var buf = _mkBuf(new Uint8Array(size));
+        if (fill !== undefined) buf.fill(fill, 0, size, encoding);
+        return buf;
+    };
+
+    Buffer.allocUnsafe = function(size) { return Buffer.alloc(size); };
+
+    Buffer.byteLength = function(string, encoding) {
+        if (typeof string !== 'string') return string.length;
+        return Buffer.from(string, encoding).length;
+    };
+
+    Buffer.concat = function(list, totalLength) {
+        if (totalLength === undefined) {
+            totalLength = 0;
+            for (var i = 0; i < list.length; i++) totalLength += list[i].length;
+        }
+        var buf = Buffer.alloc(totalLength);
+        var pos = 0;
+        for (var i = 0; i < list.length; i++) {
+            for (var j = 0; j < list[i].length && pos < totalLength; j++) {
+                buf[pos++] = list[i][j];
+            }
+        }
+        return buf;
+    };
+
+    Buffer.prototype.toString = function(encoding, start, end) {
+        start = start || 0;
+        end = end !== undefined ? end : this.length;
+        var slice = this.subarray(start, end);
+        var enc = _normEnc(encoding);
+        if (enc === 'base64') return _toBase64(slice);
+        if (enc === 'hex') {
+            var out = '';
+            for (var i = 0; i < slice.length; i++) out += (slice[i] < 16 ? '0' : '') + slice[i].toString(16);
+            return out;
+        }
+        if (enc === 'latin1' || enc === 'binary' || enc === 'ascii') {
+            var out = '';
+            for (var i = 0; i < slice.length; i++) out += String.fromCharCode(slice[i]);
+            return out;
+        }
+        return new globalThis.TextDecoder().decode(slice);
+    };
+
+    Buffer.prototype.toJSON = function() {
+        return { type: 'Buffer', data: Array.prototype.slice.call(this) };
+    };
+
+    Buffer.prototype.slice = function(start, end) {
+        return _mkBuf(this.subarray(start, end));
+    };
+
+    Buffer.prototype.copy = function(target, targetStart, sourceStart, sourceEnd) {
+        targetStart = targetStart || 0;
+        sourceStart = sourceStart || 0;
+        sourceEnd = sourceEnd !== undefined ? sourceEnd : this.length;
+        var n = Math.min(sourceEnd - sourceStart, target.length - targetStart);
+        for (var i = 0; i < n; i++) target[targetStart + i] = this[sourceStart + i];
+        return n;
+    };
+
+    Buffer.prototype.equals = function(other) {
+        if (this.length !== other.length) return false;
+        for (var i = 0; i < this.length; i++) {
+            if (this[i] !== other[i]) return false;
+        }
+        return true;
+    };
+
+    Buffer.prototype.compare = function(other) {
+        var len = Math.min(this.length, other.length);
+        for (var i = 0; i < len; i++) {
+            if (this[i] !== other[i]) return this[i] < other[i] ? -1 : 1;
+        }
+        return this.length === other.length ? 0 : (this.length < other.length ? -1 : 1);
+    };
+
+    Buffer.prototype.write = function(string, offset, length, encoding) {
+        if (typeof offset === 'string') { encoding = offset; offset = 0; length = this.length; }
+        else if (typeof length === 'string') { encoding = length; length = this.length - (offset || 0); }
+        offset = offset || 0;
+        length = length !== undefined ? length : this.length - offset;
+        var src = Buffer.from(string, encoding || 'utf8');
+        var n = Math.min(src.length, length, this.length - offset);
+        for (var i = 0; i < n; i++) this[offset + i] = src[i];
+        return n;
+    };
+
+    Buffer.prototype.fill = function(value, offset, end, encoding) {
+        offset = offset || 0;
+        end = end !== undefined ? end : this.length;
+        if (typeof value === 'number') {
+            for (var i = offset; i < end; i++) this[i] = value & 0xFF;
+        } else if (typeof value === 'string') {
+            var src = Buffer.from(value, encoding || 'utf8');
+            for (var i = offset; i < end; i++) this[i] = src[(i - offset) % src.length];
+        }
+        return this;
+    };
+
+    Buffer.prototype.indexOf = function(value, byteOffset, encoding) {
+        if (typeof value === 'number') {
+            for (var i = byteOffset || 0; i < this.length; i++) {
+                if (this[i] === (value & 0xFF)) return i;
+            }
+            return -1;
+        }
+        if (typeof value === 'string') value = Buffer.from(value, encoding || 'utf8');
+        byteOffset = byteOffset || 0;
+        if (value.length === 0) return byteOffset < this.length ? byteOffset : this.length;
+        for (var i = byteOffset; i <= this.length - value.length; i++) {
+            var found = true;
+            for (var j = 0; j < value.length; j++) {
+                if (this[i + j] !== value[j]) { found = false; break; }
+            }
+            if (found) return i;
+        }
+        return -1;
+    };
+
+    Buffer.prototype.includes = function(value, byteOffset, encoding) {
+        return this.indexOf(value, byteOffset, encoding) !== -1;
+    };
+
+    // Integer read/write methods
+    Buffer.prototype.readUInt8 = function(off) { return this[off]; };
+    Buffer.prototype.readUint8 = Buffer.prototype.readUInt8;
+    Buffer.prototype.readInt8 = function(off) { var v = this[off]; return v > 127 ? v - 256 : v; };
+    Buffer.prototype.readUInt16BE = function(off) { return (this[off] << 8) | this[off + 1]; };
+    Buffer.prototype.readUint16BE = Buffer.prototype.readUInt16BE;
+    Buffer.prototype.readUInt16LE = function(off) { return this[off] | (this[off + 1] << 8); };
+    Buffer.prototype.readUint16LE = Buffer.prototype.readUInt16LE;
+    Buffer.prototype.readInt16BE = function(off) { var v = this.readUInt16BE(off); return v > 0x7FFF ? v - 0x10000 : v; };
+    Buffer.prototype.readInt16LE = function(off) { var v = this.readUInt16LE(off); return v > 0x7FFF ? v - 0x10000 : v; };
+    Buffer.prototype.readUInt32BE = function(off) { return ((this[off] << 24) | (this[off+1] << 16) | (this[off+2] << 8) | this[off+3]) >>> 0; };
+    Buffer.prototype.readUint32BE = Buffer.prototype.readUInt32BE;
+    Buffer.prototype.readUInt32LE = function(off) { return ((this[off+3] << 24) | (this[off+2] << 16) | (this[off+1] << 8) | this[off]) >>> 0; };
+    Buffer.prototype.readUint32LE = Buffer.prototype.readUInt32LE;
+    Buffer.prototype.readInt32BE = function(off) { return (this[off] << 24) | (this[off+1] << 16) | (this[off+2] << 8) | this[off+3]; };
+    Buffer.prototype.readInt32LE = function(off) { return (this[off+3] << 24) | (this[off+2] << 16) | (this[off+1] << 8) | this[off]; };
+    Buffer.prototype.writeUInt8 = function(val, off) { this[off] = val & 0xFF; return off + 1; };
+    Buffer.prototype.writeUint8 = Buffer.prototype.writeUInt8;
+    Buffer.prototype.writeUInt16BE = function(val, off) { this[off] = (val >> 8) & 0xFF; this[off+1] = val & 0xFF; return off + 2; };
+    Buffer.prototype.writeUint16BE = Buffer.prototype.writeUInt16BE;
+    Buffer.prototype.writeUInt16LE = function(val, off) { this[off] = val & 0xFF; this[off+1] = (val >> 8) & 0xFF; return off + 2; };
+    Buffer.prototype.writeUint16LE = Buffer.prototype.writeUInt16LE;
+    Buffer.prototype.writeUInt32BE = function(val, off) { this[off] = (val >> 24) & 0xFF; this[off+1] = (val >> 16) & 0xFF; this[off+2] = (val >> 8) & 0xFF; this[off+3] = val & 0xFF; return off + 4; };
+    Buffer.prototype.writeUint32BE = Buffer.prototype.writeUInt32BE;
+    Buffer.prototype.writeUInt32LE = function(val, off) { this[off] = val & 0xFF; this[off+1] = (val >> 8) & 0xFF; this[off+2] = (val >> 16) & 0xFF; this[off+3] = (val >> 24) & 0xFF; return off + 4; };
+    Buffer.prototype.writeUint32LE = Buffer.prototype.writeUInt32LE;
+    Buffer.prototype.writeInt8 = function(val, off) { if (val < 0) val = 256 + val; this[off] = val & 0xFF; return off + 1; };
+    Buffer.prototype.writeInt16BE = function(val, off) { if (val < 0) val = 0x10000 + val; return this.writeUInt16BE(val, off); };
+    Buffer.prototype.writeInt16LE = function(val, off) { if (val < 0) val = 0x10000 + val; return this.writeUInt16LE(val, off); };
+    Buffer.prototype.writeInt32BE = function(val, off) { if (val < 0) val = 0x100000000 + val; return this.writeUInt32BE(val >>> 0, off); };
+    Buffer.prototype.writeInt32LE = function(val, off) { if (val < 0) val = 0x100000000 + val; return this.writeUInt32LE(val >>> 0, off); };
+
+    globalThis.Buffer = Buffer;
+}
 "#;
 
 /// SSR runtime functions appended to the virtual entry.
@@ -1123,6 +1385,19 @@ async fn build_server_bundle(
             "node:path".to_string(),
             vec![Some(
                 runtime_dir.join("path.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        // Node.js buffer module polyfill (re-exports globalThis.Buffer from banner)
+        (
+            "buffer".to_string(),
+            vec![Some(
+                runtime_dir.join("buffer.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "node:buffer".to_string(),
+            vec![Some(
+                runtime_dir.join("buffer.ts").to_string_lossy().to_string(),
             )],
         ),
     ];
@@ -2250,6 +2525,10 @@ mod tests {
         assert!(
             bundle.contains("MessageChannel"),
             "should have MessageChannel polyfill"
+        );
+        assert!(
+            bundle.contains("globalThis.Buffer"),
+            "should have Buffer polyfill"
         );
 
         // Page registry
@@ -3441,6 +3720,146 @@ export default function Home() {
         assert_eq!(gssp["props"]["ext"], ".gz");
         assert_eq!(gssp["props"]["abs"], true);
         assert_eq!(gssp["props"]["rel"], false);
+    }
+
+    // ── buffer polyfill integration tests ────────────────────────
+
+    #[tokio::test]
+    async fn test_integration_buffer_polyfill_global() {
+        // Test Buffer global: from/toString with utf8, base64, hex
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                r#"
+                export default function Home(props) {
+                    return <div>{JSON.stringify(props)}</div>;
+                }
+                export function getServerSideProps() {
+                    var buf = Buffer.from('hello world');
+                    return { props: {
+                        utf8: buf.toString('utf8'),
+                        base64: buf.toString('base64'),
+                        hex: buf.toString('hex'),
+                        roundtrip: Buffer.from(buf.toString('base64'), 'base64').toString('utf8'),
+                        isBuffer: Buffer.isBuffer(buf),
+                        notBuffer: Buffer.isBuffer('nope'),
+                        len: buf.length,
+                    }};
+                }
+                "#,
+            )],
+            None,
+        );
+
+        let (_result, pool) = build_and_load(&config, &scan).await;
+
+        let gssp_json = pool
+            .execute(|iso| iso.get_server_side_props("index", "{\"params\":{},\"query\":{}}"))
+            .await
+            .expect("pool execute")
+            .expect("gssp");
+
+        let gssp: serde_json::Value = serde_json::from_str(&gssp_json).unwrap();
+        assert_eq!(gssp["props"]["utf8"], "hello world", "utf8: {gssp_json}");
+        assert_eq!(
+            gssp["props"]["base64"], "aGVsbG8gd29ybGQ=",
+            "base64: {gssp_json}"
+        );
+        assert_eq!(
+            gssp["props"]["hex"], "68656c6c6f20776f726c64",
+            "hex: {gssp_json}"
+        );
+        assert_eq!(
+            gssp["props"]["roundtrip"], "hello world",
+            "base64 roundtrip: {gssp_json}"
+        );
+        assert_eq!(gssp["props"]["isBuffer"], true, "isBuffer: {gssp_json}");
+        assert_eq!(gssp["props"]["notBuffer"], false, "notBuffer: {gssp_json}");
+        assert_eq!(gssp["props"]["len"], 11, "length: {gssp_json}");
+    }
+
+    #[tokio::test]
+    async fn test_integration_buffer_polyfill_import() {
+        // Test importing Buffer from 'buffer' module
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                r#"
+                import { Buffer } from 'buffer';
+                export default function Home(props) {
+                    return <div>{props.result}</div>;
+                }
+                export function getServerSideProps() {
+                    var buf = Buffer.from('SGVsbG8=', 'base64');
+                    return { props: { result: buf.toString('utf8') }};
+                }
+                "#,
+            )],
+            None,
+        );
+
+        let (_result, pool) = build_and_load(&config, &scan).await;
+
+        let gssp_json = pool
+            .execute(|iso| iso.get_server_side_props("index", "{\"params\":{},\"query\":{}}"))
+            .await
+            .expect("pool execute")
+            .expect("gssp");
+
+        let gssp: serde_json::Value = serde_json::from_str(&gssp_json).unwrap();
+        assert_eq!(
+            gssp["props"]["result"], "Hello",
+            "import from 'buffer' should work: {gssp_json}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_integration_buffer_alloc_concat() {
+        // Test Buffer.alloc, Buffer.concat, and integer read/write methods
+        let (_tmp, config, scan) = setup_test_project(
+            &[(
+                "index.tsx",
+                r#"
+                export default function Home(props) {
+                    return <div>{JSON.stringify(props)}</div>;
+                }
+                export function getServerSideProps() {
+                    var a = Buffer.from('foo');
+                    var b = Buffer.from('bar');
+                    var c = Buffer.concat([a, b]);
+
+                    var alloc = Buffer.alloc(4);
+                    alloc.writeUInt32BE(0xDEADBEEF, 0);
+                    var readBack = alloc.readUInt32BE(0);
+
+                    return { props: {
+                        concat: c.toString('utf8'),
+                        allocLen: alloc.length,
+                        readBack: readBack,
+                        byteLen: Buffer.byteLength('hello', 'utf8'),
+                    }};
+                }
+                "#,
+            )],
+            None,
+        );
+
+        let (_result, pool) = build_and_load(&config, &scan).await;
+
+        let gssp_json = pool
+            .execute(|iso| iso.get_server_side_props("index", "{\"params\":{},\"query\":{}}"))
+            .await
+            .expect("pool execute")
+            .expect("gssp");
+
+        let gssp: serde_json::Value = serde_json::from_str(&gssp_json).unwrap();
+        assert_eq!(gssp["props"]["concat"], "foobar", "concat: {gssp_json}");
+        assert_eq!(gssp["props"]["allocLen"], 4, "alloc length: {gssp_json}");
+        assert_eq!(
+            gssp["props"]["readBack"], 0xDEADBEEFu64,
+            "readBack: {gssp_json}"
+        );
+        assert_eq!(gssp["props"]["byteLen"], 5, "byteLength: {gssp_json}");
     }
 
     // ── detect_data_strategy_from_source tests ──────────────────
