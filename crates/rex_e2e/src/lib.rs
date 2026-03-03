@@ -767,8 +767,9 @@ mod tests {
         let reader_thread = std::thread::spawn(move || {
             let reader = BufReader::new(stderr);
             for line in reader.lines() {
-                if let Ok(line) = line {
-                    lines_writer.lock().unwrap().push(line);
+                match line {
+                    Ok(line) => lines_writer.lock().unwrap().push(line),
+                    Err(_) => break,
                 }
             }
         });
