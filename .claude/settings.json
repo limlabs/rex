@@ -17,11 +17,9 @@
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/typecheck-fixture.sh"
           }
         ]
-      }
-    ],
-    "WorktreeCreate": [
+      },
       {
-        "matcher": "",
+        "matcher": "EnterWorktree",
         "hooks": [
           {
             "type": "command",
