@@ -44,7 +44,7 @@ jobs:
       - name: TypeScript strict check (runtime)
         run: cd runtime && npm run typecheck
 
-      - name: TypeScript strict check (fixtures)
+      - name: TypeScript strict check (fixtures & benchmarks)
         run: scripts/typecheck-fixtures.sh
 
       - name: oxlint

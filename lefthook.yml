@@ -21,7 +21,7 @@ pre-commit:
       fail_text: "Fix TypeScript errors in runtime/"
     typecheck-fixtures:
       run: scripts/typecheck-fixtures.sh
-      fail_text: "Fix TypeScript errors in fixtures before committing"
+      fail_text: "Fix TypeScript errors in fixtures/benchmarks before committing"
     coverage-ratchet:
       run: scripts/coverage-ratchet.sh
       fail_text: "Coverage dropped below the threshold in .coverage-threshold"

@@ -9,7 +9,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 FIXTURES_DIR="$ROOT/fixtures"
-SKIP=("nextjs-app-router")
+BENCHMARKS_DIR="$ROOT/benchmarks"
+# Skip directories that require build-time codegen (e.g. TanStack Router)
+SKIP=("tanstack-basic" "tanstack-tailwind")
 
 # Ensure packages/rex has its dependencies installed (fixtures resolve
 # rex source files via path aliases and need @types/react available).
@@ -68,10 +70,22 @@ for dir in "$FIXTURES_DIR"/*/; do
   fi
 done
 
+for dir in "$BENCHMARKS_DIR"/*/; do
+  name="$(basename "$dir")"
+
+  for skip in "${SKIP[@]}"; do
+    [[ "$name" == "$skip" ]] && continue 2
+  done
+
+  if ! check_fixture "$dir"; then
+    FAILED+=("benchmarks/$name")
+  fi
+done
+
 echo ""
 if [[ ${#FAILED[@]} -gt 0 ]]; then
   echo "TypeScript errors in: ${FAILED[*]}"
   exit 1
 fi
 
-echo "All fixture type checks passed."
+echo "All fixture and benchmark type checks passed."
