@@ -11,11 +11,55 @@ const PACKAGES: &[(&str, &str)] = &[
     ("scheduler", SCHEDULER_VERSION),
 ];
 
+/// Server runtime TypeScript files to compile to JavaScript at build time.
+const SERVER_RUNTIME_TS: &[&str] = &[
+    "v8-polyfills",
+    "ssr-runtime",
+    "mcp-runtime",
+    "middleware-runtime",
+];
+
+fn strip_typescript(source: &str) -> String {
+    let allocator = oxc_allocator::Allocator::default();
+    let source_type = oxc_span::SourceType::ts();
+    let mut ret = oxc_parser::Parser::new(&allocator, source, source_type).parse();
+
+    let semantic = oxc_semantic::SemanticBuilder::new()
+        .build(&ret.program)
+        .semantic;
+
+    let options = oxc_transformer::TransformOptions::default();
+    let transformer =
+        oxc_transformer::Transformer::new(&allocator, Path::new("input.ts"), &options);
+    transformer.build_with_scoping(semantic.into_scoping(), &mut ret.program);
+
+    oxc_codegen::Codegen::new().build(&ret.program).code
+}
+
+fn compile_server_runtime(manifest_dir: &Path, out_dir: &Path) {
+    let runtime_dir = manifest_dir.join("../../runtime/server");
+
+    for name in SERVER_RUNTIME_TS {
+        let ts_path = runtime_dir.join(format!("{name}.ts"));
+        let ts_source = fs::read_to_string(&ts_path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", ts_path.display()));
+        let js = strip_typescript(&ts_source);
+        fs::write(out_dir.join(format!("{name}.js")), js)
+            .unwrap_or_else(|e| panic!("failed to write {name}.js: {e}"));
+
+        println!("cargo:rerun-if-changed=../../runtime/server/{name}.ts");
+    }
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let out_dir = Path::new(&out_dir);
+
+    // Compile server runtime TS → JS
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
+    compile_server_runtime(Path::new(&manifest_dir), out_dir);
     let node_modules = out_dir.join("node_modules");
     let stamp = out_dir.join(".react-version");
 

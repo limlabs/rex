@@ -161,6 +161,7 @@ pub(crate) fn runtime_server_dir() -> Result<PathBuf> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use rex_core::{PageType, Route};
@@ -279,5 +280,53 @@ export const config = {
 "#;
         let matchers = extract_middleware_matchers(source);
         assert_eq!(matchers, vec!["/dashboard/:path*", "/api/:path*"]);
+    }
+
+    #[test]
+    fn test_detect_data_strategy_from_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let gssp_page = tmp.path().join("gssp.tsx");
+        fs::write(
+            &gssp_page,
+            "export default function Page() {}\nexport function getServerSideProps() { return { props: {} }; }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            detect_data_strategy(&gssp_page).unwrap(),
+            DataStrategy::GetServerSideProps
+        );
+
+        let gsp_page = tmp.path().join("gsp.tsx");
+        fs::write(
+            &gsp_page,
+            "export default function Page() {}\nexport function getStaticProps() { return { props: {} }; }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            detect_data_strategy(&gsp_page).unwrap(),
+            DataStrategy::GetStaticProps
+        );
+
+        let none_page = tmp.path().join("none.tsx");
+        fs::write(&none_page, "export default function Page() {}\n").unwrap();
+        assert_eq!(
+            detect_data_strategy(&none_page).unwrap(),
+            DataStrategy::None
+        );
+    }
+
+    #[test]
+    fn test_runtime_server_dir_exists() {
+        let dir = runtime_server_dir().unwrap();
+        assert!(dir.exists());
+        assert!(dir.join("head.ts").exists());
+    }
+
+    #[test]
+    fn test_runtime_client_dir_exists() {
+        let dir = runtime_client_dir().unwrap();
+        assert!(dir.exists());
+        assert!(dir.join("link.ts").exists());
     }
 }

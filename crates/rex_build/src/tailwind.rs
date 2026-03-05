@@ -97,6 +97,7 @@ pub fn process_tailwind_css(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
@@ -117,5 +118,235 @@ mod tests {
     fn test_find_tailwind_bin_not_found() {
         let tmp = TempDir::new().expect("test setup");
         assert!(find_tailwind_bin(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn test_collect_all_css_import_paths_from_app() {
+        let tmp = TempDir::new().unwrap();
+        let pages_dir = tmp.path().join("pages");
+        fs::create_dir_all(&pages_dir).unwrap();
+
+        let css_file = tmp.path().join("globals.css");
+        fs::write(&css_file, "@import \"tailwindcss\";").unwrap();
+
+        let app = pages_dir.join("_app.tsx");
+        fs::write(
+            &app,
+            format!(
+                "import '{}';\nexport default function App() {{}}\n",
+                css_file.display()
+            ),
+        )
+        .unwrap();
+
+        let scan = rex_router::ScanResult {
+            app: Some(rex_core::Route {
+                pattern: "/_app".to_string(),
+                file_path: app.clone(),
+                abs_path: app,
+                dynamic_segments: vec![],
+                page_type: rex_core::PageType::Regular,
+                specificity: 0,
+            }),
+            routes: vec![],
+            not_found: None,
+            error: None,
+            document: None,
+            middleware: None,
+            mcp_tools: vec![],
+            api_routes: vec![],
+            app_scan: None,
+        };
+
+        let paths = collect_all_css_import_paths(&scan).unwrap();
+        assert_eq!(paths.len(), 1);
+        assert!(paths[0].ends_with("globals.css"));
+    }
+
+    #[test]
+    fn test_collect_all_css_import_paths_from_pages() {
+        let tmp = TempDir::new().unwrap();
+        let pages_dir = tmp.path().join("pages");
+        fs::create_dir_all(&pages_dir).unwrap();
+
+        let css_file = pages_dir.join("about.css");
+        fs::write(&css_file, "body {}").unwrap();
+
+        let page = pages_dir.join("about.tsx");
+        fs::write(
+            &page,
+            format!(
+                "import '{}';\nexport default function About() {{}}\n",
+                css_file.display()
+            ),
+        )
+        .unwrap();
+
+        let scan = rex_router::ScanResult {
+            app: None,
+            routes: vec![rex_core::Route {
+                pattern: "/about".to_string(),
+                file_path: page.clone(),
+                abs_path: page,
+                dynamic_segments: vec![],
+                page_type: rex_core::PageType::Regular,
+                specificity: 0,
+            }],
+            not_found: None,
+            error: None,
+            document: None,
+            middleware: None,
+            mcp_tools: vec![],
+            api_routes: vec![],
+            app_scan: None,
+        };
+
+        let paths = collect_all_css_import_paths(&scan).unwrap();
+        assert_eq!(paths.len(), 1);
+    }
+
+    #[test]
+    fn test_collect_all_css_import_paths_empty() {
+        let tmp = TempDir::new().unwrap();
+        let page = tmp.path().join("index.tsx");
+        fs::write(&page, "export default function Home() {}\n").unwrap();
+
+        let scan = rex_router::ScanResult {
+            app: None,
+            routes: vec![rex_core::Route {
+                pattern: "/".to_string(),
+                file_path: page.clone(),
+                abs_path: page,
+                dynamic_segments: vec![],
+                page_type: rex_core::PageType::Regular,
+                specificity: 0,
+            }],
+            not_found: None,
+            error: None,
+            document: None,
+            middleware: None,
+            mcp_tools: vec![],
+            api_routes: vec![],
+            app_scan: None,
+        };
+
+        let paths = collect_all_css_import_paths(&scan).unwrap();
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn test_process_tailwind_css_no_tailwind_files() {
+        let tmp = TempDir::new().unwrap();
+        let pages_dir = tmp.path().join("pages");
+        fs::create_dir_all(&pages_dir).unwrap();
+
+        let css_file = pages_dir.join("styles.css");
+        fs::write(&css_file, "body { margin: 0; }").unwrap();
+
+        let app = pages_dir.join("_app.tsx");
+        fs::write(
+            &app,
+            format!(
+                "import '{}';\nexport default function App() {{}}\n",
+                css_file.display()
+            ),
+        )
+        .unwrap();
+
+        let output_dir = tmp.path().join("output");
+        fs::create_dir_all(&output_dir).unwrap();
+
+        let config = rex_core::RexConfig {
+            project_root: tmp.path().to_path_buf(),
+            pages_dir: pages_dir.clone(),
+            app_dir: tmp.path().join("app"),
+            output_dir: output_dir.clone(),
+            port: 3000,
+            dev: false,
+        };
+
+        let scan = rex_router::ScanResult {
+            app: Some(rex_core::Route {
+                pattern: "/_app".to_string(),
+                file_path: app.clone(),
+                abs_path: app,
+                dynamic_segments: vec![],
+                page_type: rex_core::PageType::Regular,
+                specificity: 0,
+            }),
+            routes: vec![],
+            not_found: None,
+            error: None,
+            document: None,
+            middleware: None,
+            mcp_tools: vec![],
+            api_routes: vec![],
+            app_scan: None,
+        };
+
+        let mappings = process_tailwind_css(&config, &scan, &output_dir).unwrap();
+        assert!(mappings.is_empty(), "no tailwind directives = no mappings");
+    }
+
+    #[test]
+    fn test_process_tailwind_css_no_bin_errors() {
+        let tmp = TempDir::new().unwrap();
+        let pages_dir = tmp.path().join("pages");
+        fs::create_dir_all(&pages_dir).unwrap();
+
+        let css_file = pages_dir.join("styles.css");
+        fs::write(&css_file, "@import \"tailwindcss\";\n").unwrap();
+
+        let app = pages_dir.join("_app.tsx");
+        fs::write(
+            &app,
+            format!(
+                "import '{}';\nexport default function App() {{}}\n",
+                css_file.display()
+            ),
+        )
+        .unwrap();
+
+        let output_dir = tmp.path().join("output");
+        fs::create_dir_all(&output_dir).unwrap();
+
+        let config = rex_core::RexConfig {
+            project_root: tmp.path().to_path_buf(),
+            pages_dir: pages_dir.clone(),
+            app_dir: tmp.path().join("app"),
+            output_dir: output_dir.clone(),
+            port: 3000,
+            dev: false,
+        };
+
+        let scan = rex_router::ScanResult {
+            app: Some(rex_core::Route {
+                pattern: "/_app".to_string(),
+                file_path: app.clone(),
+                abs_path: app,
+                dynamic_segments: vec![],
+                page_type: rex_core::PageType::Regular,
+                specificity: 0,
+            }),
+            routes: vec![],
+            not_found: None,
+            error: None,
+            document: None,
+            middleware: None,
+            mcp_tools: vec![],
+            api_routes: vec![],
+            app_scan: None,
+        };
+
+        let result = process_tailwind_css(&config, &scan, &output_dir);
+        assert!(
+            result.is_err(),
+            "should error when tailwindcss binary not found"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("tailwindcss is not installed"),
+            "error should mention missing binary"
+        );
     }
 }

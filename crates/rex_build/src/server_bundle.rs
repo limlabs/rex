@@ -9,19 +9,20 @@ use tracing::debug;
 
 /// V8 polyfills for bare V8 environment (React 19 needs these).
 /// Injected as a rolldown banner so they run before any bundled code.
-pub(crate) const V8_POLYFILLS: &str = include_str!("../../../runtime/server/v8-polyfills.js");
+/// Compiled from TypeScript at build time by build.rs.
+pub(crate) const V8_POLYFILLS: &str = include_str!(concat!(env!("OUT_DIR"), "/v8-polyfills.js"));
 
 /// SSR runtime functions appended to the virtual entry.
 /// These are bundled into the IIFE by rolldown alongside React and page code.
-const SSR_RUNTIME: &str = include_str!("../../../runtime/server/ssr-runtime.js");
+const SSR_RUNTIME: &str = include_str!(concat!(env!("OUT_DIR"), "/ssr-runtime.js"));
 
 /// MCP tool runtime functions appended to the virtual entry when mcp/ tools exist.
 /// Defines __rex_list_mcp_tools() and __rex_call_mcp_tool(name, paramsJson).
-const MCP_RUNTIME: &str = include_str!("../../../runtime/server/mcp-runtime.js");
+const MCP_RUNTIME: &str = include_str!(concat!(env!("OUT_DIR"), "/mcp-runtime.js"));
 
 /// Middleware runtime functions appended to the virtual entry when middleware.ts exists.
 /// Defines __rex_run_middleware(reqJson) and __rex_resolve_middleware().
-const MIDDLEWARE_RUNTIME: &str = include_str!("../../../runtime/server/middleware-runtime.js");
+const MIDDLEWARE_RUNTIME: &str = include_str!(concat!(env!("OUT_DIR"), "/middleware-runtime.js"));
 
 /// Build the server bundle using rolldown.
 ///

@@ -126,8 +126,11 @@ pub(crate) fn extract_string_literal(line: &str) -> Option<&str> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use tempfile::TempDir;
 
     #[test]
     fn test_extract_string_literal_single_quotes() {
@@ -156,5 +159,237 @@ mod tests {
     #[test]
     fn test_extract_string_literal_no_quotes() {
         assert_eq!(extract_string_literal("import foo"), None);
+    }
+
+    #[test]
+    fn test_extract_css_imports_finds_css() {
+        let tmp = TempDir::new().unwrap();
+        let page = tmp.path().join("page.tsx");
+        fs::write(
+            &page,
+            "import './styles.css';\nimport React from 'react';\nexport default function Page() {}\n",
+        )
+        .unwrap();
+        let css_file = tmp.path().join("styles.css");
+        fs::write(&css_file, "body {}").unwrap();
+
+        let result = extract_css_imports(&page).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].ends_with("styles.css"));
+    }
+
+    #[test]
+    fn test_extract_css_imports_skips_module_css() {
+        let tmp = TempDir::new().unwrap();
+        let page = tmp.path().join("page.tsx");
+        fs::write(
+            &page,
+            "import './styles.module.css';\nimport './global.css';\n",
+        )
+        .unwrap();
+
+        let result = extract_css_imports(&page).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].ends_with("global.css"));
+    }
+
+    #[test]
+    fn test_extract_css_imports_double_quotes() {
+        let tmp = TempDir::new().unwrap();
+        let page = tmp.path().join("page.tsx");
+        fs::write(&page, "import \"./theme.css\";\n").unwrap();
+
+        let result = extract_css_imports(&page).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].ends_with("theme.css"));
+    }
+
+    #[test]
+    fn test_extract_css_imports_no_css() {
+        let tmp = TempDir::new().unwrap();
+        let page = tmp.path().join("page.tsx");
+        fs::write(
+            &page,
+            "import React from 'react';\nexport default function Page() {}\n",
+        )
+        .unwrap();
+
+        let result = extract_css_imports(&page).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_collect_css_files_global_from_app() {
+        let tmp = TempDir::new().unwrap();
+        let pages_dir = tmp.path().join("pages");
+        fs::create_dir_all(&pages_dir).unwrap();
+
+        let css_file = tmp.path().join("globals.css");
+        fs::write(&css_file, "body { margin: 0; }").unwrap();
+
+        let app_file = pages_dir.join("_app.tsx");
+        fs::write(
+            &app_file,
+            format!(
+                "import '{}';\nexport default function App() {{}}\n",
+                css_file.display()
+            ),
+        )
+        .unwrap();
+
+        let output_dir = tmp.path().join("output");
+        fs::create_dir_all(&output_dir).unwrap();
+
+        let scan = rex_router::ScanResult {
+            app: Some(rex_core::Route {
+                pattern: "/_app".to_string(),
+                file_path: app_file.clone(),
+                abs_path: app_file,
+                dynamic_segments: vec![],
+                page_type: rex_core::PageType::Regular,
+                specificity: 0,
+            }),
+            routes: vec![],
+            not_found: None,
+            error: None,
+            document: None,
+            middleware: None,
+            mcp_tools: vec![],
+            api_routes: vec![],
+            app_scan: None,
+        };
+
+        let mut manifest = crate::manifest::AssetManifest::new("abc12345def67890".to_string());
+        collect_css_files(
+            &scan,
+            &output_dir,
+            "abc12345def67890",
+            &mut manifest,
+            &HashMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(manifest.global_css.len(), 1);
+        assert!(manifest.global_css[0].contains("globals"));
+        assert!(manifest.global_css[0].ends_with(".css"));
+        assert!(manifest.css_contents.contains_key(&manifest.global_css[0]));
+    }
+
+    #[test]
+    fn test_collect_css_files_per_page() {
+        let tmp = TempDir::new().unwrap();
+        let pages_dir = tmp.path().join("pages");
+        fs::create_dir_all(&pages_dir).unwrap();
+
+        let css_file = pages_dir.join("about.css");
+        fs::write(&css_file, ".about { color: red; }").unwrap();
+
+        let page_file = pages_dir.join("about.tsx");
+        fs::write(
+            &page_file,
+            format!(
+                "import '{}';\nexport default function About() {{}}\n",
+                css_file.display()
+            ),
+        )
+        .unwrap();
+
+        let output_dir = tmp.path().join("output");
+        fs::create_dir_all(&output_dir).unwrap();
+
+        let scan = rex_router::ScanResult {
+            app: None,
+            routes: vec![rex_core::Route {
+                pattern: "/about".to_string(),
+                file_path: page_file.clone(),
+                abs_path: page_file,
+                dynamic_segments: vec![],
+                page_type: rex_core::PageType::Regular,
+                specificity: 0,
+            }],
+            not_found: None,
+            error: None,
+            document: None,
+            middleware: None,
+            mcp_tools: vec![],
+            api_routes: vec![],
+            app_scan: None,
+        };
+
+        let mut manifest = crate::manifest::AssetManifest::new("abc12345def67890".to_string());
+        collect_css_files(
+            &scan,
+            &output_dir,
+            "abc12345def67890",
+            &mut manifest,
+            &HashMap::new(),
+        )
+        .unwrap();
+
+        assert!(manifest.pages.contains_key("/about"));
+        let page = &manifest.pages["/about"];
+        assert!(!page.css.is_empty());
+    }
+
+    #[test]
+    fn test_collect_css_files_with_tailwind_override() {
+        let tmp = TempDir::new().unwrap();
+        let pages_dir = tmp.path().join("pages");
+        fs::create_dir_all(&pages_dir).unwrap();
+
+        let raw_css = tmp.path().join("globals.css");
+        fs::write(&raw_css, "@import \"tailwindcss\";").unwrap();
+
+        let tw_output = tmp.path().join("globals.tailwind.css");
+        fs::write(&tw_output, ".processed { color: blue; }").unwrap();
+
+        let app_file = pages_dir.join("_app.tsx");
+        fs::write(
+            &app_file,
+            format!(
+                "import '{}';\nexport default function App() {{}}\n",
+                raw_css.display()
+            ),
+        )
+        .unwrap();
+
+        let output_dir = tmp.path().join("output");
+        fs::create_dir_all(&output_dir).unwrap();
+
+        let scan = rex_router::ScanResult {
+            app: Some(rex_core::Route {
+                pattern: "/_app".to_string(),
+                file_path: app_file.clone(),
+                abs_path: app_file,
+                dynamic_segments: vec![],
+                page_type: rex_core::PageType::Regular,
+                specificity: 0,
+            }),
+            routes: vec![],
+            not_found: None,
+            error: None,
+            document: None,
+            middleware: None,
+            mcp_tools: vec![],
+            api_routes: vec![],
+            app_scan: None,
+        };
+
+        let mut tw_map = HashMap::new();
+        tw_map.insert(raw_css.clone(), tw_output);
+
+        let mut manifest = crate::manifest::AssetManifest::new("abc12345def67890".to_string());
+        collect_css_files(
+            &scan,
+            &output_dir,
+            "abc12345def67890",
+            &mut manifest,
+            &tw_map,
+        )
+        .unwrap();
+
+        assert_eq!(manifest.global_css.len(), 1);
+        let content = &manifest.css_contents[&manifest.global_css[0]];
+        assert!(content.contains("processed"), "should use tailwind output");
     }
 }
