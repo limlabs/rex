@@ -305,6 +305,49 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
+    async fn e2e_buffer_polyfill() {
+        // The buffer-test page uses Buffer in getServerSideProps for
+        // base64/hex/utf8 encoding, concat, and type checking
+        let url = format!("{}/buffer-test", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 200, "buffer-test page should return 200");
+
+        let body = resp.text().await.unwrap();
+
+        // UTF-8 round-trip
+        assert!(
+            body.contains("hello world"),
+            "Should contain utf8-encoded 'hello world': {body}"
+        );
+        // Base64 encoding of "hello world"
+        assert!(
+            body.contains("aGVsbG8gd29ybGQ="),
+            "Should contain base64 of 'hello world': {body}"
+        );
+        // Hex encoding of "hello world"
+        assert!(
+            body.contains("68656c6c6f20776f726c64"),
+            "Should contain hex of 'hello world': {body}"
+        );
+        // Base64 decode round-trip ("SGVsbG8gUmV4IQ==" → "Hello Rex!")
+        assert!(
+            body.contains("Hello Rex!"),
+            "Should contain base64-decoded 'Hello Rex!': {body}"
+        );
+        // Buffer.isBuffer check
+        assert!(
+            body.contains("true"),
+            "Should contain 'true' for isBuffer check: {body}"
+        );
+        // Buffer.concat
+        assert!(
+            body.contains("foobar"),
+            "Should contain concatenated 'foobar': {body}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
     async fn e2e_concurrent_requests() {
         // Fire multiple requests simultaneously to test isolate pool
         let base = base_url();
