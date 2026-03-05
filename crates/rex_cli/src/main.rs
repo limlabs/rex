@@ -584,31 +584,18 @@ fn cmd_lint(root: PathBuf, fix: bool, deny_warnings: bool, paths: Vec<PathBuf>) 
 
     // Build config store
     let mut external_plugin_store = ExternalPluginStore::default();
-    let config_builder = ConfigStoreBuilder::from_oxlintrc(
-        false,
-        oxlintrc,
-        None,
-        &mut external_plugin_store,
-        None,
-    )
-    .map_err(|e| anyhow::anyhow!("failed to build lint config: {e}"))?;
+    let config_builder =
+        ConfigStoreBuilder::from_oxlintrc(false, oxlintrc, None, &mut external_plugin_store, None)
+            .map_err(|e| anyhow::anyhow!("failed to build lint config: {e}"))?;
 
     let base_config = config_builder
         .build(&mut external_plugin_store)
         .map_err(|e| anyhow::anyhow!("failed to build lint config: {e}"))?;
 
-    let config_store = ConfigStore::new(
-        base_config,
-        Default::default(),
-        external_plugin_store,
-    );
+    let config_store = ConfigStore::new(base_config, Default::default(), external_plugin_store);
 
     // Create linter
-    let fix_kind = if fix {
-        FixKind::SafeFix
-    } else {
-        FixKind::None
-    };
+    let fix_kind = if fix { FixKind::SafeFix } else { FixKind::None };
     let linter = Linter::new(LintOptions::default(), config_store, None).with_fix(fix_kind);
 
     // Determine lint targets
@@ -622,13 +609,7 @@ fn cmd_lint(root: PathBuf, fix: bool, deny_warnings: bool, paths: Vec<PathBuf>) 
     } else {
         paths
             .into_iter()
-            .map(|p| {
-                if p.is_absolute() {
-                    p
-                } else {
-                    root.join(p)
-                }
-            })
+            .map(|p| if p.is_absolute() { p } else { root.join(p) })
             .collect()
     };
 
