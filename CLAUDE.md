@@ -129,6 +129,7 @@ docker run -v $(pwd):/app -w /app -p 3000:3000 rex
 |--------|-------|---------|
 | `GITHUB_TOKEN` | Automatic | GHCR push, release asset upload |
 | `NPM_TOKEN` | Manual (`gh secret set NPM_TOKEN`) | npm publish |
+| `CARGO_REGISTRY_TOKEN` | Manual (`gh secret set CARGO_REGISTRY_TOKEN`) | crates.io publish |
 
 ## Plane Project Tracker
 

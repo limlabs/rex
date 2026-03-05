@@ -44,3 +44,6 @@ pre-push:
     test:
       run: cargo test
       fail_text: "Tests must pass before pushing"
+    e2e:
+      run: cargo build -p rex_cli && cargo test -p rex_e2e --lib -- --ignored
+      fail_text: "E2E tests must pass before pushing"
