@@ -56,7 +56,7 @@ enum Commands {
         root: PathBuf,
     },
 
-    /// Lint pages with oxlint (React + Next.js rules)
+    /// Lint source files with oxlint (React + Next.js rules)
     Lint {
         /// Project root directory
         #[arg(long, default_value = ".")]
@@ -66,9 +66,13 @@ enum Commands {
         #[arg(long)]
         fix: bool,
 
-        /// Additional arguments passed to oxlint
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<String>,
+        /// Treat warnings as errors
+        #[arg(long)]
+        deny_warnings: bool,
+
+        /// Paths to lint (defaults to pages/ directory)
+        #[arg(trailing_var_arg = true)]
+        paths: Vec<PathBuf>,
     },
 
     /// Type-check pages with tsc
@@ -161,9 +165,14 @@ async fn main() -> Result<()> {
             init_plain_tracing();
             cmd_start(root, port).await
         }
-        Commands::Lint { root, fix, args } => {
+        Commands::Lint {
+            root,
+            fix,
+            deny_warnings,
+            paths,
+        } => {
             init_plain_tracing();
-            cmd_lint(root, fix, args)
+            cmd_lint(root, fix, deny_warnings, paths)
         }
         Commands::Typecheck { root, args } => {
             init_plain_tracing();
@@ -553,62 +562,176 @@ a {
     Ok(())
 }
 
-fn cmd_lint(root: PathBuf, fix: bool, extra_args: Vec<String>) -> Result<()> {
+fn cmd_lint(root: PathBuf, fix: bool, deny_warnings: bool, paths: Vec<PathBuf>) -> Result<()> {
+    use oxc_linter::{
+        ConfigStore, ConfigStoreBuilder, ExternalPluginStore, FixKind, LintOptions, LintRunner,
+        LintServiceOptions, Linter, Oxlintrc,
+    };
+    use std::ffi::OsStr;
+    use std::sync::Arc;
+
     let root = std::fs::canonicalize(&root)?;
 
-    // Find oxlint binary
-    let oxlint = find_oxlint(&root).ok_or_else(|| {
-        anyhow::anyhow!(
-            "oxlint not found. Install it:\n\n  \
-             npm install -D oxlint\n  \
-             # or globally: npm install -g oxlint"
-        )
-    })?;
-
-    // Write default config if none exists
+    // Load config: .oxlintrc.json if present, otherwise use Rex defaults
     let config_path = root.join(".oxlintrc.json");
-    if !config_path.exists() {
-        eprintln!(
-            "  {} {}",
-            dim("Creating"),
-            dim(".oxlintrc.json with Rex defaults")
-        );
-        std::fs::write(&config_path, default_oxlintrc())?;
+    let oxlintrc = if config_path.exists() {
+        Oxlintrc::from_file(&config_path)
+            .map_err(|e| anyhow::anyhow!("failed to parse .oxlintrc.json: {e}"))?
+    } else {
+        Oxlintrc::from_string(default_oxlintrc())
+            .map_err(|e| anyhow::anyhow!("failed to parse default oxlintrc: {e}"))?
+    };
+
+    // Build config store
+    let mut external_plugin_store = ExternalPluginStore::default();
+    let config_builder =
+        ConfigStoreBuilder::from_oxlintrc(false, oxlintrc, None, &mut external_plugin_store, None)
+            .map_err(|e| anyhow::anyhow!("failed to build lint config: {e}"))?;
+
+    let base_config = config_builder
+        .build(&mut external_plugin_store)
+        .map_err(|e| anyhow::anyhow!("failed to build lint config: {e}"))?;
+
+    let config_store = ConfigStore::new(base_config, Default::default(), external_plugin_store);
+
+    // Create linter
+    let fix_kind = if fix { FixKind::SafeFix } else { FixKind::None };
+    let linter = Linter::new(LintOptions::default(), config_store, None).with_fix(fix_kind);
+
+    // Determine lint targets
+    let lint_dirs: Vec<PathBuf> = if paths.is_empty() {
+        let pages_dir = root.join("pages");
+        if pages_dir.is_dir() {
+            vec![pages_dir]
+        } else {
+            vec![root.clone()]
+        }
+    } else {
+        paths
+            .into_iter()
+            .map(|p| if p.is_absolute() { p } else { root.join(p) })
+            .collect()
+    };
+
+    // Discover source files
+    let mut files: Vec<PathBuf> = Vec::new();
+    for dir in &lint_dirs {
+        if dir.is_file() {
+            files.push(dir.clone());
+        } else if dir.is_dir() {
+            walk_lint_dir(dir, &mut files);
+        }
     }
 
-    let pages_dir = root.join("pages");
-    let lint_dir = if pages_dir.is_dir() {
-        pages_dir
-    } else {
-        root.clone()
-    };
+    if files.is_empty() {
+        eprintln!();
+        eprintln!("  {} {}", magenta_bold("◆ rex lint"), dim("(oxlint)"));
+        eprintln!();
+        eprintln!("  {} {}", dim("No source files found to lint"), dim(""));
+        eprintln!();
+        return Ok(());
+    }
 
     eprintln!();
     eprintln!("  {} {}", magenta_bold("◆ rex lint"), dim("(oxlint)"));
     eprintln!();
 
-    let mut cmd = Command::new(&oxlint);
-    cmd.current_dir(&root);
-    cmd.arg(lint_dir);
-    cmd.arg("--config").arg(&config_path);
+    // Build LintRunner and execute
+    let service_options = LintServiceOptions::new(root.clone().into_boxed_path());
 
-    if fix {
-        cmd.arg("--fix");
+    let lint_runner = LintRunner::builder(service_options, linter)
+        .with_fix_kind(fix_kind)
+        .build()
+        .map_err(|e| anyhow::anyhow!("failed to build lint runner: {e}"))?;
+
+    let file_paths: Vec<Arc<OsStr>> = files
+        .iter()
+        .map(|p| Arc::from(p.as_os_str().to_owned()))
+        .collect();
+
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<oxc_diagnostics::Error>>();
+    let lint_runner = lint_runner
+        .lint_files(&file_paths, tx)
+        .map_err(|e| anyhow::anyhow!("lint failed: {e}"))?;
+
+    // Collect and display diagnostics
+    let mut error_count: usize = 0;
+    let mut warning_count: usize = 0;
+
+    let _ = &lint_runner; // keep runner alive for fix writing
+
+    for errors in rx {
+        for error in &errors {
+            let severity = error.severity().unwrap_or(oxc_diagnostics::Severity::Error);
+            match severity {
+                oxc_diagnostics::Severity::Error => error_count += 1,
+                oxc_diagnostics::Severity::Warning => warning_count += 1,
+                _ => {}
+            }
+            // Print diagnostics using miette-style formatting
+            eprintln!("{error:?}");
+        }
     }
 
-    for arg in &extra_args {
-        cmd.arg(arg);
-    }
+    let total = error_count + warning_count;
 
-    let status = cmd.status()?;
-
-    if status.success() {
-        eprintln!();
+    if total == 0 {
         eprintln!("  {} {}", green_bold("✓"), green_bold("No lint errors"));
         eprintln!();
+        return Ok(());
     }
 
-    std::process::exit(status.code().unwrap_or(1));
+    eprintln!();
+    if error_count > 0 {
+        eprintln!(
+            "  {} {}",
+            bold(&format!("{error_count} error(s)")),
+            if warning_count > 0 {
+                format!("and {} warning(s)", warning_count)
+            } else {
+                String::new()
+            }
+        );
+    } else {
+        eprintln!("  {}", bold(&format!("{warning_count} warning(s)")));
+    }
+    eprintln!();
+
+    if error_count > 0 || (deny_warnings && warning_count > 0) {
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+/// Walk a directory recursively, collecting lintable source files.
+fn walk_lint_dir(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name == "node_modules" || name == ".rex" || name.starts_with('.') {
+                continue;
+            }
+            walk_lint_dir(&path, out);
+        } else if path.is_file() {
+            if let Some("js" | "jsx" | "ts" | "tsx" | "mjs" | "mts") =
+                path.extension().and_then(|e| e.to_str())
+            {
+                // Skip .d.ts type definition files
+                if !path
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().ends_with(".d.ts"))
+                {
+                    out.push(path);
+                }
+            }
+        }
+    }
 }
 
 fn cmd_typecheck(root: PathBuf, extra_args: Vec<String>) -> Result<()> {
@@ -831,27 +954,6 @@ fn walk_dir(
             }
         }
     }
-}
-
-fn find_oxlint(root: &std::path::Path) -> Option<PathBuf> {
-    // 1. Local node_modules/.bin/oxlint
-    let local = root.join("node_modules/.bin/oxlint");
-    if local.exists() {
-        return Some(local);
-    }
-
-    // 2. oxlint in PATH
-    if Command::new("oxlint")
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
-    {
-        return Some(PathBuf::from("oxlint"));
-    }
-
-    None
 }
 
 fn default_oxlintrc() -> &'static str {
