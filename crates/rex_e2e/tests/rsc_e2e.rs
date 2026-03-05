@@ -921,17 +921,8 @@ mod rsc {
         let build_id = extract_build_id(&body);
 
         // Get the flight data for the dashboard/settings page which uses ActionCounter
-        let rsc_url = format!(
-            "{}/_rex/rsc/{}/dashboard/settings",
-            base_url(),
-            build_id
-        );
-        let flight = reqwest::get(&rsc_url)
-            .await
-            .unwrap()
-            .text()
-            .await
-            .unwrap();
+        let rsc_url = format!("{}/_rex/rsc/{}/dashboard/settings", base_url(), build_id);
+        let flight = reqwest::get(&rsc_url).await.unwrap().text().await.unwrap();
 
         // Flight data should contain server action references (T: rows for server references)
         // Extract an action ID from the flight data — look for the action hash pattern
