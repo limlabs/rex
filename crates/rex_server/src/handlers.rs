@@ -2176,4 +2176,19 @@ globalThis.__rex_resolve_gsp = function() {
         let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert!(parsed["error"].as_str().unwrap().contains("not found"));
     }
+
+    #[tokio::test]
+    async fn test_server_action_invalid_utf8() {
+        let app = build_action_test_app();
+        let resp = app
+            .oneshot(
+                Request::post("/_rex/action/test-build-id/test_action_id")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(vec![0xFF, 0xFE]))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
 }

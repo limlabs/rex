@@ -632,4 +632,70 @@ export function add(a: number, b: number) { return a + b; }
         assert!(sa_modules[0].path.ends_with("actions.ts"));
         assert!(sa_modules[0].exports.contains(&"inc".to_string()));
     }
+
+    #[test]
+    fn jsx_file_analyzed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("comp.jsx"),
+            "export default function Comp() { return <div>Hello</div>; }\n",
+        )
+        .unwrap();
+
+        let entries = vec![root.join("comp.jsx")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+        assert_eq!(graph.modules.len(), 1);
+        let comp = graph.modules.values().next().unwrap();
+        assert!(comp.exports.contains(&"default".to_string()));
+    }
+
+    #[test]
+    fn class_export_detected() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("widget.ts"),
+            "\"use client\";\nexport class Widget {}\n",
+        )
+        .unwrap();
+
+        let entries = vec![root.join("widget.ts")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+        let widget = graph.modules.values().next().unwrap();
+        assert!(widget.exports.contains(&"Widget".to_string()));
+    }
+
+    #[test]
+    fn reexport_specifier_detected() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("utils.ts"), "export const helper = 42;\n").unwrap();
+        fs::write(root.join("index.ts"), "export { helper } from './utils';\n").unwrap();
+
+        let entries = vec![root.join("index.ts")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+        let index_mod = graph
+            .modules
+            .values()
+            .find(|m| m.path.ends_with("index.ts"))
+            .unwrap();
+        assert!(
+            index_mod.exports.contains(&"helper".to_string()),
+            "Re-export specifier should be detected, got: {:?}",
+            index_mod.exports
+        );
+    }
+
+    #[test]
+    fn unknown_extension_analyzed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("mod.mjs"), "export const value = 1;\n").unwrap();
+
+        let entries = vec![root.join("mod.mjs")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+        let mjs_mod = graph.modules.values().next().unwrap();
+        assert!(mjs_mod.exports.contains(&"value".to_string()));
+    }
 }
