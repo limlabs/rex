@@ -503,9 +503,15 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn e2e_graceful_shutdown() {
-        // Spawn a separate server instance for this test (not the shared one)
+        // Spawn a separate server instance on a DIFFERENT fixture directory
+        // to avoid build cache conflicts with the shared TestServer on fixtures/basic.
         let bin = rex_binary();
-        let root = fixture_root();
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("fixtures/zero-config");
         let port = find_free_port();
 
         let mut child = Command::new(&bin)
