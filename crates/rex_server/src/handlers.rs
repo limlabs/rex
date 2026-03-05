@@ -1264,7 +1264,7 @@ pub async fn image_handler(
 mod tests {
     use super::*;
     use axum::http::Request;
-    use axum::routing::get;
+    use axum::routing::{get, post};
     use axum::Router;
     use http_body_util::BodyExt;
     use rex_core::{DynamicSegment, PageType, Route};
@@ -2061,5 +2061,119 @@ globalThis.__rex_resolve_gsp = function() {
             .unwrap();
         let html = String::from_utf8_lossy(&body);
         assert!(html.contains("Home"), "should render the page: {html}");
+    }
+
+    fn build_action_test_app() -> Router {
+        rex_v8::init_v8();
+        let action_runtime = r#"
+            globalThis.__rex_server_actions = {
+                "test_action_id": function(x) { return x + 1; }
+            };
+            globalThis.__rex_call_server_action = function(actionId, argsJson) {
+                var actions = globalThis.__rex_server_actions || {};
+                var fn = actions[actionId];
+                if (!fn) return JSON.stringify({ error: "Server action not found: " + actionId });
+                var args = JSON.parse(argsJson);
+                try {
+                    var result = fn.apply(null, args);
+                    return JSON.stringify({ result: result });
+                } catch (e) {
+                    return JSON.stringify({ error: String(e) });
+                }
+            };
+        "#;
+        let bundle = format!(
+            "{}\n{}\n{}",
+            MOCK_REACT_RUNTIME,
+            make_server_bundle(&[]),
+            action_runtime
+        );
+        let pool =
+            rex_v8::IsolatePool::new(1, Arc::new(bundle), None).expect("failed to create pool");
+
+        let build_id = "test-build-id".to_string();
+        let manifest = rex_build::AssetManifest::new(build_id.clone());
+        let manifest_json = HotState::compute_manifest_json(&build_id, &manifest);
+
+        let state = Arc::new(AppState {
+            isolate_pool: pool,
+            is_dev: false,
+            project_root: PathBuf::from("/tmp/rex-test"),
+            image_cache: rex_image::ImageCache::new(PathBuf::from("/tmp/rex-test-cache")),
+            hot: RwLock::new(Arc::new(HotState {
+                route_trie: RouteTrie::from_routes(&[]),
+                api_route_trie: RouteTrie::from_routes(&[]),
+                manifest,
+                build_id,
+                has_custom_404: false,
+                has_custom_error: false,
+                has_custom_document: false,
+                project_config: rex_core::ProjectConfig::default(),
+                manifest_json,
+                document_descriptor: None,
+                has_middleware: false,
+                middleware_matchers: None,
+                app_route_trie: None,
+                has_mcp_tools: false,
+            })),
+        });
+
+        Router::new()
+            .route(
+                "/_rex/action/{build_id}/{action_id}",
+                post(server_action_handler),
+            )
+            .with_state(state)
+    }
+
+    #[tokio::test]
+    async fn test_server_action_stale_build_id() {
+        let app = build_action_test_app();
+        let resp = app
+            .oneshot(
+                Request::post("/_rex/action/wrong-build-id/test_action_id")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from("[42]"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_server_action_success() {
+        let app = build_action_test_app();
+        let resp = app
+            .oneshot(
+                Request::post("/_rex/action/test-build-id/test_action_id")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from("[42]"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_string(resp.into_body()).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["result"], 43);
+    }
+
+    #[tokio::test]
+    async fn test_server_action_not_found() {
+        let app = build_action_test_app();
+        let resp = app
+            .oneshot(
+                Request::post("/_rex/action/test-build-id/nonexistent")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from("[]"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_string(resp.into_body()).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(parsed["error"].as_str().unwrap().contains("not found"));
     }
 }
