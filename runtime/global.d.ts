@@ -86,6 +86,7 @@ declare global {
     __REX_RSC_PARSE_FLIGHT?: (flight: string) => ReactElement | null;
     __REX_RSC_MODULE_MAP__?: RexRscModuleMap;
     __rexModuleCache?: Record<string, unknown>;
+    __REX_CALL_SERVER?: (id: string, args: unknown[]) => Promise<unknown>;
     React?: typeof React;
     ReactDOM?: typeof import("react-dom/client");
   }
@@ -103,6 +104,7 @@ declare global {
   var __rex_renderToReadableStream: (
     element: ReactElement,
     bundlerConfig: Record<string, unknown>,
+    options?: Record<string, unknown>,
   ) => ReadableStream<Uint8Array>;
   var __rex_createFromReadableStream: (
     stream: ReadableStream<Uint8Array>,
@@ -133,6 +135,12 @@ declare global {
   var __rex_rsc_flight_to_html: (flightString: string) => string;
   var __rex_resolve_ssr_pending: () => "pending" | "done";
   var __rex_finalize_ssr: () => string;
+
+  // Server action globals (V8 environment — set by flight.ts runtime)
+  var __rex_server_actions: Record<string, (...args: unknown[]) => unknown>;
+  var __rex_call_server_action: (actionId: string, argsJson: string) => string;
+  var __rex_resolve_action_pending: () => "pending" | "done";
+  var __rex_finalize_action: () => string;
 }
 
 export {};

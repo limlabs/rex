@@ -220,9 +220,9 @@ globalThis.__rex_call_server_action = function(actionId: string, argsJson: strin
 
     try {
         var result = fn.apply(null, args);
-        if (result && typeof result === 'object' && typeof result.then === 'function') {
+        if (result && typeof result === 'object' && typeof (result as Record<string, unknown>).then === 'function') {
             // Async — store promise resolution
-            result.then(
+            (result as Promise<unknown>).then(
                 function(val: unknown) {
                     _actionResult = JSON.stringify({ result: val });
                     _actionDone = true;
