@@ -519,36 +519,20 @@ mod tests {
             .spawn()
             .unwrap();
 
-        // Wait for server to be ready
-        let addr = format!("127.0.0.1:{port}");
-        let deadline = Instant::now() + Duration::from_secs(30);
+        // Wait for server to be fully ready (HTTP 200)
+        let url = format!("http://127.0.0.1:{port}/");
+        let deadline = Instant::now() + Duration::from_secs(60);
         loop {
             if Instant::now() > deadline {
                 child.kill().ok();
-                panic!("Shutdown test: server failed to start");
+                panic!("Shutdown test: server failed to become HTTP-ready within 60s");
             }
-            if TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(100))
-                .is_ok()
-            {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-
-        // Verify it responds (retry to handle race between TCP bind and HTTP readiness)
-        let url = format!("http://127.0.0.1:{port}/");
-        let http_deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            match reqwest::get(&url).await {
-                Ok(resp) => {
-                    assert_eq!(resp.status(), 200);
+            if let Ok(resp) = reqwest::get(&url).await {
+                if resp.status() == 200 {
                     break;
                 }
-                Err(_) if Instant::now() < http_deadline => {
-                    tokio::time::sleep(Duration::from_millis(200)).await;
-                }
-                Err(e) => panic!("Server never became HTTP-ready: {e}"),
             }
+            tokio::time::sleep(Duration::from_millis(250)).await;
         }
 
         // Send SIGTERM (graceful shutdown)
@@ -579,9 +563,9 @@ mod tests {
         }
 
         // Verify the port is no longer accepting connections
+        let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
         assert!(
-            TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(500),)
-                .is_err(),
+            TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_err(),
             "Port should be closed after shutdown"
         );
     }
