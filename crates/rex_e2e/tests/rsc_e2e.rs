@@ -843,4 +843,143 @@ mod rsc {
             panic!("Could not extract build_id from page HTML");
         }
     }
+
+    // -------------------------------------------------------
+    // Server action tests
+    // -------------------------------------------------------
+
+    /// Helper: extract build_id from page HTML
+    fn extract_build_id(body: &str) -> String {
+        let start = body
+            .find("\"build_id\":\"")
+            .expect("Could not find build_id in HTML");
+        let rest = &body[start + 12..];
+        let end = rest.find('"').unwrap();
+        rest[..end].to_string()
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn rsc_server_action_returns_result() {
+        // First, get the build_id from the page HTML
+        let body = reqwest::get(&format!("{}/", base_url()))
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        let build_id = extract_build_id(&body);
+
+        // Find the action ID from the flight data — look for server action references
+        // For now, we'll test the endpoint with a known-bad action ID to verify routing
+        // works, then test with a valid one extracted from flight data.
+
+        // Test: stale build_id returns 404
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(&format!(
+                "{}/_rex/action/stale-build-id/some-action",
+                base_url()
+            ))
+            .header("Content-Type", "application/json")
+            .body("[42]")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 404, "Stale build_id should return 404");
+
+        // Test: unknown action ID returns error JSON (not a 500)
+        let resp = client
+            .post(&format!(
+                "{}/_rex/action/{}/nonexistent-action-id",
+                base_url(),
+                build_id
+            ))
+            .header("Content-Type", "application/json")
+            .body("[42]")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let result: serde_json::Value = resp.json().await.unwrap();
+        assert!(
+            result.get("error").is_some(),
+            "Unknown action should return error JSON, got: {result}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn rsc_server_action_increment_works() {
+        // Get the page HTML and extract build_id + flight data
+        let body = reqwest::get(&format!("{}/", base_url()))
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        let build_id = extract_build_id(&body);
+
+        // Get the flight data for the dashboard/settings page which uses ActionCounter
+        let rsc_url = format!(
+            "{}/_rex/rsc/{}/dashboard/settings",
+            base_url(),
+            build_id
+        );
+        let flight = reqwest::get(&rsc_url)
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+
+        // Flight data should contain server action references (T: rows for server references)
+        // Extract an action ID from the flight data — look for the action hash pattern
+        // Server action IDs are 14-char hex strings referenced in flight I rows
+        let action_id = {
+            let mut found = None;
+            for line in flight.lines() {
+                // Look for server reference markers in the flight protocol
+                // These appear as {"id":"<hash>","bound":null} in T: rows
+                if let Some(pos) = line.find("\"id\":\"") {
+                    let rest = &line[pos + 6..];
+                    if let Some(end) = rest.find('"') {
+                        let id = &rest[..end];
+                        // Server action IDs are hex strings (14 chars)
+                        if id.len() == 14 && id.chars().all(|c| c.is_ascii_hexdigit()) {
+                            found = Some(id.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+            found.expect("Should find a server action ID in flight data")
+        };
+
+        // Call the server action with argument [42] — should return 43 (incrementCounter)
+        // or 41 (decrementCounter). Either confirms the action executes.
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(&format!(
+                "{}/_rex/action/{}/{}",
+                base_url(),
+                build_id,
+                action_id
+            ))
+            .header("Content-Type", "application/json")
+            .body("[42]")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let result: serde_json::Value = resp.json().await.unwrap();
+        let value = result
+            .get("result")
+            .expect("Server action should return {result: ...}");
+        // incrementCounter(42) = 43, decrementCounter(42) = 41
+        assert!(
+            value == 43 || value == 41,
+            "Server action should return 43 or 41, got: {value}"
+        );
+    }
 }
