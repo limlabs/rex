@@ -107,4 +107,4 @@ jobs:
         run: cargo build -p rex_cli
 
       - name: Run e2e tests
-        run: cargo test -p rex_e2e -- --ignored
+        run: cargo test -p rex_e2e --lib -- --ignored
