@@ -877,7 +877,7 @@ mod rsc {
         // Test: stale build_id returns 404
         let client = reqwest::Client::new();
         let resp = client
-            .post(&format!(
+            .post(format!(
                 "{}/_rex/action/stale-build-id/some-action",
                 base_url()
             ))
@@ -890,7 +890,7 @@ mod rsc {
 
         // Test: unknown action ID returns error JSON (not a 500)
         let resp = client
-            .post(&format!(
+            .post(format!(
                 "{}/_rex/action/{}/nonexistent-action-id",
                 base_url(),
                 build_id
@@ -951,7 +951,7 @@ mod rsc {
         // or 41 (decrementCounter). Either confirms the action executes.
         let client = reqwest::Client::new();
         let resp = client
-            .post(&format!(
+            .post(format!(
                 "{}/_rex/action/{}/{}",
                 base_url(),
                 build_id,
