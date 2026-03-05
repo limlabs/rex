@@ -503,9 +503,15 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn e2e_graceful_shutdown() {
-        // Spawn a separate server instance for this test (not the shared one)
+        // Spawn a separate server instance on a DIFFERENT fixture directory
+        // to avoid build cache conflicts with the shared TestServer on fixtures/basic.
         let bin = rex_binary();
-        let root = fixture_root();
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("fixtures/zero-config");
         let port = find_free_port();
 
         let mut child = Command::new(&bin)
@@ -519,26 +525,21 @@ mod tests {
             .spawn()
             .unwrap();
 
-        // Wait for server to be ready
-        let addr = format!("127.0.0.1:{port}");
-        let deadline = Instant::now() + Duration::from_secs(30);
+        // Wait for server to be fully ready (HTTP 200)
+        let url = format!("http://127.0.0.1:{port}/");
+        let deadline = Instant::now() + Duration::from_secs(60);
         loop {
             if Instant::now() > deadline {
                 child.kill().ok();
-                panic!("Shutdown test: server failed to start");
+                panic!("Shutdown test: server failed to become HTTP-ready within 60s");
             }
-            if TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(100))
-                .is_ok()
-            {
-                break;
+            if let Ok(resp) = reqwest::get(&url).await {
+                if resp.status() == 200 {
+                    break;
+                }
             }
-            std::thread::sleep(Duration::from_millis(100));
+            tokio::time::sleep(Duration::from_millis(250)).await;
         }
-
-        // Verify it responds
-        let url = format!("http://127.0.0.1:{port}/");
-        let resp = reqwest::get(&url).await.unwrap();
-        assert_eq!(resp.status(), 200);
 
         // Send SIGTERM (graceful shutdown)
         #[cfg(unix)]
@@ -568,9 +569,9 @@ mod tests {
         }
 
         // Verify the port is no longer accepting connections
+        let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
         assert!(
-            TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(500),)
-                .is_err(),
+            TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_err(),
             "Port should be closed after shutdown"
         );
     }

@@ -47,10 +47,8 @@ jobs:
       - name: TypeScript strict check (fixtures)
         run: scripts/typecheck-fixtures.sh
 
-      - uses: oxc-project/oxlint-action@latest
-        with:
-          deny-warnings: true
-          args: runtime/ packages/rex/src/
+      - name: oxlint
+        run: cargo run -p rex_cli -- lint --deny-warnings runtime/ packages/rex/src/
 
   test:
     name: Test & Coverage
@@ -83,3 +81,28 @@ jobs:
             echo "::error::Coverage ${COVERAGE}% is below threshold ${COVERAGE_THRESHOLD}%"
             exit 1
           fi
+
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: [check]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+          save-if: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install fixture dependencies
+        run: cd fixtures/basic && npm install
+
+      - name: Build rex binary
+        run: cargo build -p rex_cli
+
+      - name: Run e2e tests
+        run: cargo test -p rex_e2e --lib -- --ignored

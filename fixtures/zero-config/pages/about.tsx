@@ -1,5 +1,10 @@
 import React from "react";
 
+export async function getServerSideProps() {
+  console.log("hello limothy");
+  return { props: {} };
+}
+
 export default function About() {
   return (
     <div>
