@@ -48,7 +48,7 @@ jobs:
         run: scripts/typecheck-fixtures.sh
 
       - name: oxlint
-        run: cargo run -- lint --deny-warnings runtime/ packages/rex/src/
+        run: cargo run -p rex_cli -- lint --deny-warnings runtime/ packages/rex/src/
 
   test:
     name: Test & Coverage
