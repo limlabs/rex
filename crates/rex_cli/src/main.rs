@@ -970,7 +970,8 @@ fn default_oxlintrc() -> &'static str {
     "nextjs/no-img-element": "warn",
     "nextjs/no-head-import-in-document": "warn",
     "nextjs/no-duplicate-head": "warn",
-    "import/no-cycle": "warn"
+    "import/no-cycle": "warn",
+    "no-var": "error"
   },
   "ignorePatterns": [".rex/", "node_modules/"]
 }

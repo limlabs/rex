@@ -16,7 +16,7 @@ export default function Home({ message, timestamp }: Props) {
   );
 }
 
-export async function getServerSideProps(ctx: GetServerSidePropsContext) {
+export async function getServerSideProps(_ctx: GetServerSidePropsContext) {
   return {
     props: {
       message: "Hello from Rex!",
