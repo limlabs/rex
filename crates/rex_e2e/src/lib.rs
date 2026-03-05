@@ -535,10 +535,21 @@ mod tests {
             std::thread::sleep(Duration::from_millis(100));
         }
 
-        // Verify it responds
+        // Verify it responds (retry to handle race between TCP bind and HTTP readiness)
         let url = format!("http://127.0.0.1:{port}/");
-        let resp = reqwest::get(&url).await.unwrap();
-        assert_eq!(resp.status(), 200);
+        let http_deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match reqwest::get(&url).await {
+                Ok(resp) => {
+                    assert_eq!(resp.status(), 200);
+                    break;
+                }
+                Err(_) if Instant::now() < http_deadline => {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+                Err(e) => panic!("Server never became HTTP-ready: {e}"),
+            }
+        }
 
         // Send SIGTERM (graceful shutdown)
         #[cfg(unix)]
