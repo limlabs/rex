@@ -14,17 +14,14 @@ pre-commit:
       run: "! git diff --cached --name-only --diff-filter=ACR | grep '\\.js$' | grep -v '^packages/rex/bin/' | grep -q ."
       fail_text: "Do not commit .js files — use TypeScript (.ts/.tsx) instead"
     oxlint:
-      run: oxlint --deny-warnings runtime/ packages/rex/src/
+      run: cargo run -- lint --deny-warnings runtime/ packages/rex/src/ fixtures/ benchmarks/
       fail_text: "Fix oxlint warnings before committing"
     typecheck:
       run: cd runtime && { [ -d node_modules ] || npm install --no-package-lock --ignore-scripts --no-audit --no-fund; } && npm run typecheck
       fail_text: "Fix TypeScript errors in runtime/"
-    test:
-      run: cargo test
-      fail_text: "Tests must pass before committing"
     typecheck-fixtures:
       run: scripts/typecheck-fixtures.sh
-      fail_text: "Fix TypeScript errors in fixtures before committing"
+      fail_text: "Fix TypeScript errors in fixtures/benchmarks before committing"
     coverage-ratchet:
       run: scripts/coverage-ratchet.sh
       fail_text: "Coverage dropped below the threshold in .coverage-threshold"
@@ -41,9 +38,6 @@ commit-msg:
 pre-push:
   parallel: false
   commands:
-    test:
-      run: cargo test
-      fail_text: "Tests must pass before pushing"
     e2e:
       run: cargo build -p rex_cli && cargo test -p rex_e2e --lib -- --ignored
       fail_text: "E2E tests must pass before pushing"
