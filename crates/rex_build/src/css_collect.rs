@@ -124,3 +124,37 @@ pub(crate) fn extract_string_literal(line: &str) -> Option<&str> {
     let end = rest.find(quote_char)?;
     Some(&rest[..end])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_string_literal_single_quotes() {
+        assert_eq!(
+            extract_string_literal("import './foo.css';"),
+            Some("./foo.css")
+        );
+    }
+
+    #[test]
+    fn test_extract_string_literal_double_quotes() {
+        assert_eq!(
+            extract_string_literal(r#"import "./foo.css";"#),
+            Some("./foo.css")
+        );
+    }
+
+    #[test]
+    fn test_extract_string_literal_from_syntax() {
+        assert_eq!(
+            extract_string_literal("import x from './foo';"),
+            Some("./foo")
+        );
+    }
+
+    #[test]
+    fn test_extract_string_literal_no_quotes() {
+        assert_eq!(extract_string_literal("import foo"), None);
+    }
+}

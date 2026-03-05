@@ -54,79 +54,64 @@ pub(crate) fn detect_data_strategy_from_source(source: &str) -> Result<DataStrat
 /// Looks for `export const config = { matcher: [...] }` and extracts string literals.
 /// Returns empty vec if no matcher found (meaning: run on all paths).
 pub(crate) fn extract_middleware_matchers(source: &str) -> Vec<String> {
-    let mut matchers = Vec::new();
-    let mut in_config = false;
-    let mut in_matcher = false;
-    let mut brace_depth: i32 = 0;
+    use oxc_ast::ast::{
+        ArrayExpressionElement, Declaration, Expression, ObjectPropertyKind, PropertyKey, Statement,
+    };
 
-    for line in source.lines() {
-        let trimmed = line.trim();
+    let allocator = oxc_allocator::Allocator::default();
+    let source_type = oxc_span::SourceType::mjs();
+    let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
 
-        if !in_config {
-            if trimmed.contains("export") && trimmed.contains("config") {
-                in_config = true;
-                // Check if matcher is on the same line
-                if let Some(idx) = trimmed.find("matcher") {
-                    let after = &trimmed[idx..];
-                    extract_strings_from_fragment(after, &mut matchers);
-                    if after.contains(']') {
-                        return matchers;
-                    }
-                    in_matcher = true;
-                }
-                brace_depth =
-                    trimmed.matches('{').count() as i32 - trimmed.matches('}').count() as i32;
-                if brace_depth <= 0 && trimmed.contains('}') {
-                    in_config = false;
-                }
+    if !parsed.errors.is_empty() {
+        return Vec::new();
+    }
+
+    for stmt in &parsed.program.body {
+        let Statement::ExportNamedDeclaration(export) = stmt else {
+            continue;
+        };
+        let Some(Declaration::VariableDeclaration(var_decl)) = export.declaration.as_ref() else {
+            continue;
+        };
+        for declarator in &var_decl.declarations {
+            let oxc_ast::ast::BindingPattern::BindingIdentifier(ref id) = declarator.id else {
+                continue;
+            };
+            if id.name.as_str() != "config" {
+                continue;
             }
-        } else {
-            brace_depth +=
-                trimmed.matches('{').count() as i32 - trimmed.matches('}').count() as i32;
-
-            if !in_matcher {
-                if let Some(idx) = trimmed.find("matcher") {
-                    let after = &trimmed[idx..];
-                    extract_strings_from_fragment(after, &mut matchers);
-                    if after.contains(']') {
-                        return matchers;
-                    }
-                    in_matcher = true;
+            let Some(Expression::ObjectExpression(obj)) = declarator.init.as_ref() else {
+                continue;
+            };
+            for prop in &obj.properties {
+                let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+                    continue;
+                };
+                let is_matcher = match &prop.key {
+                    PropertyKey::StaticIdentifier(id) => id.name.as_str() == "matcher",
+                    PropertyKey::StringLiteral(s) => s.value.as_str() == "matcher",
+                    _ => false,
+                };
+                if !is_matcher {
+                    continue;
                 }
-            } else {
-                extract_strings_from_fragment(trimmed, &mut matchers);
-                if trimmed.contains(']') {
-                    return matchers;
-                }
-            }
-
-            if brace_depth <= 0 {
-                in_config = false;
-                in_matcher = false;
+                return match &prop.value {
+                    Expression::ArrayExpression(arr) => arr
+                        .elements
+                        .iter()
+                        .filter_map(|el| match el {
+                            ArrayExpressionElement::StringLiteral(s) => Some(s.value.to_string()),
+                            _ => None,
+                        })
+                        .collect(),
+                    Expression::StringLiteral(s) => vec![s.value.to_string()],
+                    _ => Vec::new(),
+                };
             }
         }
     }
 
-    matchers
-}
-
-/// Extract string literals (single or double quoted) from a code fragment.
-fn extract_strings_from_fragment(fragment: &str, out: &mut Vec<String>) {
-    let mut chars = fragment.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\'' || ch == '"' {
-            let mut s = String::new();
-            for c in chars.by_ref() {
-                if c == ch {
-                    break;
-                }
-                s.push(c);
-            }
-            if !s.is_empty() {
-                out.push(s);
-            }
-        }
-    }
+    Vec::new()
 }
 
 /// Generate a build ID based on current timestamp
@@ -173,4 +158,126 @@ pub(crate) fn runtime_server_dir() -> Result<PathBuf> {
     }
     // Distributed binary: extract embedded runtime files to temp dir
     crate::embedded_runtime::server_dir()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rex_core::{PageType, Route};
+    use std::path::PathBuf;
+
+    fn make_route(pattern: &str, file_path: &str) -> Route {
+        Route {
+            pattern: pattern.to_string(),
+            file_path: PathBuf::from(file_path),
+            abs_path: PathBuf::from(file_path),
+            dynamic_segments: vec![],
+            page_type: PageType::Regular,
+            specificity: 0,
+        }
+    }
+
+    #[test]
+    fn test_route_to_chunk_name_index() {
+        let route = make_route("/", "index.tsx");
+        assert_eq!(route_to_chunk_name(&route), "index");
+    }
+
+    #[test]
+    fn test_route_to_chunk_name_nested() {
+        let route = make_route("/blog/:slug", "blog/[slug].tsx");
+        assert_eq!(route_to_chunk_name(&route), "blog-_slug_");
+    }
+
+    #[test]
+    fn test_route_to_chunk_name_deep_nested() {
+        let route = make_route("/docs/api/:path*", "docs/api/[...path].tsx");
+        assert_eq!(route_to_chunk_name(&route), "docs-api-_...path_");
+    }
+
+    #[test]
+    fn test_find_route_for_chunk_found() {
+        let routes = vec![
+            make_route("/", "index.tsx"),
+            make_route("/about", "about.tsx"),
+            make_route("/blog/:slug", "blog/[slug].tsx"),
+        ];
+        let found = find_route_for_chunk("about", &routes);
+        assert!(found.is_some());
+        assert_eq!(found.expect("route should exist").pattern, "/about");
+    }
+
+    #[test]
+    fn test_find_route_for_chunk_not_found() {
+        let routes = vec![make_route("/", "index.tsx")];
+        assert!(find_route_for_chunk("nonexistent", &routes).is_none());
+    }
+
+    #[test]
+    fn test_generate_build_id_format() {
+        let id = generate_build_id();
+        assert_eq!(id.len(), 16, "build ID should be 16 hex chars");
+        assert!(
+            id.chars().all(|c| c.is_ascii_hexdigit()),
+            "build ID should contain only hex chars"
+        );
+    }
+
+    #[test]
+    fn test_extract_middleware_matchers_multiline() {
+        let source = r#"
+export const config = {
+    matcher: [
+        '/dashboard/:path*',
+        '/api/admin/:path*',
+        '/settings'
+    ]
+}
+"#;
+        let matchers = extract_middleware_matchers(source);
+        assert_eq!(
+            matchers,
+            vec!["/dashboard/:path*", "/api/admin/:path*", "/settings"]
+        );
+    }
+
+    #[test]
+    fn test_extract_middleware_matchers_single_string() {
+        let source = r#"
+export const config = {
+    matcher: '/api/:path*'
+}
+"#;
+        let matchers = extract_middleware_matchers(source);
+        assert_eq!(matchers, vec!["/api/:path*"]);
+    }
+
+    #[test]
+    fn test_extract_middleware_matchers_with_comments() {
+        let source = r#"
+export const config = {
+    // Apply to dashboard and API routes
+    matcher: [
+        '/dashboard/:path*', // admin pages
+        '/api/:path*' // API routes
+    ]
+}
+"#;
+        let matchers = extract_middleware_matchers(source);
+        assert_eq!(matchers, vec!["/dashboard/:path*", "/api/:path*"]);
+    }
+
+    #[test]
+    fn test_extract_middleware_matchers_trailing_comma() {
+        let source = r#"
+export const config = {
+    matcher: [
+        '/dashboard/:path*',
+        '/api/:path*',
+    ],
+}
+"#;
+        let matchers = extract_middleware_matchers(source);
+        assert_eq!(matchers, vec!["/dashboard/:path*", "/api/:path*"]);
+    }
 }

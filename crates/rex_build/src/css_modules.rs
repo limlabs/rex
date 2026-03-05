@@ -265,7 +265,7 @@ pub(crate) fn generate_css_module_proxy(class_map: &HashMap<String, String>) -> 
 }
 
 /// Absolutize relative imports in a source file so it can be moved to a temp directory.
-fn absolutize_relative_imports(source: &str, source_dir: &Path) -> String {
+pub(crate) fn absolutize_relative_imports(source: &str, source_dir: &Path) -> String {
     let mut result = String::new();
 
     for line in source.lines() {
@@ -330,4 +330,74 @@ fn absolutize_relative_imports(source: &str, source_dir: &Path) -> String {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_css_module_hash_deterministic() {
+        let path = Path::new("/app/Button.module.css");
+        assert_eq!(css_module_hash(path), css_module_hash(path));
+    }
+
+    #[test]
+    fn test_css_module_hash_differs() {
+        let a = css_module_hash(Path::new("/app/Button.module.css"));
+        let b = css_module_hash(Path::new("/app/Card.module.css"));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn test_css_module_stem_basic() {
+        assert_eq!(css_module_stem(Path::new("Button.module.css")), "Button");
+    }
+
+    #[test]
+    fn test_css_module_stem_fallback() {
+        // Path with no file stem returns "module"
+        assert_eq!(css_module_stem(Path::new("")), "module");
+    }
+
+    #[test]
+    fn test_extract_import_specifier_single_quotes() {
+        let line = "import styles from './Button.module.css';";
+        assert_eq!(
+            extract_import_from_specifier(line),
+            Some("./Button.module.css")
+        );
+    }
+
+    #[test]
+    fn test_extract_import_specifier_double_quotes() {
+        let line = r#"import styles from "./Button.module.css";"#;
+        assert_eq!(
+            extract_import_from_specifier(line),
+            Some("./Button.module.css")
+        );
+    }
+
+    #[test]
+    fn test_extract_import_specifier_no_from() {
+        let line = "import './globals.css';";
+        assert_eq!(extract_import_from_specifier(line), None);
+    }
+
+    #[test]
+    fn test_absolutize_relative_imports() {
+        let source = "import Foo from './foo';\nimport React from 'react';\n";
+        let dir = Path::new("/project/src");
+        let result = absolutize_relative_imports(source, dir);
+        // join("./foo") produces "/project/src/./foo" which is fine — rolldown resolves it
+        assert!(
+            result.contains("/project/src/"),
+            "relative import should be absolutized: {result}"
+        );
+        assert!(
+            result.contains("foo"),
+            "specifier name should be preserved: {result}"
+        );
+        assert!(result.contains("from 'react'"), "bare specifiers unchanged");
+    }
 }

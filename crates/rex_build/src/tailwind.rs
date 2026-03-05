@@ -95,3 +95,27 @@ pub fn process_tailwind_css(
 
     Ok(mappings)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_find_tailwind_bin_found() {
+        let tmp = TempDir::new().expect("test setup");
+        let bin_dir = tmp.path().join("node_modules/.bin");
+        fs::create_dir_all(&bin_dir).expect("test setup");
+        let bin_path = bin_dir.join("tailwindcss");
+        fs::write(&bin_path, "#!/bin/sh\n").expect("test setup");
+        fs::set_permissions(&bin_path, fs::Permissions::from_mode(0o755)).expect("test setup");
+        assert!(find_tailwind_bin(tmp.path()).is_some());
+    }
+
+    #[test]
+    fn test_find_tailwind_bin_not_found() {
+        let tmp = TempDir::new().expect("test setup");
+        assert!(find_tailwind_bin(tmp.path()).is_none());
+    }
+}
