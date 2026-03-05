@@ -4,7 +4,7 @@
 // These intentionally implement simplified browser APIs, so `any` is used
 // throughout for globalThis assignments and constructor functions.
 
-if (typeof globalThis.process === 'undefined') {
+if (typeof (globalThis as any).process === 'undefined') {
     (globalThis as any).process = { env: { NODE_ENV: 'production' } };
 }
 if (typeof globalThis.setTimeout === 'undefined') {
@@ -261,7 +261,7 @@ if (typeof globalThis.AbortController === 'undefined') {
 }
 
 // Buffer polyfill for bare V8 — Node.js Buffer API (base64, hex, binary data)
-if (typeof globalThis.Buffer === 'undefined') {
+if (typeof (globalThis as any).Buffer === 'undefined') {
     var _B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
     var _B64L = new Uint8Array(256);
     for (var _bi = 0; _bi < _B64.length; _bi++) _B64L[_B64.charCodeAt(_bi)] = _bi;
