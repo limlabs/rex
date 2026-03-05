@@ -342,6 +342,25 @@ jobs:
             artifacts/rex-macos-x86_64/rex-macos-x86_64.tar.gz
             artifacts/rex-macos-x86_64/rex-macos-x86_64.tar.gz.sha256
 
+  cargo-publish:
+    name: Cargo Publish
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish crates
+        run: |
+          # No-dep crates first (parallel-safe but sequential for simplicity)
+          cargo publish -p rex_image --no-verify
+          cargo publish -p rex_core --no-verify
+          sleep 30  # wait for crates.io index
+          # Crates that depend on rex_core
+          cargo publish -p rex_router --no-verify
+          cargo publish -p rex_v8 --no-verify
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
   cleanup-beta-releases:
     name: Clean up beta releases
     needs: release-please
