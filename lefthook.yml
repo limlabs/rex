@@ -17,7 +17,7 @@ pre-commit:
       run: cargo run -- lint --deny-warnings runtime/ packages/rex/src/ fixtures/ benchmarks/
       fail_text: "Fix oxlint warnings before committing"
     typecheck:
-      run: cd runtime && npm run typecheck
+      run: cd runtime && { [ -d node_modules ] || npm install --no-package-lock --ignore-scripts --no-audit --no-fund; } && npm run typecheck
       fail_text: "Fix TypeScript errors in runtime/"
     typecheck-fixtures:
       run: scripts/typecheck-fixtures.sh
