@@ -232,3 +232,5 @@ pub(crate) fn check_redirects(path: &str, config: &ProjectConfig) -> Option<Resp
 mod test_support;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_coverage;
