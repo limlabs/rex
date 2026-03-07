@@ -564,6 +564,12 @@ pub async fn handle_image(state: &Arc<AppState>, req: &RexRequest) -> RexRespons
     }
 
     let url_path = url.trim_start_matches('/');
+
+    // Reject paths with traversal components before touching the filesystem
+    if url_path.split('/').any(|seg| seg == ".." || seg == ".") {
+        return RexResponse::text(400, "invalid path".to_string());
+    }
+
     let file_path = state.project_root.join("public").join(url_path);
 
     // Prevent path traversal — both canonicalizations must succeed

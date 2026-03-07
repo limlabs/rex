@@ -70,6 +70,12 @@ pub async fn image_handler(
 
     // Resolve source file from public/ directory (only local files)
     let url_path = query.url.trim_start_matches('/');
+
+    // Reject paths with traversal components before touching the filesystem
+    if url_path.split('/').any(|seg| seg == ".." || seg == ".") {
+        return (StatusCode::BAD_REQUEST, "invalid path").into_response();
+    }
+
     let file_path = state.project_root.join("public").join(url_path);
 
     // Prevent path traversal — both canonicalizations must succeed

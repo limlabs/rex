@@ -19,8 +19,16 @@ impl ImageCache {
         hex::encode(hasher.finalize())
     }
 
+    /// Validate that a cache key is a safe filename (hex chars only).
+    fn validate_key(key: &str) -> bool {
+        !key.is_empty() && key.len() <= 128 && key.bytes().all(|b| b.is_ascii_hexdigit())
+    }
+
     /// Try to read a cached image. Returns None on miss.
     pub fn get(&self, key: &str) -> Option<Vec<u8>> {
+        if !Self::validate_key(key) {
+            return None;
+        }
         let path = self.cache_dir.join(key);
         match fs::read(&path) {
             Ok(data) => {
@@ -33,6 +41,12 @@ impl ImageCache {
 
     /// Store an optimized image in the cache.
     pub fn put(&self, key: &str, data: &[u8]) -> std::io::Result<()> {
+        if !Self::validate_key(key) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid cache key",
+            ));
+        }
         fs::create_dir_all(&self.cache_dir)?;
         let path = self.cache_dir.join(key);
         fs::write(&path, data)?;
