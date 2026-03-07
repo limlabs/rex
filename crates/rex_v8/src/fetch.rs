@@ -204,6 +204,14 @@ fn is_private_ip(ip: &IpAddr) -> bool {
 
 /// Validate that a URL does not resolve to a private/internal IP address.
 async fn validate_url_not_private(url: &str) -> Result<(), String> {
+    // Allow requests to the internal origin (e.g. Python/Node backend on localhost).
+    // Set REX_INTERNAL_ORIGIN=http://127.0.0.1:8000 to allow fetch() to that host.
+    if let Ok(allowed) = std::env::var("REX_INTERNAL_ORIGIN") {
+        if url.starts_with(&allowed) {
+            return Ok(());
+        }
+    }
+
     let parsed = reqwest::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
     let host = parsed.host_str().ok_or("URL has no host")?;
 
@@ -716,5 +724,16 @@ mod tests {
     async fn ssrf_blocks_metadata_url() {
         let result = validate_url_not_private("http://169.254.169.254/latest/meta-data/").await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn ssrf_allowlist_permits_internal_origin() {
+        std::env::set_var("REX_INTERNAL_ORIGIN", "http://127.0.0.1:8000");
+        let result = validate_url_not_private("http://127.0.0.1:8000/api/data").await;
+        assert!(result.is_ok());
+        // Non-matching localhost URL is still blocked
+        let result2 = validate_url_not_private("http://127.0.0.1:9999/secret").await;
+        assert!(result2.is_err());
+        std::env::remove_var("REX_INTERNAL_ORIGIN");
     }
 }

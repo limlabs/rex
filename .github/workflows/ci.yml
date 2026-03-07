@@ -10,6 +10,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -21,11 +24,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup
         with:
-          shared-key: ci
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: cargo fmt
         run: cargo fmt --check
@@ -35,10 +36,6 @@ jobs:
 
       - name: cargo check
         run: cargo check --all-targets
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
 
       - name: Install runtime dependencies
         run: cd runtime && npm ci
@@ -60,26 +57,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup
         with:
-          shared-key: ci
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install fixture dependencies
-        run: cd fixtures/basic && npm install
+      - name: Run rex_python tests
+        run: cargo test -p rex_python
 
       - name: Run tests with coverage
         run: |
           COVERAGE_THRESHOLD=$(cat .coverage-threshold | tr -d '[:space:]')
-          cargo llvm-cov --all --ignore-filename-regex 'tests/' --json --output-path coverage.json
+          cargo llvm-cov --workspace --exclude rex_python --ignore-filename-regex 'tests/' --json --output-path coverage.json
           COVERAGE=$(jq '.data[0].totals.lines.percent' coverage.json | xargs printf '%.0f')
           echo "Line coverage: ${COVERAGE}% (threshold: ${COVERAGE_THRESHOLD}%)"
           if [ "$COVERAGE" -lt "$COVERAGE_THRESHOLD" ]; then
@@ -93,18 +84,7 @@ jobs:
     needs: [check]
     steps:
       - uses: actions/checkout@v4
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci
-          save-if: false
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install fixture dependencies
-        run: cd fixtures/basic && npm install
+      - uses: ./.github/actions/setup
 
       - name: Build rex binary
         run: cargo build -p rex_cli
