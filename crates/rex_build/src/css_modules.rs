@@ -14,9 +14,10 @@ pub(crate) struct CssModuleProcessing {
     pub global_css: Vec<String>,
 }
 
-/// Pre-process CSS modules before rolldown bundling.
+/// Pre-process MDX pages and CSS modules before rolldown bundling.
 ///
-/// For each page that imports `.module.css` files:
+/// First compiles any `.mdx` pages to `.jsx` (via `process_mdx_pages`).
+/// Then, for each page that imports `.module.css` files:
 /// 1. Parse the CSS to extract class names
 /// 2. Generate scoped class names and write scoped CSS to output
 /// 3. Generate a JS proxy that exports the class name mapping

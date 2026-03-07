@@ -74,7 +74,10 @@ pub(crate) async fn build_server_bundle(
     // Special pages (404, _error)
     for (label, route_opt) in [("404", &scan.not_found), ("_error", &scan.error)] {
         if let Some(route) = route_opt {
-            let page_path = route.abs_path.to_string_lossy().replace('\\', "/");
+            let effective_path = page_overrides
+                .get(&route.abs_path)
+                .unwrap_or(&route.abs_path);
+            let page_path = effective_path.to_string_lossy().replace('\\', "/");
             entry.push_str(&format!("import * as __page_{label} from '{page_path}';\n"));
             entry.push_str(&format!(
                 "globalThis.__rex_pages['{label}'] = __page_{label};\n"
@@ -106,7 +109,8 @@ pub(crate) async fn build_server_bundle(
     // _document (imports rex/document which sets up __rex_render_document)
     if let Some(doc) = &scan.document {
         entry.push_str("\nimport 'rex/document';\n");
-        let doc_path = doc.abs_path.to_string_lossy().replace('\\', "/");
+        let effective_doc = page_overrides.get(&doc.abs_path).unwrap_or(&doc.abs_path);
+        let doc_path = effective_doc.to_string_lossy().replace('\\', "/");
         entry.push_str(&format!("import * as __doc from '{doc_path}';\n"));
         entry.push_str("globalThis.__rex_document = __doc;\n");
     }

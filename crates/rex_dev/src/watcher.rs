@@ -24,7 +24,7 @@ pub struct FileEvent {
 /// Start watching the project root for file changes. Returns a receiver for file events.
 ///
 /// Watches recursively but skips `node_modules/`, `.rex/`, `.git/`, and `target/`.
-/// - `.tsx/.ts/.jsx/.js` files under `pages_dir` → PageModified / PageRemoved
+/// - `.tsx/.ts/.jsx/.js/.mdx` files under `pages_dir` → PageModified / PageRemoved
 /// - `.css` files anywhere → CssModified
 pub fn start_watcher(project_root: &Path, pages_dir: &Path) -> Result<mpsc::Receiver<FileEvent>> {
     let (tx, rx) = mpsc::channel();

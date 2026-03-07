@@ -61,11 +61,18 @@ pub fn compile_mdx_with_options(source: &str, options: &MdxOptions) -> Result<St
     let mut codegen = MdxCodegen::default();
     let mut frontmatter_yaml: Option<String> = None;
     let mut jsx_children = Vec::new();
+    let mut body_esm_lines = Vec::new();
 
     if let mdast::Node::Root(root) = &ast {
         for child in &root.children {
             if let mdast::Node::Yaml(yaml) = child {
                 frontmatter_yaml = Some(yaml.value.clone());
+                continue;
+            }
+            // Collect ESM found by the markdown parser (e.g. imports after frontmatter
+            // that extract_esm couldn't reach because frontmatter came first).
+            if let mdast::Node::MdxjsEsm(esm) = child {
+                body_esm_lines.push(esm.value.clone());
                 continue;
             }
             if let Some(expr) = codegen.node_to_jsx(child) {
@@ -77,8 +84,12 @@ pub fn compile_mdx_with_options(source: &str, options: &MdxOptions) -> Result<St
     // Phase 4: Assemble the output module.
     let mut output = String::new();
 
-    // Emit extracted ESM imports/exports
+    // Emit extracted ESM imports/exports (from top-of-file and from markdown body)
     for line in &esm_lines {
+        output.push_str(line);
+        output.push('\n');
+    }
+    for line in &body_esm_lines {
         output.push_str(line);
         output.push('\n');
     }
@@ -313,8 +324,8 @@ impl MdxCodegen {
             mdast::Node::MdxJsxTextElement(el) => Some(self.mdx_jsx_text_to_jsx(el)),
             mdast::Node::MdxTextExpression(expr) => Some(expr.value.clone()),
             mdast::Node::MdxFlowExpression(expr) => Some(expr.value.clone()),
-            mdast::Node::MdxjsEsm(_) => None,
-            mdast::Node::Yaml(_) => None, // Handled in compile_mdx
+            mdast::Node::MdxjsEsm(_) => None, // Handled in compile_mdx_with_options
+            mdast::Node::Yaml(_) => None,     // Handled in compile_mdx_with_options
             _ => None,
         }
     }
