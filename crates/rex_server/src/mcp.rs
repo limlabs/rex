@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::debug;
 
-use crate::handlers::AppState;
+use crate::state::AppState;
 
 // --- JSON-RPC 2.0 types ---
 
