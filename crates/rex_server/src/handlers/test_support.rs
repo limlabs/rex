@@ -176,11 +176,15 @@ pub(super) async fn body_string(body: axum::body::Body) -> String {
 pub(super) struct TestAppBuilder {
     routes: Vec<Route>,
     pages: Vec<(&'static str, &'static str, Option<&'static str>)>,
+    api_routes: Vec<Route>,
     project_config: rex_core::ProjectConfig,
     middleware_js: Option<String>,
     middleware_matchers: Option<Vec<String>>,
     extra_bundle: Option<String>,
     custom_router: Option<Box<dyn FnOnce(Arc<AppState>) -> Router>>,
+    is_dev: bool,
+    has_custom_404: bool,
+    has_custom_error: bool,
 }
 
 impl TestAppBuilder {
@@ -188,11 +192,15 @@ impl TestAppBuilder {
         Self {
             routes: Vec::new(),
             pages: Vec::new(),
+            api_routes: Vec::new(),
             project_config: rex_core::ProjectConfig::default(),
             middleware_js: None,
             middleware_matchers: None,
             extra_bundle: None,
             custom_router: None,
+            is_dev: false,
+            has_custom_404: false,
+            has_custom_error: false,
         }
     }
 
@@ -208,6 +216,26 @@ impl TestAppBuilder {
 
     pub fn config(mut self, config: rex_core::ProjectConfig) -> Self {
         self.project_config = config;
+        self
+    }
+
+    pub fn api_routes(mut self, routes: Vec<Route>) -> Self {
+        self.api_routes = routes;
+        self
+    }
+
+    pub fn dev_mode(mut self) -> Self {
+        self.is_dev = true;
+        self
+    }
+
+    pub fn custom_404(mut self) -> Self {
+        self.has_custom_404 = true;
+        self
+    }
+
+    pub fn custom_error(mut self) -> Self {
+        self.has_custom_error = true;
         self
     }
 
@@ -268,18 +296,20 @@ impl TestAppBuilder {
             None
         };
 
+        let api_trie = RouteTrie::from_routes(&self.api_routes);
+
         let state = Arc::new(AppState {
             isolate_pool: pool,
-            is_dev: false,
+            is_dev: self.is_dev,
             project_root: PathBuf::from("/tmp/rex-test"),
             image_cache: rex_image::ImageCache::new(PathBuf::from("/tmp/rex-test-cache")),
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
-                api_route_trie: RouteTrie::from_routes(&[]),
+                api_route_trie: api_trie,
                 manifest,
                 build_id,
-                has_custom_404: false,
-                has_custom_error: false,
+                has_custom_404: self.has_custom_404,
+                has_custom_error: self.has_custom_error,
                 has_custom_document: false,
                 project_config: self.project_config,
                 manifest_json,
@@ -313,6 +343,54 @@ pub(super) const TEST_MIDDLEWARE_REDIRECT: &str = r#"
                 status: 302,
                 request_headers: {},
                 response_headers: {}
+            });
+        }
+        return JSON.stringify({
+            action: 'next',
+            url: null,
+            status: 307,
+            request_headers: {},
+            response_headers: {}
+        });
+    };
+"#;
+
+/// API handler runtime for tests.
+pub(super) const TEST_API_RUNTIME: &str = r#"
+    globalThis.__rex_api_routes = globalThis.__rex_api_routes || {};
+    globalThis.__rex_api_routes['api/hello'] = function(req) {
+        var parsed = JSON.parse(req);
+        if (parsed.method === 'POST') {
+            return JSON.stringify({
+                statusCode: 200,
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ echo: parsed.body })
+            });
+        }
+        return JSON.stringify({
+            statusCode: 200,
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ message: 'hello from api' })
+        });
+    };
+    globalThis.__rex_call_api_handler = function(routeKey, reqJson) {
+        var handler = globalThis.__rex_api_routes[routeKey];
+        if (!handler) throw new Error('API route not found: ' + routeKey);
+        return handler(reqJson);
+    };
+"#;
+
+/// Middleware runtime that rewrites /old-path to /new-path.
+pub(super) const TEST_MIDDLEWARE_REWRITE: &str = r#"
+    globalThis.__rex_run_middleware = function(reqJson) {
+        var req = JSON.parse(reqJson);
+        if (req.pathname === '/rewrite-me') {
+            return JSON.stringify({
+                action: 'rewrite',
+                url: '/',
+                status: 200,
+                request_headers: {},
+                response_headers: { 'x-rewritten': 'true' }
             });
         }
         return JSON.stringify({
