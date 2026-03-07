@@ -550,6 +550,64 @@ export default function Home() {
     );
 }
 
+/// Test that a project with no pages (app-only) produces a minimal server bundle.
+#[tokio::test]
+async fn test_minimal_server_bundle_no_pages() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+
+    setup_mock_node_modules(&root);
+
+    // Create pages dir but no page files — simulates an app-only project
+    let pages_dir = root.join("pages");
+    fs::create_dir_all(&pages_dir).unwrap();
+
+    let config = RexConfig::new(root).with_dev(true);
+    let scan = ScanResult {
+        routes: vec![],
+        api_routes: vec![],
+        app: None,
+        document: None,
+        error: None,
+        not_found: None,
+        middleware: None,
+        app_scan: None,
+        mcp_tools: vec![],
+    };
+
+    let result = build_bundles(&config, &scan, &ProjectConfig::default())
+        .await
+        .expect("minimal build should succeed");
+
+    let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
+
+    // Should have stub render functions
+    assert!(
+        bundle.contains("__rex_render_page"),
+        "minimal bundle should have render stub"
+    );
+    assert!(
+        bundle.contains("__rex_get_server_side_props"),
+        "minimal bundle should have GSSP stub"
+    );
+    assert!(
+        bundle.contains("__rex_render_document"),
+        "minimal bundle should have document stub"
+    );
+
+    // Should have V8 polyfills
+    assert!(
+        bundle.contains("globalThis.process"),
+        "minimal bundle should have process polyfill"
+    );
+
+    // Manifest should be empty (no pages)
+    assert!(
+        result.manifest.pages.is_empty(),
+        "app-only manifest should have no page entries"
+    );
+}
+
 /// Test that a project with no package.json and no node_modules can still
 /// build using the embedded React packages (zero-config mode).
 #[tokio::test]
