@@ -39,6 +39,10 @@ When using `gh` CLI (PRs, issues), pass `GH_TOKEN`:
 GH_TOKEN="$GH_TOKEN" gh pr create ...
 ```
 
+## GitHub Operations
+
+**Prefer MCP tools (`mcp__github__*`) over `gh` CLI** for PRs, issues, and reviews. Use `gh` CLI only for operations not covered by MCP (e.g., pushing code, release creation).
+
 ## Conventional Commits
 
 All commits must use [Conventional Commits](https://www.conventionalcommits.org/) — enforced by a `commit-msg` hook and required by release-please for changelog/version bumps:
