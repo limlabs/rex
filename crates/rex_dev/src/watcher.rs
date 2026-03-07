@@ -105,7 +105,7 @@ pub fn start_watcher(project_root: &Path, pages_dir: &Path) -> Result<mpsc::Rece
 fn is_page_file(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()),
-        Some("tsx" | "ts" | "jsx" | "js")
+        Some("tsx" | "ts" | "jsx" | "js" | "mdx")
     )
 }
 

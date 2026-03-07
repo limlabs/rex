@@ -185,7 +185,9 @@ fn yaml_value_to_js(value: &str) -> String {
     }
 
     // Number
-    if value.parse::<f64>().is_ok() && !value.starts_with('0') || value == "0" {
+    if value.parse::<f64>().is_ok()
+        && (!value.starts_with('0') || value == "0" || value.starts_with("0."))
+    {
         return value.to_string();
     }
 
@@ -281,6 +283,18 @@ mod tests {
         assert!(js.contains("title: 'Hello'"));
         assert!(js.contains("count: 5"));
         assert!(js.contains("draft: true"));
+    }
+
+    #[test]
+    fn yaml_to_js_decimal_numbers() {
+        let js = yaml_to_js_object("rating: 0.5\nzero: 0\npi: 3.14\noctal_like: 0123");
+        assert!(js.contains("rating: 0.5"), "0.5 should be a number: {js}");
+        assert!(js.contains("zero: 0"), "0 should be a number: {js}");
+        assert!(js.contains("pi: 3.14"), "3.14 should be a number: {js}");
+        assert!(
+            js.contains("octal_like: '0123'"),
+            "0123 should be a string: {js}"
+        );
     }
 
     #[test]
