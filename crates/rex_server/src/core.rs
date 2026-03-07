@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tracing::{debug, error, info};
 
 use crate::document::{assemble_document, DocumentParams};
-use crate::handlers::{AppState, HotState};
+use crate::state::{AppState, HotState};
 
 /// Framework-agnostic HTTP request.
 #[derive(Debug, Clone)]
@@ -160,7 +160,7 @@ pub fn collect_custom_headers(path: &str, config: &ProjectConfig) -> Vec<(String
 }
 
 /// Check if middleware should run for the given path.
-fn should_run_middleware(path: &str, hot: &HotState) -> bool {
+pub fn should_run_middleware(path: &str, hot: &HotState) -> bool {
     if !hot.has_middleware {
         return false;
     }
@@ -178,7 +178,7 @@ fn should_run_middleware(path: &str, hot: &HotState) -> bool {
 }
 
 /// Execute middleware in V8 and return the result.
-async fn execute_middleware(
+pub async fn execute_middleware(
     state: &Arc<AppState>,
     path: &str,
     method: &str,
