@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/limlabs/rex/compare/v0.10.0...v0.10.1) (2026-03-07)
+
+
+### Bug Fixes
+
+* **rsc:** streaming head shell, __rex div, server action discovery ([#62](https://github.com/limlabs/rex/issues/62)) ([1c64906](https://github.com/limlabs/rex/commit/1c6490611a8b4206a0754b0a15ebccc3b028ce78))
+
 ## [0.10.0](https://github.com/limlabs/rex/compare/v0.9.0...v0.10.0) (2026-03-07)
 
 
