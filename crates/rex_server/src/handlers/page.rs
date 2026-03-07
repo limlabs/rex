@@ -8,13 +8,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
-use crate::document::{
-    assemble_body_tail, assemble_head_shell, assemble_rsc_body_tail, assemble_rsc_head_shell,
-};
+use crate::document::{assemble_body_tail, assemble_head_shell};
 
 use super::{
     check_redirects, check_rewrites, collect_headers, dev_error_overlay, execute_middleware,
-    render_error_page, should_run_middleware, AppState, HotState,
+    render_error_page, rsc::render_app_route, should_run_middleware, AppState, HotState,
 };
 use crate::state::snapshot;
 
@@ -116,111 +114,6 @@ pub async fn page_handler(
     }
 
     response
-}
-
-/// Render an app/ route using RSC with streaming (head shell + body tail).
-pub(super) async fn render_app_route(
-    state: &Arc<AppState>,
-    hot: &Arc<HotState>,
-    route_match: &rex_core::RouteMatch,
-    _path: &str,
-    uri: &Uri,
-) -> Response {
-    let route_key = route_match.route.pattern.clone();
-    let params = route_match.params.clone();
-    let search_params: HashMap<String, String> = uri
-        .query()
-        .map(|q| {
-            url::form_urlencoded::parse(q.as_bytes())
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
-    let props_json =
-        serde_json::json!({ "params": params, "searchParams": search_params }).to_string();
-
-    // Look up client chunks for this app route
-    let app_assets = hot.manifest.app_routes.get(&route_key);
-    let client_chunks: Vec<String> = app_assets
-        .map(|a| a.client_chunks.clone())
-        .unwrap_or_default();
-
-    // Serialize client reference manifest
-    let client_manifest_json = hot
-        .manifest
-        .client_reference_manifest
-        .as_ref()
-        .and_then(|m| serde_json::to_string(m).ok())
-        .unwrap_or_else(|| "{}".to_string());
-
-    let is_dev = state.is_dev;
-    let manifest_json = hot.manifest_json.clone();
-
-    // Flush head shell immediately so browser starts fetching resources
-    let shell = assemble_rsc_head_shell(&client_chunks, &client_manifest_json);
-
-    let shell_chunk = stream::once(async { Ok::<_, std::convert::Infallible>(shell) });
-
-    let state_clone = state.clone();
-    let route_key_clone = route_key.clone();
-    let props_clone = props_json.clone();
-    let client_chunks_clone = client_chunks.clone();
-    let client_manifest_json_clone = client_manifest_json.clone();
-
-    let tail_chunk = stream::once(async move {
-        let rsc_result = state_clone
-            .isolate_pool
-            .execute(move |iso| iso.render_rsc_to_html(&route_key_clone, &props_clone))
-            .await;
-
-        let (body_html, head_html, flight_data) = match rsc_result {
-            Ok(Ok(r)) => (r.body, r.head, r.flight),
-            Ok(Err(e)) => {
-                error!("RSC render error: {e}");
-                let msg = e.to_string().replace('<', "&lt;").replace('>', "&gt;");
-                if is_dev {
-                    (
-                        format!("<pre style=\"padding:20px;color:#e63946;font-family:monospace\">RSC Error: {msg}</pre>"),
-                        String::new(),
-                        String::new(),
-                    )
-                } else {
-                    (
-                        "<h1>Internal Server Error</h1>".to_string(),
-                        String::new(),
-                        String::new(),
-                    )
-                }
-            }
-            Err(e) => {
-                error!("RSC pool error: {e}");
-                (
-                    "<h1>Internal Server Error</h1>".to_string(),
-                    String::new(),
-                    String::new(),
-                )
-            }
-        };
-
-        let tail = assemble_rsc_body_tail(
-            &body_html,
-            &head_html,
-            &flight_data,
-            &client_chunks_clone,
-            &client_manifest_json_clone,
-            is_dev,
-            Some(&manifest_json),
-        );
-
-        Ok::<_, std::convert::Infallible>(tail)
-    });
-
-    let body = Body::from_stream(shell_chunk.chain(tail_chunk));
-
-    Response::builder()
-        .header("content-type", "text/html; charset=utf-8")
-        .body(body)
-        .expect("response build")
 }
 
 pub(super) async fn page_handler_inner(
