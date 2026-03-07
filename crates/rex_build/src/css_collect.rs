@@ -78,23 +78,23 @@ pub(crate) fn collect_css_files(
 }
 
 /// Parse a source file and extract CSS import paths (resolved relative to the file).
+///
+/// Uses the OXC parser to find `ImportDeclaration` nodes whose source ends with
+/// `.css` (excluding `.module.css`, which is handled separately).
 pub(crate) fn extract_css_imports(source_path: &Path) -> Result<Vec<PathBuf>> {
     let source = fs::read_to_string(source_path)?;
     let parent = source_path.parent().unwrap_or(Path::new("."));
-    let mut css_paths = Vec::new();
 
-    for line in source.lines() {
-        let trimmed = line.trim();
-        // Match: import 'path.css' or import "path.css"
-        if trimmed.starts_with("import ")
-            || trimmed.starts_with("import'")
-            || trimmed.starts_with("import\"")
-        {
-            if let Some(path) = extract_string_literal(trimmed) {
-                // Skip .module.css — handled separately by process_css_modules
-                if path.ends_with(".css") && !path.ends_with(".module.css") {
-                    css_paths.push(parent.join(path));
-                }
+    let source_type = source_type_for_path(source_path);
+    let allocator = oxc_allocator::Allocator::default();
+    let parsed = oxc_parser::Parser::new(&allocator, &source, source_type).parse();
+
+    let mut css_paths = Vec::new();
+    for stmt in &parsed.program.body {
+        if let oxc_ast::ast::Statement::ImportDeclaration(import) = stmt {
+            let specifier = import.source.value.as_str();
+            if specifier.ends_with(".css") && !specifier.ends_with(".module.css") {
+                css_paths.push(parent.join(specifier));
             }
         }
     }
@@ -102,27 +102,14 @@ pub(crate) fn extract_css_imports(source_path: &Path) -> Result<Vec<PathBuf>> {
     Ok(css_paths)
 }
 
-/// Extract the string literal from an import statement.
-/// E.g. `import '../styles/globals.css';` → `../styles/globals.css`
-pub(crate) fn extract_string_literal(line: &str) -> Option<&str> {
-    // Find first quote character
-    let single = line.find('\'');
-    let double = line.find('"');
-    let (quote_char, start) = match (single, double) {
-        (Some(s), Some(d)) => {
-            if s < d {
-                ('\'', s)
-            } else {
-                ('"', d)
-            }
-        }
-        (Some(s), None) => ('\'', s),
-        (None, Some(d)) => ('"', d),
-        (None, None) => return None,
-    };
-    let rest = &line[start + 1..];
-    let end = rest.find(quote_char)?;
-    Some(&rest[..end])
+/// Infer OXC source type from file extension.
+pub(crate) fn source_type_for_path(path: &Path) -> oxc_span::SourceType {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("tsx") => oxc_span::SourceType::tsx(),
+        Some("ts") => oxc_span::SourceType::ts(),
+        Some("jsx") => oxc_span::SourceType::jsx(),
+        _ => oxc_span::SourceType::mjs(),
+    }
 }
 
 #[cfg(test)]
@@ -131,35 +118,6 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use tempfile::TempDir;
-
-    #[test]
-    fn test_extract_string_literal_single_quotes() {
-        assert_eq!(
-            extract_string_literal("import './foo.css';"),
-            Some("./foo.css")
-        );
-    }
-
-    #[test]
-    fn test_extract_string_literal_double_quotes() {
-        assert_eq!(
-            extract_string_literal(r#"import "./foo.css";"#),
-            Some("./foo.css")
-        );
-    }
-
-    #[test]
-    fn test_extract_string_literal_from_syntax() {
-        assert_eq!(
-            extract_string_literal("import x from './foo';"),
-            Some("./foo")
-        );
-    }
-
-    #[test]
-    fn test_extract_string_literal_no_quotes() {
-        assert_eq!(extract_string_literal("import foo"), None);
-    }
 
     #[test]
     fn test_extract_css_imports_finds_css() {
