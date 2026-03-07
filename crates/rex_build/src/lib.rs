@@ -8,8 +8,16 @@ pub mod rsc_bundler;
 pub mod rsc_graph;
 pub mod server_action_manifest;
 
+// Internal modules extracted from bundler.rs
+pub(crate) mod build_utils;
+pub(crate) mod client_bundle;
+pub(crate) mod css_collect;
+pub(crate) mod css_modules;
+pub(crate) mod server_bundle;
+pub mod tailwind;
+
 pub use bundler::build_bundles;
-pub use bundler::{
+pub use manifest::AssetManifest;
+pub use tailwind::{
     collect_all_css_import_paths, find_tailwind_bin, needs_tailwind, process_tailwind_css,
 };
-pub use manifest::AssetManifest;

@@ -18,7 +18,7 @@ SKIP=("tanstack-basic" "tanstack-tailwind")
 REX_PKG="$ROOT/packages/rex"
 if [[ ! -d "$REX_PKG/node_modules" ]]; then
   echo "--- Installing packages/rex dependencies ---"
-  (cd "$REX_PKG" && npm install --ignore-scripts --no-audit --no-fund)
+  (cd "$REX_PKG" && npm install --no-package-lock --ignore-scripts --no-audit --no-fund)
 fi
 
 check_fixture() {
@@ -34,7 +34,7 @@ check_fixture() {
 
   if [[ ! -d "$dir/node_modules" ]]; then
     echo "  Installing dependencies..."
-    (cd "$dir" && npm install --ignore-scripts --no-audit --no-fund) || {
+    (cd "$dir" && npm install --no-package-lock --ignore-scripts --no-audit --no-fund) || {
       echo "  WARN: npm install failed for $name, skipping"
       return 0
     }
