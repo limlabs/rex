@@ -718,7 +718,7 @@ async fn page_handler_inner(
                             serde_json::to_string(&fields).unwrap_or_else(|_| "[]".to_string());
                         match state
                             .isolate_pool
-                            .execute(move |iso| iso.call_form_action(&fields_json))
+                            .execute(move |iso| iso.call_form_action("", &fields_json))
                             .await
                         {
                             Ok(Ok(json_result)) => {

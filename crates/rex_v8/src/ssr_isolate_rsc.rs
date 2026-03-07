@@ -31,6 +31,9 @@ impl SsrIsolate {
             self.rsc_flight_fn = v8_get_optional_fn!(scope, global, "__rex_render_flight");
             self.rsc_to_html_fn = v8_get_optional_fn!(scope, global, "__rex_render_rsc_to_html");
             self.server_action_fn = v8_get_optional_fn!(scope, global, "__rex_call_server_action");
+            self.server_action_encoded_fn =
+                v8_get_optional_fn!(scope, global, "__rex_call_server_action_encoded");
+            self.form_action_fn = v8_get_optional_fn!(scope, global, "__rex_call_form_action");
         }
 
         tracing::debug!("RSC bundles loaded into V8 context");
@@ -234,6 +237,28 @@ impl SsrIsolate {
         }
     }
 
+    /// Set request context (headers/cookies) in V8 globals before action execution.
+    pub fn set_request_context(&mut self, headers_json: &str, cookies_json: &str) -> Result<()> {
+        v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+        let code = format!(
+            "globalThis.__rex_request_headers = {}; globalThis.__rex_request_cookies = {};",
+            headers_json, cookies_json
+        );
+        v8_eval!(scope, &code, "<set-request-context>")?;
+        Ok(())
+    }
+
+    /// Clear request context after action execution.
+    pub fn clear_request_context(&mut self) -> Result<()> {
+        v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+        v8_eval!(
+            scope,
+            "globalThis.__rex_request_headers = {}; globalThis.__rex_request_cookies = {};",
+            "<clear-request-context>"
+        )?;
+        Ok(())
+    }
+
     /// Call __rex_call_server_action(actionId, argsJson) and return JSON response.
     /// Handles async actions by pumping V8's microtask queue + fetch loop.
     pub fn call_server_action(&mut self, action_id: &str, args_json: &str) -> Result<String> {
@@ -258,8 +283,79 @@ impl SsrIsolate {
             result.to_rust_string_lossy(scope)
         };
 
-        if result_str == "__REX_ACTION_ASYNC__" {
-            // Run fetch loop + microtask pump for async server actions
+        self.pump_action_loop(&result_str)
+    }
+
+    /// Call __rex_call_server_action_encoded(actionId, body, isFormFields) using React's decodeReply.
+    /// The body is an encoded string from the client's encodeReply.
+    /// When `is_form_fields` is true, body is JSON-encoded form fields (multipart).
+    /// Always async since decodeReply returns a Promise.
+    pub fn call_server_action_encoded(
+        &mut self,
+        action_id: &str,
+        body: &str,
+        is_form_fields: bool,
+    ) -> Result<String> {
+        let action_fn = self
+            .server_action_encoded_fn
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Encoded server actions not loaded"))?;
+
+        let result_str = {
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+            let func = v8::Local::new(scope, action_fn);
+            let undef = v8::undefined(scope);
+            let arg0 = v8::String::new(scope, action_id)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+            let arg1 = v8::String::new(scope, body)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+            let arg2 = v8::Boolean::new(scope, is_form_fields);
+
+            let result = v8_call!(
+                scope,
+                func,
+                undef.into(),
+                &[arg0.into(), arg1.into(), arg2.into()]
+            )
+            .map_err(|e| anyhow::anyhow!("Encoded server action error: {e}"))?;
+
+            result.to_rust_string_lossy(scope)
+        };
+
+        self.pump_action_loop(&result_str)
+    }
+
+    /// Call __rex_call_form_action(fieldsJson) using React's decodeAction.
+    /// fieldsJson is a JSON array of [key, value] pairs from multipart parsing.
+    /// The action ID is extracted from the FormData by React's decodeAction.
+    pub fn call_form_action(&mut self, _action_id: &str, fields_json: &str) -> Result<String> {
+        let action_fn = self
+            .form_action_fn
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Form actions not loaded"))?;
+
+        let result_str = {
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+            let func = v8::Local::new(scope, action_fn);
+            let undef = v8::undefined(scope);
+            let arg0 = v8::String::new(scope, fields_json)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+
+            let result = v8_call!(scope, func, undef.into(), &[arg0.into()])
+                .map_err(|e| anyhow::anyhow!("Form action error: {e}"))?;
+
+            result.to_rust_string_lossy(scope)
+        };
+
+        self.pump_action_loop(&result_str)
+    }
+
+    /// Shared async resolution loop for server action results.
+    /// Pumps V8 microtasks and the fetch loop until the action resolves.
+    fn pump_action_loop(&mut self, initial_result: &str) -> Result<String> {
+        if initial_result == "__REX_ACTION_ASYNC__" {
             crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
 
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
@@ -305,7 +401,7 @@ impl SsrIsolate {
             .map_err(|e| anyhow::anyhow!("Server action finalize error: {e}"))?;
             Ok(resolve_result.to_rust_string_lossy(scope))
         } else {
-            Ok(result_str)
+            Ok(initial_result.to_string())
         }
     }
 }
