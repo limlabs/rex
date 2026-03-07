@@ -19,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -46,6 +48,9 @@ jobs:
 
       - name: TypeScript strict check (fixtures & benchmarks)
         run: scripts/typecheck-fixtures.sh
+
+      - name: File length check
+        run: scripts/check-file-length.sh --diff origin/${{ github.base_ref || 'main' }}
 
       - name: oxlint
         run: cargo run -p rex_cli -- lint --deny-warnings runtime/ packages/rex/src/ fixtures/ benchmarks/

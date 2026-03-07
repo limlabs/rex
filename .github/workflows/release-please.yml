@@ -361,6 +361,14 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
+  smoke-test:
+    name: Smoke Test
+    needs: [release-please, npm-publish]
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    uses: ./.github/workflows/smoke-test.yml
+    with:
+      version: ${{ needs.release-please.outputs.tag_name }}
+
   cleanup-beta-releases:
     name: Clean up beta releases
     needs: release-please
