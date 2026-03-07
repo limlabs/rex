@@ -37,7 +37,8 @@ if ! command -v jq &>/dev/null; then
 fi
 
 echo "Running tests with coverage..."
-cargo llvm-cov --workspace --json --output-path "$REPO_ROOT/coverage.json"
+# Exclude rex_python (PyO3 cdylib — tested via Python pytest, not Rust tests)
+cargo llvm-cov --workspace --exclude rex_python --json --output-path "$REPO_ROOT/coverage.json"
 
 COVERAGE=$(jq '.data[0].totals.lines.percent' "$REPO_ROOT/coverage.json" | xargs printf '%.0f')
 rm -f "$REPO_ROOT/coverage.json"
