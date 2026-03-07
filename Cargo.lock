@@ -2103,6 +2103,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "markdown"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5cab8f2cadc416a82d2e783a1946388b31654d391d1c7d92cc1f03e295b1deb"
+dependencies = [
+ "unicode-id",
+]
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4186,6 +4195,7 @@ dependencies = [
  "oxc_syntax 0.115.0",
  "oxc_transformer 0.115.0",
  "rex_core",
+ "rex_mdx",
  "rex_router",
  "rex_v8",
  "rolldown",
@@ -4286,6 +4296,18 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "rex_mdx"
+version = "0.9.0"
+dependencies = [
+ "anyhow",
+ "markdown",
+ "oxc_allocator 0.115.0",
+ "oxc_ast 0.115.0",
+ "oxc_parser 0.115.0",
+ "oxc_span 0.115.0",
 ]
 
 [[package]]
@@ -5887,6 +5909,12 @@ name = "unicase"
 version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbc4bc3a9f746d862c45cb89d705aa10f187bb96c76001afab07a0d35ce60142"
+
+[[package]]
+name = "unicode-id"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70ba288e709927c043cbe476718d37be306be53fb1fafecd0dbe36d072be2580"
 
 [[package]]
 name = "unicode-id-start"

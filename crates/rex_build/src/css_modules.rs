@@ -25,35 +25,48 @@ pub(crate) fn process_css_modules(
     scan: &ScanResult,
     output_dir: &Path,
     build_id: &str,
+    project_root: &Path,
 ) -> Result<CssModuleProcessing> {
     let hash_prefix = &build_id[..8];
     let temp_dir = output_dir.join("_css_modules");
     fs::create_dir_all(&temp_dir)?;
 
-    let mut page_overrides = HashMap::new();
+    // Pre-process MDX pages first — their compiled .jsx files become the
+    // effective source for any subsequent CSS module scanning.
+    let mdx = crate::mdx::process_mdx_pages(scan, output_dir, project_root)?;
+    let mut page_overrides = mdx.page_overrides;
     let mut route_css: HashMap<String, Vec<String>> = HashMap::new();
     let mut global_css = Vec::new();
 
     // Track processed CSS module files to avoid duplicating work
     let mut processed_css: HashMap<PathBuf, (String, HashMap<String, String>)> = HashMap::new();
 
-    // Collect all source files to scan: (abs_path, route_pattern or None for _app)
-    let mut sources: Vec<(&PathBuf, Option<&str>)> = Vec::new();
+    // Collect all source files to scan: (original_abs_path, effective_path, route_pattern or None for _app)
+    // Use the MDX-compiled path when available so CSS module imports in MDX pages are found.
+    let mut sources: Vec<(&PathBuf, PathBuf, Option<&str>)> = Vec::new();
     for route in &scan.routes {
-        sources.push((&route.abs_path, Some(&route.pattern)));
+        let effective = page_overrides
+            .get(&route.abs_path)
+            .cloned()
+            .unwrap_or_else(|| route.abs_path.clone());
+        sources.push((&route.abs_path, effective, Some(&route.pattern)));
     }
     if let Some(app) = &scan.app {
-        sources.push((&app.abs_path, None));
+        let effective = page_overrides
+            .get(&app.abs_path)
+            .cloned()
+            .unwrap_or_else(|| app.abs_path.clone());
+        sources.push((&app.abs_path, effective, None));
     }
 
-    for (source_path, route_pattern) in &sources {
-        let css_module_imports = find_css_module_imports(source_path)?;
+    for (original_path, effective_path, route_pattern) in &sources {
+        let css_module_imports = find_css_module_imports(effective_path)?;
         if css_module_imports.is_empty() {
             continue;
         }
 
-        let source_dir = source_path.parent().unwrap_or(Path::new("."));
-        let mut source_content = fs::read_to_string(source_path)?;
+        let source_dir = effective_path.parent().unwrap_or(Path::new("."));
+        let mut source_content = fs::read_to_string(effective_path)?;
         let mut page_css_files = Vec::new();
 
         for (import_specifier, css_abs_path) in &css_module_imports {
@@ -107,17 +120,17 @@ pub(crate) fn process_css_modules(
         source_content = absolutize_relative_imports(&source_content, source_dir);
 
         // Write modified page source to temp dir
-        let modified_name = source_path
+        let modified_name = effective_path
             .file_name()
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
         // Use a unique name to avoid collisions between pages in different dirs
-        let unique_name = format!("{}_{}", css_module_hash(source_path), modified_name);
+        let unique_name = format!("{}_{}", css_module_hash(effective_path), modified_name);
         let modified_path = temp_dir.join(&unique_name);
         fs::write(&modified_path, &source_content)?;
 
-        page_overrides.insert((*source_path).clone(), modified_path);
+        page_overrides.insert((*original_path).clone(), modified_path);
 
         // Track CSS files
         if let Some(pattern) = route_pattern {

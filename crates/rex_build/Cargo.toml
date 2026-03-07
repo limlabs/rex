@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 rex_core = { path = "../rex_core" }
+rex_mdx = { path = "../rex_mdx" }
 rex_router = { path = "../rex_router" }
 rolldown = { workspace = true }
 rolldown_common = { workspace = true }

@@ -1,0 +1,22 @@
+[package]
+name = "rex_mdx"
+version = "0.9.0" # x-release-please-version
+edition = "2021"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+markdown = "1.0.0-alpha.23"
+oxc_allocator = "0.115"
+oxc_parser = "0.115"
+oxc_ast = "0.115"
+oxc_span = "0.115"
+
+[dev-dependencies]
+oxc_allocator = "0.115"
+oxc_parser = "0.115"
+oxc_ast = "0.115"
+oxc_span = "0.115"

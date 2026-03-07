@@ -10,6 +10,7 @@ members = [
     "crates/rex_dev",
     "crates/rex_image",
     "crates/rex_e2e",
+    "crates/rex_mdx",
     "crates/rex_napi",
 ]
 

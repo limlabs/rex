@@ -71,7 +71,7 @@ pub async fn build_bundles(
     fs::create_dir_all(&client_dir)?;
 
     // Pre-process CSS modules (generates scoped CSS + JS proxy files)
-    let css_modules = process_css_modules(scan, &client_dir, &build_id)?;
+    let css_modules = process_css_modules(scan, &client_dir, &build_id, &config.project_root)?;
 
     // Pre-process Tailwind CSS files (compile with tailwindcss CLI)
     let tailwind_outputs = process_tailwind_css(config, scan, &client_dir)?;
@@ -137,6 +137,12 @@ pub async fn build_bundles(
 
     // Build RSC bundles if app/ scan is present
     if let Some(app_scan) = &scan.app_scan {
+        // Pre-process any .mdx pages/layouts in the app router
+        let app_scan = &crate::mdx::process_mdx_app_pages(
+            app_scan,
+            &config.server_build_dir(),
+            &config.project_root,
+        )?;
         let rsc_result =
             crate::rsc_bundler::build_rsc_bundles(config, app_scan, &build_id, &define).await?;
 
