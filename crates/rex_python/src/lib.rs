@@ -2,7 +2,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use rex_build::AssetManifest;
 use rex_server::document::{assemble_document, DocumentParams};
-use rex_server::handlers::snapshot;
+use rex_server::state::snapshot;
 use rex_server::{Rex, RexOptions};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
