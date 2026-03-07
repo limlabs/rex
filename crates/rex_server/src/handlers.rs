@@ -1,6 +1,6 @@
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
 use futures::stream::{self, StreamExt};
 use rex_core::{
@@ -486,11 +486,13 @@ async fn execute_middleware(
 /// Main page handler - catches all routes and performs SSR
 pub async fn page_handler(
     State(state): State<Arc<AppState>>,
+    method: Method,
     uri: Uri,
     headers: HeaderMap,
+    body: axum::body::Bytes,
 ) -> Response {
     let path = uri.path();
-    info!(path, "Handling page request");
+    info!(path, method = %method, "Handling page request");
 
     let hot = snapshot(&state);
 
@@ -501,7 +503,7 @@ pub async fn page_handler(
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
-        match execute_middleware(&state, path, "GET", &header_map).await {
+        match execute_middleware(&state, path, method.as_str(), &header_map).await {
             Ok(Some(mw)) => match mw.action {
                 MiddlewareAction::Redirect => {
                     let url = mw.url.as_deref().unwrap_or("/");
@@ -523,8 +525,16 @@ pub async fn page_handler(
                         };
                         mw_response_headers = mw.response_headers.into_iter().collect();
                         let custom_headers = collect_headers(&rewrite_path, &hot.project_config);
-                        let mut response =
-                            page_handler_inner(&state, &hot, &rewrite_path, &uri, &headers).await;
+                        let mut response = page_handler_inner(
+                            &state,
+                            &hot,
+                            &rewrite_path,
+                            &uri,
+                            &headers,
+                            &method,
+                            &body,
+                        )
+                        .await;
                         for (key, value) in custom_headers.into_iter().chain(mw_response_headers) {
                             if let (Ok(name), Ok(val)) = (
                                 axum::http::header::HeaderName::from_bytes(key.as_bytes()),
@@ -568,7 +578,7 @@ pub async fn page_handler(
     // Collect custom headers to add to the response
     let custom_headers = collect_headers(path, &hot.project_config);
 
-    let mut response = page_handler_inner(&state, &hot, path, &uri, &headers).await;
+    let mut response = page_handler_inner(&state, &hot, path, &uri, &headers, &method, &body).await;
 
     // Apply custom headers + middleware response headers
     for (key, value) in custom_headers.into_iter().chain(mw_response_headers) {
@@ -694,10 +704,30 @@ async fn page_handler_inner(
     path: &str,
     uri: &Uri,
     headers: &HeaderMap,
+    method: &Method,
+    body: &axum::body::Bytes,
 ) -> Response {
     // Check app/ routes first (RSC)
     if let Some(ref app_trie) = hot.app_route_trie {
         if let Some(app_match) = app_trie.match_path(path) {
+            // Progressive enhancement: handle POST form submissions with $ACTION_ID_*
+            if *method == Method::POST {
+                if let Some(fields) = parse_form_action_fields(headers, body) {
+                    if fields.iter().any(|(k, _)| k.starts_with("$ACTION_ID_")) {
+                        let fields_json =
+                            serde_json::to_string(&fields).unwrap_or_else(|_| "[]".to_string());
+                        match state
+                            .isolate_pool
+                            .execute(move |iso| iso.call_form_action(&fields_json))
+                            .await
+                        {
+                            Ok(Ok(_)) => {}
+                            Ok(Err(e)) => error!("Form action error: {e}"),
+                            Err(e) => error!("Form action pool error: {e}"),
+                        }
+                    }
+                }
+            }
             return render_app_route(state, hot, &app_match, path, uri).await;
         }
     }
@@ -1247,6 +1277,37 @@ fn extract_field_name(headers: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Parse form fields from a POST request body for progressive enhancement.
+/// Returns Some(fields) for multipart/form-data or application/x-www-form-urlencoded,
+/// None for other content types.
+fn parse_form_action_fields(headers: &HeaderMap, body: &[u8]) -> Option<Vec<(String, String)>> {
+    let content_type = headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if content_type.starts_with("multipart/form-data") {
+        let boundary = content_type
+            .split("boundary=")
+            .nth(1)
+            .unwrap_or("")
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .trim_matches('"');
+        Some(parse_multipart_fields(body, boundary))
+    } else if content_type.starts_with("application/x-www-form-urlencoded") {
+        Some(
+            url::form_urlencoded::parse(body)
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        )
+    } else {
+        None
+    }
 }
 
 /// Query parameters for the image optimization endpoint.
@@ -2441,5 +2502,41 @@ globalThis.__rex_resolve_gsp = function() {
             .trim()
             .trim_matches('"');
         assert_eq!(boundary, "----WebKitBoundary");
+    }
+
+    #[test]
+    fn test_parse_form_action_fields_multipart() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "content-type",
+            "multipart/form-data; boundary=----boundary"
+                .parse()
+                .unwrap(),
+        );
+        let body = b"------boundary\r\nContent-Disposition: form-data; name=\"x\"\r\n\r\nval\r\n------boundary--\r\n";
+        let fields = parse_form_action_fields(&headers, body).unwrap();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0], ("x".to_string(), "val".to_string()));
+    }
+
+    #[test]
+    fn test_parse_form_action_fields_urlencoded() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "content-type",
+            "application/x-www-form-urlencoded".parse().unwrap(),
+        );
+        let body = b"name=Alice&$ACTION_ID_abc=";
+        let fields = parse_form_action_fields(&headers, body).unwrap();
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0], ("name".to_string(), "Alice".to_string()));
+        assert_eq!(fields[1].0, "$ACTION_ID_abc");
+    }
+
+    #[test]
+    fn test_parse_form_action_fields_unsupported_type() {
+        let mut headers = HeaderMap::new();
+        headers.insert("content-type", "text/plain".parse().unwrap());
+        assert!(parse_form_action_fields(&headers, b"hello").is_none());
     }
 }
