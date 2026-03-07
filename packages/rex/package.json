@@ -39,6 +39,10 @@
     "./middleware": {
       "types": "./src/middleware.d.ts",
       "import": "../../runtime/server/middleware.js"
+    },
+    "./actions": {
+      "types": "./src/actions.d.ts",
+      "import": "../../runtime/server/actions.js"
     }
   },
   "scripts": {

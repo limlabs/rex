@@ -125,6 +125,21 @@ pub async fn build_rsc_bundles(
         }
     }
 
+    // Also register function-level "use server" exports
+    let inline_action_modules = graph.inline_server_action_modules();
+    for module in &inline_action_modules {
+        let rel_path = module
+            .path
+            .strip_prefix(&project_root)
+            .unwrap_or(&module.path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        for export in &module.server_functions {
+            let action_id = server_action_id(&rel_path, export, build_id);
+            server_action_manifest.add(&action_id, rel_path.clone(), export.clone());
+        }
+    }
+
     // Build rex/* → stub aliases for client boundaries discovered via rex/* imports.
     // The stub_aliases map absolute paths, but rolldown also needs the specifier alias
     // (e.g. "rex/link" → stub) for when source code uses `import Link from 'rex/link'`.
@@ -330,11 +345,12 @@ async fn build_rsc_server_bundle(
     if !server_action_manifest.actions.is_empty() {
         entry.push_str("\n// --- Server Actions Registration ---\n");
         entry.push_str(
-            "import { registerServerReference, decodeReply, decodeAction } from 'react-server-dom-webpack/server';\n",
+            "import { registerServerReference, decodeReply, decodeAction, decodeFormState } from 'react-server-dom-webpack/server';\n",
         );
-        // Expose decodeReply/decodeAction as globals for the flight runtime
+        // Expose decodeReply/decodeAction/decodeFormState as globals for the flight runtime
         entry.push_str("globalThis.__rex_decodeReply = decodeReply;\n");
         entry.push_str("globalThis.__rex_decodeAction = decodeAction;\n");
+        entry.push_str("globalThis.__rex_decodeFormState = decodeFormState;\n");
 
         // Group actions by module_path to deduplicate imports
         let mut modules_by_path: std::collections::HashMap<&str, Vec<(&str, &str)>> =
@@ -399,6 +415,15 @@ async fn build_rsc_server_bundle(
         aliases.push((
             original.to_string_lossy().to_string(),
             vec![Some(stub.to_string_lossy().to_string())],
+        ));
+    }
+
+    // Add rex/actions alias for server action utilities (redirect, notFound, etc.)
+    let actions_runtime = crate::build_utils::runtime_server_dir()?.join("actions.ts");
+    if actions_runtime.exists() {
+        aliases.push((
+            "rex/actions".to_string(),
+            vec![Some(actions_runtime.to_string_lossy().to_string())],
         ));
     }
 

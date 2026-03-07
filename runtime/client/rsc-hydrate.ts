@@ -38,10 +38,39 @@ function callServer(id: string, args: unknown[]): Promise<unknown> {
       body: body,
     });
   }).then(function(r: Response) {
-    return r.json();
-  }).then(function(d: { result?: unknown; error?: string }) {
-    if (d.error) throw new Error(d.error);
-    return d.result;
+    // Handle redirect
+    const redirectUrl = r.headers.get('x-rex-redirect');
+    if (redirectUrl) {
+      if (window.__REX_RSC_NAVIGATE) {
+        window.__REX_RSC_NAVIGATE(redirectUrl);
+      } else {
+        window.location.href = redirectUrl;
+      }
+      return undefined;
+    }
+
+    // Handle not found
+    if (r.headers.get('x-rex-not-found') === '1') {
+      throw new Error('Not Found');
+    }
+
+    // Flight format response
+    const ct = r.headers.get('content-type') || '';
+    if (ct.startsWith('text/x-component')) {
+      const ssrManifest = buildSSRManifest();
+      return Promise.resolve(
+        createFromFetch(Promise.resolve(r), {
+          ssrManifest: { moduleMap: ssrManifest, moduleLoading: null },
+          callServer: callServer
+        })
+      );
+    }
+
+    // JSON fallback (errors, legacy)
+    return r.json().then(function(d: { result?: unknown; error?: string }) {
+      if (d.error) throw new Error(d.error);
+      return d.result;
+    });
   });
 }
 

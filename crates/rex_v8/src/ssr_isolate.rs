@@ -635,6 +635,28 @@ impl SsrIsolate {
         }
     }
 
+    /// Set request context (headers/cookies) in V8 globals before action execution.
+    pub fn set_request_context(&mut self, headers_json: &str, cookies_json: &str) -> Result<()> {
+        v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+        let code = format!(
+            "globalThis.__rex_request_headers = {}; globalThis.__rex_request_cookies = {};",
+            headers_json, cookies_json
+        );
+        v8_eval!(scope, &code, "<set-request-context>")?;
+        Ok(())
+    }
+
+    /// Clear request context after action execution.
+    pub fn clear_request_context(&mut self) -> Result<()> {
+        v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+        v8_eval!(
+            scope,
+            "globalThis.__rex_request_headers = {}; globalThis.__rex_request_cookies = {};",
+            "<clear-request-context>"
+        )?;
+        Ok(())
+    }
+
     /// Call __rex_call_server_action(actionId, argsJson) and return JSON response.
     /// Handles async actions by pumping V8's microtask queue + fetch loop.
     pub fn call_server_action(&mut self, action_id: &str, args_json: &str) -> Result<String> {

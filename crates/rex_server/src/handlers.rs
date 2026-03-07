@@ -1129,6 +1129,9 @@ pub async fn rsc_handler(
     }
 }
 
+/// Maximum body size for server action requests (1 MB).
+const MAX_ACTION_BODY_SIZE: usize = 1024 * 1024;
+
 /// Server action handler: POST /_rex/action/{build_id}/{action_id}
 ///
 /// Dispatches a server function call from the client. Supports three content types:
@@ -1136,7 +1139,8 @@ pub async fn rsc_handler(
 /// - `text/x-component`: Encoded reply — body is a string from React's `encodeReply`
 /// - `multipart/form-data`: Form submission — body is parsed multipart fields
 ///
-/// Returns `{ result: ... }` or `{ error: ... }` as JSON.
+/// Returns flight data (`text/x-component`) for success, or JSON `{ error }` for errors.
+/// Special headers for redirect/notFound: `X-Rex-Redirect`, `X-Rex-Not-Found`.
 pub async fn server_action_handler(
     State(state): State<Arc<AppState>>,
     Path((build_id, action_id)): Path<(String, String)>,
@@ -1150,10 +1154,51 @@ pub async fn server_action_handler(
         return StatusCode::NOT_FOUND.into_response();
     }
 
+    // CSRF protection: validate Origin header against Host
+    if let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok()) {
+        if let Some(host) = headers.get("host").and_then(|v| v.to_str().ok()) {
+            let origin_host = origin
+                .trim_start_matches("https://")
+                .trim_start_matches("http://");
+            if origin_host != host {
+                return (StatusCode::FORBIDDEN, "CSRF validation failed").into_response();
+            }
+        }
+    }
+
+    // Body size limit
+    if body.len() > MAX_ACTION_BODY_SIZE {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "Request body too large").into_response();
+    }
+
     let content_type = headers
         .get("content-type")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("application/json");
+
+    // Serialize request context for V8
+    let header_map: HashMap<String, String> = headers
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+    let headers_json = serde_json::to_string(&header_map).unwrap_or_else(|_| "{}".to_string());
+    let cookies: HashMap<String, String> = headers
+        .get("cookie")
+        .and_then(|v| v.to_str().ok())
+        .map(|cookie_str| {
+            cookie_str
+                .split(';')
+                .filter_map(|pair| {
+                    let mut parts = pair.splitn(2, '=');
+                    Some((
+                        parts.next()?.trim().to_string(),
+                        parts.next()?.trim().to_string(),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let cookies_json = serde_json::to_string(&cookies).unwrap_or_else(|_| "{}".to_string());
 
     let result = if content_type.starts_with("text/x-component") {
         // Encoded reply path: React's encodeReply produced a string
@@ -1166,7 +1211,12 @@ pub async fn server_action_handler(
         let action_id_owned = action_id.clone();
         state
             .isolate_pool
-            .execute(move |iso| iso.call_server_action_encoded(&action_id_owned, &body_str, false))
+            .execute(move |iso| {
+                let _ = iso.set_request_context(&headers_json, &cookies_json);
+                let r = iso.call_server_action_encoded(&action_id_owned, &body_str, false);
+                let _ = iso.clear_request_context();
+                r
+            })
             .await
     } else if content_type.starts_with("multipart/form-data") {
         // Multipart from callServer: encodeReply returned FormData for complex args (Blob, File).
@@ -1187,7 +1237,10 @@ pub async fn server_action_handler(
         state
             .isolate_pool
             .execute(move |iso| {
-                iso.call_server_action_encoded(&action_id_owned, &fields_json, true)
+                let _ = iso.set_request_context(&headers_json, &cookies_json);
+                let r = iso.call_server_action_encoded(&action_id_owned, &fields_json, true);
+                let _ = iso.clear_request_context();
+                r
             })
             .await
     } else {
@@ -1201,15 +1254,17 @@ pub async fn server_action_handler(
         let action_id_owned = action_id.clone();
         state
             .isolate_pool
-            .execute(move |iso| iso.call_server_action(&action_id_owned, &args_json))
+            .execute(move |iso| {
+                let _ = iso.set_request_context(&headers_json, &cookies_json);
+                let r = iso.call_server_action(&action_id_owned, &args_json);
+                let _ = iso.clear_request_context();
+                r
+            })
             .await
     };
 
     match result {
-        Ok(Ok(json_result)) => Response::builder()
-            .header("Content-Type", "application/json")
-            .body(Body::from(json_result))
-            .expect("response build"),
+        Ok(Ok(json_result)) => build_action_response(&json_result),
         Ok(Err(e)) => {
             error!("Server action error: {e}");
             Response::builder()
@@ -1225,6 +1280,77 @@ pub async fn server_action_handler(
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
+}
+
+/// Parse the JSON envelope from `__rex_finalize_action()` and build the HTTP response.
+///
+/// Envelope shapes:
+/// - `{ "flight": "<flight data>" }` → 200 with `text/x-component`
+/// - `{ "redirect": "/url", "redirectStatus": 303 }` → 200 with `X-Rex-Redirect` header
+/// - `{ "notFound": true }` → 200 with `X-Rex-Not-Found` header
+/// - `{ "error": "..." }` → 500 with JSON error
+/// - `{ "result": ... }` → 200 with JSON (legacy fallback)
+fn build_action_response(json_result: &str) -> Response {
+    let parsed: serde_json::Value = match serde_json::from_str(json_result) {
+        Ok(v) => v,
+        Err(_) => {
+            return Response::builder()
+                .header("Content-Type", "application/json")
+                .body(Body::from(json_result.to_string()))
+                .expect("response build");
+        }
+    };
+
+    // Redirect
+    if let Some(redirect_url) = parsed.get("redirect").and_then(|v| v.as_str()) {
+        let status = parsed
+            .get("redirectStatus")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(303) as u16;
+        return Response::builder()
+            .status(StatusCode::from_u16(status).unwrap_or(StatusCode::SEE_OTHER))
+            .header("Location", redirect_url)
+            .header("X-Rex-Redirect", redirect_url)
+            .body(Body::empty())
+            .expect("response build");
+    }
+
+    // Not found
+    if parsed
+        .get("notFound")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        return Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .header("X-Rex-Not-Found", "1")
+            .body(Body::empty())
+            .expect("response build");
+    }
+
+    // Flight data (success)
+    if let Some(flight) = parsed.get("flight").and_then(|v| v.as_str()) {
+        return Response::builder()
+            .header("Content-Type", "text/x-component")
+            .header("Cache-Control", "no-cache")
+            .body(Body::from(flight.to_string()))
+            .expect("response build");
+    }
+
+    // Error
+    if parsed.get("error").is_some() {
+        return Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .header("Content-Type", "application/json")
+            .body(Body::from(json_result.to_string()))
+            .expect("response build");
+    }
+
+    // Legacy JSON result fallback
+    Response::builder()
+        .header("Content-Type", "application/json")
+        .body(Body::from(json_result.to_string()))
+        .expect("response build")
 }
 
 /// Parse multipart/form-data fields into a Vec of (key, value) pairs.
@@ -2330,7 +2456,8 @@ globalThis.__rex_resolve_gsp = function() {
             )
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
+        // Action not found errors return 500 with JSON error
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
         let body = body_string(resp.into_body()).await;
         let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert!(parsed["error"].as_str().unwrap().contains("not found"));
@@ -2538,5 +2665,107 @@ globalThis.__rex_resolve_gsp = function() {
         let mut headers = HeaderMap::new();
         headers.insert("content-type", "text/plain".parse().unwrap());
         assert!(parse_form_action_fields(&headers, b"hello").is_none());
+    }
+
+    #[test]
+    fn test_build_action_response_flight() {
+        let json = r#"{"flight":"0:\"hello\"\n"}"#;
+        let resp = build_action_response(json);
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "text/x-component"
+        );
+    }
+
+    #[test]
+    fn test_build_action_response_redirect() {
+        let json = r#"{"redirect":"/dashboard","redirectStatus":303}"#;
+        let resp = build_action_response(json);
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        assert_eq!(resp.headers().get("location").unwrap(), "/dashboard");
+        assert_eq!(resp.headers().get("x-rex-redirect").unwrap(), "/dashboard");
+    }
+
+    #[test]
+    fn test_build_action_response_not_found() {
+        let json = r#"{"notFound":true}"#;
+        let resp = build_action_response(json);
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        assert_eq!(resp.headers().get("x-rex-not-found").unwrap(), "1");
+    }
+
+    #[test]
+    fn test_build_action_response_error() {
+        let json = r#"{"error":"something broke"}"#;
+        let resp = build_action_response(json);
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+    }
+
+    #[test]
+    fn test_build_action_response_legacy_result() {
+        let json = r#"{"result":42}"#;
+        let resp = build_action_response(json);
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_server_action_csrf_mismatch() {
+        let app = build_action_test_app();
+        let resp = app
+            .oneshot(
+                Request::post("/_rex/action/test-build-id/test_action_id")
+                    .header("Content-Type", "application/json")
+                    .header("Origin", "https://evil.com")
+                    .header("Host", "localhost:3000")
+                    .body(Body::from("[42]"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn test_server_action_csrf_match() {
+        let app = build_action_test_app();
+        let resp = app
+            .oneshot(
+                Request::post("/_rex/action/test-build-id/test_action_id")
+                    .header("Content-Type", "application/json")
+                    .header("Origin", "http://localhost:3000")
+                    .header("Host", "localhost:3000")
+                    .body(Body::from("[42]"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // Should pass CSRF and reach action dispatch
+        assert_ne!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn test_server_action_body_too_large() {
+        let app = build_action_test_app();
+        // Create a body larger than 1MB
+        let large_body = vec![b'x'; MAX_ACTION_BODY_SIZE + 1];
+        let resp = app
+            .oneshot(
+                Request::post("/_rex/action/test-build-id/test_action_id")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(large_body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 }

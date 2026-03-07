@@ -200,6 +200,87 @@ globalThis.__rex_finalize_rsc_to_html = function(): string {
 let _actionResult: string | null = null;
 let _actionDone = false;
 
+// --- redirect() and notFound() sentinel errors ---
+
+const REDIRECT_TYPE = '__rex_redirect__';
+const NOT_FOUND_TYPE = '__rex_notFound__';
+
+globalThis.__rex_redirect = function(url: string, status?: number): never {
+    throw { __rex_type: REDIRECT_TYPE, url: url, status: status || 303 };
+};
+
+globalThis.__rex_notFound = function(): never {
+    throw { __rex_type: NOT_FOUND_TYPE };
+};
+
+// --- Request context (set by Rust before action execution) ---
+
+globalThis.__rex_request_headers = {};
+globalThis.__rex_request_cookies = {};
+
+// --- Flight serialization for action results ---
+
+function _storeActionResult(val: unknown): void {
+    const bundlerConfig = globalThis.__rex_webpack_bundler_config || {};
+    try {
+        // renderToReadableStream can serialize any value, not just ReactElements
+        const stream = __rex_renderToReadableStream(val as React.ReactElement, bundlerConfig);
+        const reader = stream.getReader();
+        const chunks: (string | Uint8Array)[] = [];
+
+        function drain(): void {
+            reader.read().then(function(result: ReadableStreamReadResult<Uint8Array>) {
+                if (result.done) {
+                    const decoder = new TextDecoder();
+                    const parts: string[] = [];
+                    for (let i = 0; i < chunks.length; i++) {
+                        const c = chunks[i];
+                        parts.push(typeof c === 'string' ? c : decoder.decode(c));
+                    }
+                    _actionResult = JSON.stringify({ flight: parts.join('') });
+                    _actionDone = true;
+                } else {
+                    chunks.push(result.value);
+                    drain();
+                }
+            }, function(err: unknown) {
+                _actionResult = JSON.stringify({ error: 'Flight serialization failed: ' + String(err) });
+                _actionDone = true;
+            });
+        }
+        drain();
+    } catch {
+        // Fallback to JSON if flight serialization not available
+        _actionResult = JSON.stringify({ result: val });
+        _actionDone = true;
+    }
+}
+
+function _handleActionError(err: unknown): void {
+    if (err && typeof err === 'object') {
+        const sentinel = err as Record<string, unknown>;
+        if (sentinel.__rex_type === REDIRECT_TYPE) {
+            _actionResult = JSON.stringify({
+                redirect: sentinel.url,
+                redirectStatus: sentinel.status
+            });
+            _actionDone = true;
+            return;
+        }
+        if (sentinel.__rex_type === NOT_FOUND_TYPE) {
+            _actionResult = JSON.stringify({ notFound: true });
+            _actionDone = true;
+            return;
+        }
+    }
+    _actionResult = JSON.stringify({ error: String(err) });
+    _actionDone = true;
+}
+
+function _handleActionValue(val: unknown): void {
+    _storeActionResult(val);
+}
+
 // Legacy JSON-only path (backward compat for plain JSON args)
 globalThis.__rex_call_server_action = function(actionId: string, argsJson: string): string {
     const actions = globalThis.__rex_server_actions || {};
@@ -222,22 +303,17 @@ globalThis.__rex_call_server_action = function(actionId: string, argsJson: strin
     try {
         const result = fn.apply(null, args);
         if (result && typeof result === 'object' && typeof (result as Record<string, unknown>).then === 'function') {
-            // Async — store promise resolution
             (result as Promise<unknown>).then(
-                function(val: unknown) {
-                    _actionResult = JSON.stringify({ result: val });
-                    _actionDone = true;
-                },
-                function(err: unknown) {
-                    _actionResult = JSON.stringify({ error: String(err) });
-                    _actionDone = true;
-                }
+                _handleActionValue,
+                _handleActionError
             );
             return '__REX_ACTION_ASYNC__';
         }
-        return JSON.stringify({ result: result });
+        _handleActionValue(result);
+        return '__REX_ACTION_ASYNC__';
     } catch (e) {
-        return JSON.stringify({ error: String(e) });
+        _handleActionError(e);
+        return '__REX_ACTION_ASYNC__';
     }
 };
 
@@ -286,21 +362,13 @@ globalThis.__rex_call_server_action_encoded = function(actionId: string, body: s
                 const result = fn.apply(null, argArray);
                 if (result && typeof result === 'object' && typeof (result as Record<string, unknown>).then === 'function') {
                     return (result as Promise<unknown>).then(
-                        function(val: unknown) {
-                            _actionResult = JSON.stringify({ result: val });
-                            _actionDone = true;
-                        },
-                        function(err: unknown) {
-                            _actionResult = JSON.stringify({ error: String(err) });
-                            _actionDone = true;
-                        }
+                        _handleActionValue,
+                        _handleActionError
                     );
                 }
-                _actionResult = JSON.stringify({ result: result });
-                _actionDone = true;
+                _handleActionValue(result);
             } catch (e) {
-                _actionResult = JSON.stringify({ error: String(e) });
-                _actionDone = true;
+                _handleActionError(e);
             }
         },
         function(err: unknown) {
@@ -348,21 +416,13 @@ globalThis.__rex_call_form_action = function(fieldsJson: string): string {
                 const result = (boundFn as () => unknown)();
                 if (result && typeof result === 'object' && typeof (result as Record<string, unknown>).then === 'function') {
                     return (result as Promise<unknown>).then(
-                        function(val: unknown) {
-                            _actionResult = JSON.stringify({ result: val });
-                            _actionDone = true;
-                        },
-                        function(err: unknown) {
-                            _actionResult = JSON.stringify({ error: String(err) });
-                            _actionDone = true;
-                        }
+                        _handleActionValue,
+                        _handleActionError
                     );
                 }
-                _actionResult = JSON.stringify({ result: result });
-                _actionDone = true;
+                _handleActionValue(result);
             } catch (e) {
-                _actionResult = JSON.stringify({ error: String(e) });
-                _actionDone = true;
+                _handleActionError(e);
             }
         },
         function(err: unknown) {
