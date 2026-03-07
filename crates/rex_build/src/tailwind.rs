@@ -81,7 +81,7 @@ pub fn process_tailwind_css(
         let bin = tw_bin.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
                 "CSS file {} uses Tailwind directives but tailwindcss is not installed.\n\
-                 Install it: npm install tailwindcss",
+                 Install it: npm install @tailwindcss/cli",
                 css_path.display()
             )
         })?;
@@ -345,7 +345,7 @@ mod tests {
         );
         let err = result.unwrap_err().to_string();
         assert!(
-            err.contains("tailwindcss is not installed"),
+            err.contains("tailwindcss is not installed") || err.contains("@tailwindcss/cli"),
             "error should mention missing binary"
         );
     }
