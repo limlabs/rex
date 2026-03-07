@@ -694,3 +694,59 @@ fn test_reload_preserves_server_action_fn() {
     let r2 = iso.call_server_action("x", "[]").unwrap();
     assert!(r2.contains("v2"));
 }
+
+#[test]
+fn test_call_server_action_encoded() {
+    let mut iso = make_isolate_with_actions(
+        r#"
+        globalThis.__rex_call_server_action_encoded = function(actionId, body) {
+            var args = JSON.parse(body);
+            if (!Array.isArray(args)) args = [args];
+            return JSON.stringify({ result: args[0] + 10 });
+        };
+        "#,
+    );
+    let result = iso.call_server_action_encoded("enc_act", "[5]").unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(parsed["result"], 15);
+}
+
+#[test]
+fn test_call_server_action_encoded_not_loaded() {
+    let mut iso = make_isolate(&[]);
+    let err = iso.call_server_action_encoded("act", "[]").unwrap_err();
+    assert!(
+        err.to_string().contains("not loaded"),
+        "Should error when encoded actions not loaded, got: {err}"
+    );
+}
+
+#[test]
+fn test_call_form_action_sync() {
+    let mut iso = make_isolate_with_actions(
+        r#"
+        globalThis.__rex_call_form_action = function(fieldsJson) {
+            var fields = JSON.parse(fieldsJson);
+            var name = "";
+            for (var i = 0; i < fields.length; i++) {
+                if (fields[i][0] === "name") name = fields[i][1];
+            }
+            return JSON.stringify({ result: "Hello, " + name + "!" });
+        };
+        "#,
+    );
+    let fields_json = r#"[["name","Alice"],["$ACTION_ID_abc",""]]"#;
+    let result = iso.call_form_action("abc", fields_json).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(parsed["result"], "Hello, Alice!");
+}
+
+#[test]
+fn test_call_form_action_not_loaded() {
+    let mut iso = make_isolate(&[]);
+    let err = iso.call_form_action("act", "[]").unwrap_err();
+    assert!(
+        err.to_string().contains("not loaded"),
+        "Should error when form actions not loaded, got: {err}"
+    );
+}

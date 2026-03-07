@@ -1101,11 +1101,16 @@ pub async fn rsc_handler(
 
 /// Server action handler: POST /_rex/action/{build_id}/{action_id}
 ///
-/// Dispatches a server function call from the client. The request body
-/// is a JSON array of arguments. Returns `{ result: ... }` or `{ error: ... }`.
+/// Dispatches a server function call from the client. Supports three content types:
+/// - `application/json`: Legacy path — body is a JSON array of arguments
+/// - `text/x-component`: Encoded reply — body is a string from React's `encodeReply`
+/// - `multipart/form-data`: Form submission — body is parsed multipart fields
+///
+/// Returns `{ result: ... }` or `{ error: ... }` as JSON.
 pub async fn server_action_handler(
     State(state): State<Arc<AppState>>,
     Path((build_id, action_id)): Path<(String, String)>,
+    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
     let hot = snapshot(&state);
@@ -1115,19 +1120,52 @@ pub async fn server_action_handler(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let args_json = match std::str::from_utf8(&body) {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            return (StatusCode::BAD_REQUEST, "Invalid UTF-8 body").into_response();
-        }
+    let content_type = headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/json");
+
+    let result = if content_type.starts_with("text/x-component") {
+        // Encoded reply path: React's encodeReply produced a string
+        let body_str = match std::str::from_utf8(&body) {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                return (StatusCode::BAD_REQUEST, "Invalid UTF-8 body").into_response();
+            }
+        };
+        let action_id_owned = action_id.clone();
+        state
+            .isolate_pool
+            .execute(move |iso| iso.call_server_action_encoded(&action_id_owned, &body_str))
+            .await
+    } else if content_type.starts_with("multipart/form-data") {
+        // Form submission: parse multipart fields, pass to V8 as JSON array of [key, value]
+        let boundary = content_type
+            .split("boundary=")
+            .nth(1)
+            .unwrap_or("")
+            .to_string();
+        let fields = parse_multipart_fields(&body, &boundary);
+        let fields_json = serde_json::to_string(&fields).unwrap_or_else(|_| "[]".to_string());
+        let action_id_owned = action_id.clone();
+        state
+            .isolate_pool
+            .execute(move |iso| iso.call_form_action(&action_id_owned, &fields_json))
+            .await
+    } else {
+        // Legacy JSON path
+        let args_json = match std::str::from_utf8(&body) {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                return (StatusCode::BAD_REQUEST, "Invalid UTF-8 body").into_response();
+            }
+        };
+        let action_id_owned = action_id.clone();
+        state
+            .isolate_pool
+            .execute(move |iso| iso.call_server_action(&action_id_owned, &args_json))
+            .await
     };
-
-    let action_id_owned = action_id.clone();
-
-    let result = state
-        .isolate_pool
-        .execute(move |iso| iso.call_server_action(&action_id_owned, &args_json))
-        .await;
 
     match result {
         Ok(Ok(json_result)) => Response::builder()
@@ -1149,6 +1187,56 @@ pub async fn server_action_handler(
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
+}
+
+/// Parse multipart/form-data fields into a Vec of (key, value) pairs.
+/// Only handles text fields (not file uploads) — sufficient for React form actions.
+fn parse_multipart_fields(body: &[u8], boundary: &str) -> Vec<(String, String)> {
+    let mut fields = Vec::new();
+    let body_str = match std::str::from_utf8(body) {
+        Ok(s) => s,
+        Err(_) => return fields,
+    };
+
+    let delimiter = format!("--{boundary}");
+    let parts: Vec<&str> = body_str.split(&delimiter).collect();
+
+    for part in parts {
+        let part = part.trim_start_matches("\r\n");
+        if part.is_empty() || part == "--" || part == "--\r\n" {
+            continue;
+        }
+
+        // Split headers from body at double CRLF
+        if let Some(header_end) = part.find("\r\n\r\n") {
+            let headers_section = &part[..header_end];
+            let value = part[header_end + 4..].trim_end_matches("\r\n");
+
+            // Extract name from Content-Disposition header
+            if let Some(name) = extract_field_name(headers_section) {
+                fields.push((name, value.to_string()));
+            }
+        }
+    }
+
+    fields
+}
+
+/// Extract the `name` attribute from a Content-Disposition header.
+fn extract_field_name(headers: &str) -> Option<String> {
+    for line in headers.lines() {
+        let lower = line.to_lowercase();
+        if lower.starts_with("content-disposition") {
+            // Look for name="..."
+            if let Some(name_start) = line.find("name=\"") {
+                let rest = &line[name_start + 6..];
+                if let Some(name_end) = rest.find('"') {
+                    return Some(rest[..name_end].to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Query parameters for the image optimization endpoint.
@@ -2190,5 +2278,129 @@ globalThis.__rex_resolve_gsp = function() {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_server_action_encoded_reply() {
+        // Build an app with the encoded reply handler
+        rex_v8::init_v8();
+        let action_runtime = r#"
+            globalThis.__rex_server_actions = {
+                "test_action_id": function(x) { return x + 1; }
+            };
+            globalThis.__rex_call_server_action = function(actionId, argsJson) {
+                var actions = globalThis.__rex_server_actions || {};
+                var fn = actions[actionId];
+                if (!fn) return JSON.stringify({ error: "Server action not found: " + actionId });
+                var args = JSON.parse(argsJson);
+                try {
+                    var result = fn.apply(null, args);
+                    return JSON.stringify({ result: result });
+                } catch (e) {
+                    return JSON.stringify({ error: String(e) });
+                }
+            };
+            globalThis.__rex_call_server_action_encoded = function(actionId, body) {
+                var actions = globalThis.__rex_server_actions || {};
+                var fn = actions[actionId];
+                if (!fn) return JSON.stringify({ error: "Server action not found: " + actionId });
+                var args = JSON.parse(body);
+                if (!Array.isArray(args)) args = [args];
+                try {
+                    var result = fn.apply(null, args);
+                    return JSON.stringify({ result: result });
+                } catch (e) {
+                    return JSON.stringify({ error: String(e) });
+                }
+            };
+        "#;
+        let bundle = format!(
+            "{}\n{}\n{}",
+            MOCK_REACT_RUNTIME,
+            make_server_bundle(&[]),
+            action_runtime
+        );
+        let pool =
+            rex_v8::IsolatePool::new(1, Arc::new(bundle), None).expect("failed to create pool");
+
+        let build_id = "test-build-id".to_string();
+        let manifest = rex_build::AssetManifest::new(build_id.clone());
+        let manifest_json = HotState::compute_manifest_json(&build_id, &manifest);
+
+        let state = Arc::new(AppState {
+            isolate_pool: pool,
+            is_dev: false,
+            project_root: PathBuf::from("/tmp/rex-test"),
+            image_cache: rex_image::ImageCache::new(PathBuf::from("/tmp/rex-test-cache")),
+            hot: RwLock::new(Arc::new(HotState {
+                route_trie: RouteTrie::from_routes(&[]),
+                api_route_trie: RouteTrie::from_routes(&[]),
+                manifest,
+                build_id,
+                has_custom_404: false,
+                has_custom_error: false,
+                has_custom_document: false,
+                project_config: rex_core::ProjectConfig::default(),
+                manifest_json,
+                document_descriptor: None,
+                has_middleware: false,
+                middleware_matchers: None,
+                app_route_trie: None,
+                has_mcp_tools: false,
+            })),
+        });
+
+        let app = Router::new()
+            .route(
+                "/_rex/action/{build_id}/{action_id}",
+                post(server_action_handler),
+            )
+            .with_state(state);
+
+        // Send with text/x-component content type (encoded reply)
+        let resp = app
+            .oneshot(
+                Request::post("/_rex/action/test-build-id/test_action_id")
+                    .header("Content-Type", "text/x-component")
+                    .body(Body::from("[42]"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_string(resp.into_body()).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["result"], 43);
+    }
+
+    #[test]
+    fn test_parse_multipart_fields() {
+        let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
+        let body = "------WebKitFormBoundary7MA4YWxkTrZu0gW\r\n\
+             Content-Disposition: form-data; name=\"name\"\r\n\
+             \r\n\
+             Alice\r\n\
+             ------WebKitFormBoundary7MA4YWxkTrZu0gW\r\n\
+             Content-Disposition: form-data; name=\"$ACTION_ID_abc123\"\r\n\
+             \r\n\
+             \r\n\
+             ------WebKitFormBoundary7MA4YWxkTrZu0gW--\r\n";
+        let fields = parse_multipart_fields(body.as_bytes(), boundary);
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].0, "name");
+        assert_eq!(fields[0].1, "Alice");
+        assert_eq!(fields[1].0, "$ACTION_ID_abc123");
+    }
+
+    #[test]
+    fn test_extract_field_name_basic() {
+        let headers = "Content-Disposition: form-data; name=\"username\"";
+        assert_eq!(extract_field_name(headers), Some("username".to_string()));
+    }
+
+    #[test]
+    fn test_extract_field_name_missing() {
+        let headers = "Content-Type: text/plain";
+        assert_eq!(extract_field_name(headers), None);
     }
 }

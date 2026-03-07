@@ -330,8 +330,11 @@ async fn build_rsc_server_bundle(
     if !server_action_manifest.actions.is_empty() {
         entry.push_str("\n// --- Server Actions Registration ---\n");
         entry.push_str(
-            "import { registerServerReference } from 'react-server-dom-webpack/server';\n",
+            "import { registerServerReference, decodeReply, decodeAction } from 'react-server-dom-webpack/server';\n",
         );
+        // Expose decodeReply/decodeAction as globals for the flight runtime
+        entry.push_str("globalThis.__rex_decodeReply = decodeReply;\n");
+        entry.push_str("globalThis.__rex_decodeAction = decodeAction;\n");
 
         // Group actions by module_path to deduplicate imports
         let mut modules_by_path: std::collections::HashMap<&str, Vec<(&str, &str)>> =
@@ -351,6 +354,14 @@ async fn build_rsc_server_bundle(
             .to_string();
 
         entry.push_str("globalThis.__rex_server_actions = {};\n");
+
+        // Build server action manifest for decodeReply/decodeAction resolution
+        let sa_config_json =
+            serde_json::to_string(&server_action_manifest.to_server_reference_config())
+                .unwrap_or_else(|_| "{}".to_string());
+        entry.push_str(&format!(
+            "globalThis.__rex_server_action_manifest = {sa_config_json};\n"
+        ));
 
         for (i, (module_path, actions)) in modules_by_path.iter().enumerate() {
             let abs_path = format!("{}/{}", project_root_str.trim_end_matches('/'), module_path);
@@ -967,12 +978,12 @@ mod tests {
         fs::write(rsdw_dir.join("index.js"), "export default {};\n").unwrap();
         fs::write(
             rsdw_dir.join("client.js"),
-            "export function createFromReadableStream(s) { return {}; }\nexport function createServerReference(id, callServer) { return function(...args) { return callServer(id, args); }; }\n",
+            "export function createFromReadableStream(s) { return {}; }\nexport function createServerReference(id, callServer) { return function(...args) { return callServer(id, args); }; }\nexport function encodeReply(value) { return Promise.resolve(JSON.stringify(value)); }\n",
         )
         .unwrap();
         fs::write(
             rsdw_dir.join("server.js"),
-            "export function renderToReadableStream(el, config) { return new ReadableStream(); }\nexport function registerServerReference(fn, id, name) { return fn; }\n",
+            "export function renderToReadableStream(el, config) { return new ReadableStream(); }\nexport function registerServerReference(fn, id, name) { return fn; }\nexport function decodeReply(body, manifest) { if (typeof body === 'string') { return Promise.resolve(JSON.parse(body)); } return Promise.resolve([]); }\nexport function decodeAction(body, manifest) { return Promise.resolve(null); }\n",
         )
         .unwrap();
     }

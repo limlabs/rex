@@ -12,19 +12,31 @@
 //   modules using window.__REX_RSC_MODULE_MAP__ which maps ref_id → chunk_url.
 //   After all modules are loaded into the webpack cache, we hydrate.
 
-import { createFromReadableStream, createFromFetch } from 'react-server-dom-webpack/client';
+import { createFromReadableStream, createFromFetch, encodeReply } from 'react-server-dom-webpack/client';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
 // --- callServer: server action RPC ---
 // Must be defined before module loading since stubs reference it at module scope.
+// Uses encodeReply to properly serialize args (handles FormData, Blob, etc.)
 function callServer(id: string, args: unknown[]): Promise<unknown> {
   const manifest = window.__REX_MANIFEST__;
   const buildId = manifest ? manifest.build_id : '';
-  return fetch('/_rex/action/' + buildId + '/' + id, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(args),
+  const url = '/_rex/action/' + buildId + '/' + id;
+
+  return encodeReply(args).then(function(body: string | FormData) {
+    var headers: Record<string, string> = {};
+    // encodeReply returns a string for simple args, FormData for complex (Blob, File, etc.)
+    // For string bodies, set content type so the server knows to use decodeReply
+    if (typeof body === 'string') {
+      headers['Content-Type'] = 'text/x-component';
+    }
+    // For FormData, the browser sets the multipart content-type automatically
+    return fetch(url, {
+      method: 'POST',
+      headers: headers,
+      body: body,
+    });
   }).then(function(r: Response) {
     return r.json();
   }).then(function(d: { result?: unknown; error?: string }) {
