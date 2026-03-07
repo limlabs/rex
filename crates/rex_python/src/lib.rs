@@ -1,5 +1,6 @@
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
+use rex_build::AssetManifest;
 use rex_server::document::{assemble_document, DocumentParams};
 use rex_server::handlers::snapshot;
 use rex_server::{Rex, RexOptions};
@@ -7,9 +8,77 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-/// Convert an anyhow::Error into a Python RuntimeError.
+/// Convert a displayable error into a Python RuntimeError.
 fn to_py_err(e: impl std::fmt::Display) -> PyErr {
     PyRuntimeError::new_err(format!("{e:#}"))
+}
+
+/// Build a module_name -> route_pattern lookup from scan results.
+fn build_module_map(scan: &rex_router::ScanResult) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for route in &scan.routes {
+        map.insert(route.module_name(), route.pattern.clone());
+    }
+    map
+}
+
+/// Resolved component identity for rendering.
+#[derive(Debug)]
+struct ResolvedComponent {
+    module_name: String,
+    route_pattern: String,
+}
+
+/// Resolve a component string into module name + route pattern.
+///
+/// If `component` starts with `/`, it's treated as a URL path and matched
+/// against the route trie. Otherwise, it's treated as a module name and
+/// the pattern is looked up from the module map.
+fn resolve_component(
+    component: &str,
+    rex: &Rex,
+    module_to_pattern: &HashMap<String, String>,
+) -> Result<ResolvedComponent, String> {
+    if component.starts_with('/') {
+        let route_match = rex
+            .match_route(component)
+            .ok_or_else(|| format!("No route matches path: {component}"))?;
+        Ok(ResolvedComponent {
+            module_name: route_match.module_name.clone(),
+            route_pattern: route_match.pattern.clone(),
+        })
+    } else {
+        let route_pattern = module_to_pattern
+            .get(component)
+            .cloned()
+            .unwrap_or_else(|| format!("/{component}"));
+        Ok(ResolvedComponent {
+            module_name: component.to_string(),
+            route_pattern,
+        })
+    }
+}
+
+/// Collect client JS scripts for a page from the manifest.
+fn client_scripts_for(manifest: &AssetManifest, route_pattern: &str) -> Vec<String> {
+    manifest
+        .pages
+        .get(route_pattern)
+        .map(|p| vec![p.js.clone()])
+        .unwrap_or_default()
+}
+
+/// Collect CSS files for a page (global + per-page) from the manifest.
+fn css_files_for(manifest: &AssetManifest, route_pattern: &str) -> Vec<String> {
+    manifest
+        .pages
+        .get(route_pattern)
+        .map(|p| {
+            let mut css = manifest.global_css.clone();
+            css.extend(p.css.clone());
+            css
+        })
+        .unwrap_or_else(|| manifest.global_css.clone())
 }
 
 /// A Rex renderer for Python web frameworks.
@@ -33,19 +102,9 @@ struct Renderer {
 
 #[pymethods]
 impl Renderer {
-    /// Create a new Renderer.
-    ///
-    /// Scans pages, bundles with Rolldown, and creates a V8 isolate pool.
-    /// All in-process — no Node.js, no npm, no external binary.
-    ///
-    /// Args:
-    ///     root: Directory containing pages/ (default: "./ui")
-    ///     dev: Enable dev mode with file watching (default: False)
-    ///     pool_size: Number of V8 isolates (default: CPU count)
     #[new]
     #[pyo3(signature = (root="./ui", dev=false, pool_size=None))]
     fn new(root: &str, dev: bool, pool_size: Option<usize>) -> PyResult<Self> {
-        // Initialize tracing (ignore if already initialized)
         let _ = tracing_subscriber::fmt()
             .with_env_filter(
                 tracing_subscriber::EnvFilter::try_from_default_env()
@@ -63,15 +122,11 @@ impl Renderer {
             .block_on(Rex::new(RexOptions {
                 root: root.into(),
                 dev,
-                port: 0, // Python extension doesn't serve directly
+                port: 0,
             }))
             .map_err(to_py_err)?;
 
-        // Build module_name -> route_pattern mapping from scan results
-        let mut module_to_pattern = HashMap::new();
-        for route in &rex.scan().routes {
-            module_to_pattern.insert(route.module_name(), route.pattern.clone());
-        }
+        let module_to_pattern = build_module_map(rex.scan());
 
         Ok(Renderer {
             rex,
@@ -81,21 +136,6 @@ impl Renderer {
         })
     }
 
-    /// Render a page component with the given props.
-    ///
-    /// Accepts either a module name ("blog/[slug]") or a URL path ("/blog/hello").
-    /// Props are passed directly to the component — no getServerSideProps is called.
-    /// Returns a complete HTML document string.
-    ///
-    /// The GIL is released during V8 execution, so multiple Python threads
-    /// can call render() concurrently.
-    ///
-    /// Args:
-    ///     component: Module name (e.g. "index", "blog/[slug]") or URL path
-    ///     props: Dict of props to pass to the component (default: {})
-    ///
-    /// Returns:
-    ///     Complete HTML document string
     #[pyo3(signature = (component, props=None))]
     fn render(
         &self,
@@ -105,37 +145,19 @@ impl Renderer {
     ) -> PyResult<String> {
         self.check_closed()?;
 
-        // Serialize Python props to JSON
         let props_json = match props {
             Some(obj) => python_to_json(obj)?,
             None => "{}".to_string(),
         };
 
-        // Determine the module name (route key for V8)
-        // If it looks like a URL path (starts with /), match it against the trie.
-        // Otherwise, treat it as a module name directly.
-        let (module_name, route_pattern) = if component.starts_with('/') {
-            let route_match = self.rex.match_route(component).ok_or_else(|| {
-                PyRuntimeError::new_err(format!("No route matches path: {component}"))
-            })?;
-            let mod_name = route_match.module_name.clone();
-            let pattern = route_match.pattern.clone();
-            (mod_name, pattern)
-        } else {
-            let mod_name = component.to_string();
-            let pattern = self
-                .module_to_pattern
-                .get(component)
-                .cloned()
-                .unwrap_or_else(|| format!("/{component}"));
-            (mod_name, pattern)
-        };
+        let resolved = resolve_component(component, &self.rex, &self.module_to_pattern)
+            .map_err(|e| PyRuntimeError::new_err(e))?;
 
         let state = self.rex.state();
 
         // Release the GIL during V8 execution
         let result = py.detach(|| {
-            let route_key = module_name.clone();
+            let route_key = resolved.module_name.clone();
             let props = props_json.clone();
             self.rt.block_on(async {
                 state
@@ -151,22 +173,10 @@ impl Renderer {
             Err(e) => return Err(PyRuntimeError::new_err(format!("Pool error: {e}"))),
         };
 
-        // Look up page assets from the manifest
         let hot = snapshot(&state);
-        let page_assets = hot.manifest.pages.get(&route_pattern);
+        let client_scripts = client_scripts_for(&hot.manifest, &resolved.route_pattern);
+        let css_files = css_files_for(&hot.manifest, &resolved.route_pattern);
 
-        let client_scripts: Vec<String> =
-            page_assets.map(|p| vec![p.js.clone()]).unwrap_or_default();
-
-        let css_files: Vec<String> = page_assets
-            .map(|p| {
-                let mut css = hot.manifest.global_css.clone();
-                css.extend(p.css.clone());
-                css
-            })
-            .unwrap_or_else(|| hot.manifest.global_css.clone());
-
-        // Assemble the full HTML document
         let html = assemble_document(&DocumentParams {
             ssr_html: &render_result.body,
             head_html: &render_result.head,
@@ -183,22 +193,16 @@ impl Renderer {
         Ok(html)
     }
 
-    /// Path to the client-side static files directory.
-    ///
-    /// Mount this as a static file directory in your web framework:
-    ///     app.mount("/_rex/static", StaticFiles(directory=rex.client_dir))
     #[getter]
     fn client_dir(&self) -> String {
         self.rex.static_dir().to_string_lossy().to_string()
     }
 
-    /// The current build ID (content hash).
     #[getter]
     fn build_id(&self) -> String {
         self.rex.build_id()
     }
 
-    /// Build manifest as a Python dict.
     #[getter]
     fn manifest(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let hot = snapshot(&self.rex.state());
@@ -209,13 +213,11 @@ impl Renderer {
         Ok(result.unbind())
     }
 
-    /// List of available page module names.
     #[getter]
     fn pages(&self) -> Vec<String> {
         self.module_to_pattern.keys().cloned().collect()
     }
 
-    /// Rebuild bundles and reload V8 isolates.
     fn rebuild(&mut self) -> PyResult<()> {
         self.check_closed()?;
 
@@ -242,17 +244,11 @@ impl Renderer {
             )
             .map_err(to_py_err)?;
 
-        // Update module mapping
-        self.module_to_pattern.clear();
-        for route in &scan.routes {
-            self.module_to_pattern
-                .insert(route.module_name(), route.pattern.clone());
-        }
+        self.module_to_pattern = build_module_map(&scan);
 
         Ok(())
     }
 
-    /// Shut down the renderer, releasing V8 isolates and other resources.
     fn close(&mut self) {
         self.closed.store(true, Ordering::SeqCst);
     }
@@ -286,4 +282,143 @@ fn python_to_json(obj: &Bound<'_, PyAny>) -> PyResult<String> {
 fn rex_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Renderer>()?;
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use rex_build::AssetManifest;
+    use rex_core::DataStrategy;
+    use std::sync::LazyLock;
+
+    /// Shared Rex instance — avoids concurrent builds racing on the same output dir.
+    static REX: LazyLock<Rex> = LazyLock::new(|| {
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("fixtures/basic");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(Rex::new(RexOptions {
+            root: fixtures,
+            dev: false,
+            port: 0,
+        }))
+        .unwrap()
+    });
+
+    #[test]
+    fn build_module_map_from_scan() {
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("fixtures/basic");
+        let pages_dir = fixtures.join("pages");
+        let scan = rex_router::scan_project(&fixtures, &pages_dir).unwrap();
+        let map = build_module_map(&scan);
+
+        assert!(map.contains_key("index"));
+        assert!(map.contains_key("about"));
+        assert!(map.contains_key("blog/[slug]"));
+        assert_eq!(map.get("index").unwrap(), "/");
+        assert_eq!(map.get("about").unwrap(), "/about");
+        assert_eq!(map.get("blog/[slug]").unwrap(), "/blog/:slug");
+    }
+
+    #[test]
+    fn resolve_component_by_module_name() {
+        let mut module_to_pattern = HashMap::new();
+        module_to_pattern.insert("index".to_string(), "/".to_string());
+        module_to_pattern.insert("blog/[slug]".to_string(), "/blog/:slug".to_string());
+
+        let rex = &*REX;
+
+        // Known module name
+        let resolved = resolve_component("index", rex, &module_to_pattern).unwrap();
+        assert_eq!(resolved.module_name, "index");
+        assert_eq!(resolved.route_pattern, "/");
+
+        // Known dynamic module
+        let resolved = resolve_component("blog/[slug]", rex, &module_to_pattern).unwrap();
+        assert_eq!(resolved.module_name, "blog/[slug]");
+        assert_eq!(resolved.route_pattern, "/blog/:slug");
+
+        // Unknown module — falls back to /{name}
+        let resolved = resolve_component("unknown", rex, &module_to_pattern).unwrap();
+        assert_eq!(resolved.module_name, "unknown");
+        assert_eq!(resolved.route_pattern, "/unknown");
+    }
+
+    #[test]
+    fn resolve_component_by_url_path() {
+        let module_to_pattern = HashMap::new();
+        let rex = &*REX;
+
+        // URL path matching
+        let resolved = resolve_component("/about", rex, &module_to_pattern).unwrap();
+        assert_eq!(resolved.module_name, "about");
+        assert_eq!(resolved.route_pattern, "/about");
+
+        // Dynamic URL path
+        let resolved = resolve_component("/blog/hello", rex, &module_to_pattern).unwrap();
+        assert_eq!(resolved.module_name, "blog/[slug]");
+        assert_eq!(resolved.route_pattern, "/blog/:slug");
+    }
+
+    #[test]
+    fn resolve_component_unknown_path_errors() {
+        let module_to_pattern = HashMap::new();
+        let rex = &*REX;
+        let result = resolve_component("/nonexistent/path", rex, &module_to_pattern);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No route matches"));
+    }
+
+    #[test]
+    fn client_scripts_for_known_page() {
+        let mut manifest = AssetManifest::new("test123".to_string());
+        manifest.add_page("/", "index-abc.js", DataStrategy::None);
+        manifest.add_page("/about", "about-def.js", DataStrategy::None);
+
+        assert_eq!(client_scripts_for(&manifest, "/"), vec!["index-abc.js"]);
+        assert_eq!(
+            client_scripts_for(&manifest, "/about"),
+            vec!["about-def.js"]
+        );
+    }
+
+    #[test]
+    fn client_scripts_for_unknown_page() {
+        let manifest = AssetManifest::new("test123".to_string());
+        let scripts: Vec<String> = client_scripts_for(&manifest, "/unknown");
+        assert!(scripts.is_empty());
+    }
+
+    #[test]
+    fn css_files_includes_global_and_page() {
+        let mut manifest = AssetManifest::new("test123".to_string());
+        manifest.global_css = vec!["global.css".to_string()];
+        manifest.add_page_with_css(
+            "/",
+            "index.js",
+            &["page.css".to_string()],
+            DataStrategy::None,
+        );
+
+        let css = css_files_for(&manifest, "/");
+        assert_eq!(css, vec!["global.css", "page.css"]);
+    }
+
+    #[test]
+    fn css_files_falls_back_to_global() {
+        let mut manifest = AssetManifest::new("test123".to_string());
+        manifest.global_css = vec!["global.css".to_string()];
+
+        let css = css_files_for(&manifest, "/unknown");
+        assert_eq!(css, vec!["global.css"]);
+    }
 }
