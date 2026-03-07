@@ -1,7 +1,7 @@
 use napi::bindgen_prelude::*;
 use napi::{Env, JsFunction, JsObject, JsUnknown};
 use rex_server::core::{RexBody, RexRequest, RexResponse, RouteMatchResult};
-use rex_server::handlers::snapshot;
+use rex_server::state::snapshot;
 use rex_server::Rex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -337,7 +337,7 @@ fn extract_headers(env: &Env, headers_obj: &JsObject) -> Result<HashMap<String, 
 
 /// Dispatch a request through the Rex core handler, including static file serving.
 async fn dispatch_request(
-    state: &Arc<rex_server::handlers::AppState>,
+    state: &Arc<rex_server::state::AppState>,
     static_dir: &Path,
     req: RexRequest,
 ) -> RexResponse {
