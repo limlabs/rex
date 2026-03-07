@@ -40,6 +40,24 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.version }}
 
+      - name: Wait for package on npm registry
+        run: |
+          VERSION="${INPUT_VERSION#v}"
+          echo "Waiting for @limlabs/rex@$VERSION..."
+          for i in $(seq 1 30); do
+            if npm view "@limlabs/rex@$VERSION" version 2>/dev/null; then
+              echo "@limlabs/rex@$VERSION is available"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::Timed out waiting for @limlabs/rex@$VERSION on npm"
+              exit 1
+            fi
+            sleep 10
+          done
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+
       - name: Install dependencies
         run: cd "fixtures/${{ matrix.fixture }}" && npm install
 
