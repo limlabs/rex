@@ -25,7 +25,7 @@ function callServer(id: string, args: unknown[]): Promise<unknown> {
   const url = '/_rex/action/' + buildId + '/' + id;
 
   return encodeReply(args).then(function(body: string | FormData) {
-    var headers: Record<string, string> = {};
+    let headers: Record<string, string> = {};
     // encodeReply returns a string for simple args, FormData for complex (Blob, File, etc.)
     // For string bodies, set content type so the server knows to use decodeReply
     if (typeof body === 'string') {

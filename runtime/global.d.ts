@@ -140,7 +140,7 @@ declare global {
   var __rex_server_actions: Record<string, (...args: unknown[]) => unknown>;
   var __rex_server_action_manifest: Record<string, unknown>;
   var __rex_call_server_action: (actionId: string, argsJson: string) => string;
-  var __rex_call_server_action_encoded: (actionId: string, body: string) => string;
+  var __rex_call_server_action_encoded: (actionId: string, body: string, isFormFields?: boolean) => string;
   var __rex_call_form_action: (fieldsJson: string) => string;
   var __rex_resolve_action_pending: () => "pending" | "done";
   var __rex_finalize_action: () => string;

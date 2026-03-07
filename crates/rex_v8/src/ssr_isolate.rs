@@ -662,10 +662,16 @@ impl SsrIsolate {
         self.pump_action_loop(&result_str)
     }
 
-    /// Call __rex_call_server_action_encoded(actionId, body) using React's decodeReply.
-    /// The body is an encoded string from the client's encodeReply.
-    /// Always async since decodeReply returns a Promise.
-    pub fn call_server_action_encoded(&mut self, action_id: &str, body: &str) -> Result<String> {
+    /// Call __rex_call_server_action_encoded(actionId, body, isFormFields) using React's decodeReply.
+    /// When is_form_fields is false, body is an encoded string from encodeReply.
+    /// When is_form_fields is true, body is a JSON array of [key, value] pairs from multipart
+    /// parsing — the JS side reconstructs FormData and passes it to decodeReply.
+    pub fn call_server_action_encoded(
+        &mut self,
+        action_id: &str,
+        body: &str,
+        is_form_fields: bool,
+    ) -> Result<String> {
         let action_fn = self
             .server_action_encoded_fn
             .as_ref()
@@ -680,21 +686,27 @@ impl SsrIsolate {
                 .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
             let arg1 = v8::String::new(scope, body)
                 .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+            let arg2 = v8::Boolean::new(scope, is_form_fields);
 
-            let result = v8_call!(scope, func, undef.into(), &[arg0.into(), arg1.into()])
-                .map_err(|e| anyhow::anyhow!("Encoded server action error: {e}"))?;
+            let result = v8_call!(
+                scope,
+                func,
+                undef.into(),
+                &[arg0.into(), arg1.into(), arg2.into()]
+            )
+            .map_err(|e| anyhow::anyhow!("Encoded server action error: {e}"))?;
 
             result.to_rust_string_lossy(scope)
         };
 
-        // Always async — pump microtask queue + fetch loop
         self.pump_action_loop(&result_str)
     }
 
     /// Call __rex_call_form_action(fieldsJson) using React's decodeAction.
     /// fieldsJson is a JSON array of [key, value] pairs from multipart parsing.
     /// The action ID is extracted from the FormData by React's decodeAction.
-    pub fn call_form_action(&mut self, _action_id: &str, fields_json: &str) -> Result<String> {
+    /// Used for progressive enhancement (no-JS form POST to page URL).
+    pub fn call_form_action(&mut self, fields_json: &str) -> Result<String> {
         let action_fn = self
             .form_action_fn
             .as_ref()

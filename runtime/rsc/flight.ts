@@ -242,9 +242,10 @@ globalThis.__rex_call_server_action = function(actionId: string, argsJson: strin
 };
 
 // Encoded reply path: uses React's decodeReply to handle FormData, Blob, etc.
-// body is a string (from encodeReply on the client).
+// body is either a string (from encodeReply) or a JSON array of [key, value] pairs
+// when isFormFields is true (multipart from encodeReply returning FormData).
 // Returns '__REX_ACTION_ASYNC__' since decodeReply is always async.
-globalThis.__rex_call_server_action_encoded = function(actionId: string, body: string): string {
+globalThis.__rex_call_server_action_encoded = function(actionId: string, body: string, isFormFields?: boolean): string {
     const actions = globalThis.__rex_server_actions || {};
     const fn = actions[actionId];
     if (!fn) {
@@ -257,8 +258,26 @@ globalThis.__rex_call_server_action_encoded = function(actionId: string, body: s
 
     const serverManifest = globalThis.__rex_server_action_manifest || {};
 
+    // Build the body for decodeReply: either a raw string or reconstructed FormData
+    let decodedBody: string | FormData;
+    if (isFormFields) {
+        let fields: [string, string][];
+        try {
+            fields = JSON.parse(body);
+        } catch {
+            return JSON.stringify({ error: 'Invalid form fields JSON' });
+        }
+        const formData = new FormData();
+        for (let i = 0; i < fields.length; i++) {
+            formData.append(fields[i][0], fields[i][1]);
+        }
+        decodedBody = formData;
+    } else {
+        decodedBody = body;
+    }
+
     // decodeReply returns a thenable/Promise of the decoded args
-    const decoded = globalThis.__rex_decodeReply(body, serverManifest);
+    const decoded = globalThis.__rex_decodeReply(decodedBody, serverManifest);
 
     Promise.resolve(decoded).then(
         function(args: unknown) {
@@ -310,17 +329,13 @@ globalThis.__rex_call_form_action = function(fieldsJson: string): string {
 
     // Reconstruct FormData from parsed fields
     const formData = new FormData();
-    for (var i = 0; i < fields.length; i++) {
+    for (let i = 0; i < fields.length; i++) {
         formData.append(fields[i][0], fields[i][1]);
     }
 
     const serverManifest = globalThis.__rex_server_action_manifest || {};
 
     const actionPromise = globalThis.__rex_decodeAction(formData, serverManifest);
-
-    if (!actionPromise) {
-        return JSON.stringify({ error: 'No action found in form data' });
-    }
 
     Promise.resolve(actionPromise).then(
         function(boundFn: unknown) {

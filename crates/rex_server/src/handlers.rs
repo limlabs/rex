@@ -1136,21 +1136,29 @@ pub async fn server_action_handler(
         let action_id_owned = action_id.clone();
         state
             .isolate_pool
-            .execute(move |iso| iso.call_server_action_encoded(&action_id_owned, &body_str))
+            .execute(move |iso| iso.call_server_action_encoded(&action_id_owned, &body_str, false))
             .await
     } else if content_type.starts_with("multipart/form-data") {
-        // Form submission: parse multipart fields, pass to V8 as JSON array of [key, value]
+        // Multipart from callServer: encodeReply returned FormData for complex args (Blob, File).
+        // Use decodeReply (not decodeAction) since the action ID is in the URL, not the FormData.
         let boundary = content_type
             .split("boundary=")
             .nth(1)
             .unwrap_or("")
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .trim_matches('"')
             .to_string();
         let fields = parse_multipart_fields(&body, &boundary);
         let fields_json = serde_json::to_string(&fields).unwrap_or_else(|_| "[]".to_string());
         let action_id_owned = action_id.clone();
         state
             .isolate_pool
-            .execute(move |iso| iso.call_form_action(&action_id_owned, &fields_json))
+            .execute(move |iso| {
+                iso.call_server_action_encoded(&action_id_owned, &fields_json, true)
+            })
             .await
     } else {
         // Legacy JSON path
@@ -1223,13 +1231,15 @@ fn parse_multipart_fields(body: &[u8], boundary: &str) -> Vec<(String, String)> 
 }
 
 /// Extract the `name` attribute from a Content-Disposition header.
+/// Uses `; name="` to avoid matching `filename="..."`.
 fn extract_field_name(headers: &str) -> Option<String> {
     for line in headers.lines() {
         let lower = line.to_lowercase();
         if lower.starts_with("content-disposition") {
-            // Look for name="..."
-            if let Some(name_start) = line.find("name=\"") {
-                let rest = &line[name_start + 6..];
+            // Look for "; name=" to avoid matching "filename="
+            if let Some(pos) = lower.find("; name=\"") {
+                let name_start = pos + 8; // length of "; name=\""
+                let rest = &line[name_start..];
                 if let Some(name_end) = rest.find('"') {
                     return Some(rest[..name_end].to_string());
                 }
@@ -2300,12 +2310,18 @@ globalThis.__rex_resolve_gsp = function() {
                     return JSON.stringify({ error: String(e) });
                 }
             };
-            globalThis.__rex_call_server_action_encoded = function(actionId, body) {
+            globalThis.__rex_call_server_action_encoded = function(actionId, body, isFormFields) {
                 var actions = globalThis.__rex_server_actions || {};
                 var fn = actions[actionId];
                 if (!fn) return JSON.stringify({ error: "Server action not found: " + actionId });
-                var args = JSON.parse(body);
-                if (!Array.isArray(args)) args = [args];
+                var args;
+                if (isFormFields) {
+                    var fields = JSON.parse(body);
+                    args = [fields];
+                } else {
+                    args = JSON.parse(body);
+                    if (!Array.isArray(args)) args = [args];
+                }
                 try {
                     var result = fn.apply(null, args);
                     return JSON.stringify({ result: result });
@@ -2402,5 +2418,28 @@ globalThis.__rex_resolve_gsp = function() {
     fn test_extract_field_name_missing() {
         let headers = "Content-Type: text/plain";
         assert_eq!(extract_field_name(headers), None);
+    }
+
+    #[test]
+    fn test_extract_field_name_ignores_filename() {
+        // filename= before name= — should still extract name, not filename
+        let headers = "Content-Disposition: form-data; filename=\"test.txt\"; name=\"file_upload\"";
+        assert_eq!(extract_field_name(headers), Some("file_upload".to_string()));
+    }
+
+    #[test]
+    fn test_boundary_quoted() {
+        // Verify boundary extraction handles quoted values and trailing params
+        let ct = "multipart/form-data; boundary=\"----WebKitBoundary\"; charset=utf-8";
+        let boundary = ct
+            .split("boundary=")
+            .nth(1)
+            .unwrap_or("")
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .trim_matches('"');
+        assert_eq!(boundary, "----WebKitBoundary");
     }
 }
