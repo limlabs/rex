@@ -137,45 +137,30 @@ pub(crate) fn process_css_modules(
     })
 }
 
-/// Find `.module.css` imports in a source file.
+/// Find `.module.css` imports in a source file using the OXC parser.
 /// Returns: Vec of (import_specifier, resolved_absolute_path).
 fn find_css_module_imports(source_path: &Path) -> Result<Vec<(String, PathBuf)>> {
     let source = fs::read_to_string(source_path)?;
     let parent = source_path.parent().unwrap_or(Path::new("."));
-    let mut results = Vec::new();
 
-    for line in source.lines() {
-        let trimmed = line.trim();
-        // Match: import X from './path.module.css'
-        if trimmed.starts_with("import ") {
-            if let Some(specifier) = extract_import_from_specifier(trimmed) {
-                if specifier.ends_with(".module.css") {
-                    let abs_path = parent.join(specifier);
-                    if abs_path.exists() {
-                        results.push((specifier.to_string(), abs_path));
-                    }
+    let source_type = crate::css_collect::source_type_for_path(source_path);
+    let allocator = oxc_allocator::Allocator::default();
+    let parsed = oxc_parser::Parser::new(&allocator, &source, source_type).parse();
+
+    let mut results = Vec::new();
+    for stmt in &parsed.program.body {
+        if let oxc_ast::ast::Statement::ImportDeclaration(import) = stmt {
+            let specifier = import.source.value.as_str();
+            if specifier.ends_with(".module.css") {
+                let abs_path = parent.join(specifier);
+                if abs_path.exists() {
+                    results.push((specifier.to_string(), abs_path));
                 }
             }
         }
     }
 
     Ok(results)
-}
-
-/// Extract the `from` specifier from an import statement.
-/// E.g. `import styles from './Button.module.css';` → `./Button.module.css`
-fn extract_import_from_specifier(line: &str) -> Option<&str> {
-    // Look for `from '...'` or `from "..."`
-    let from_pos = line.find("from ")?;
-    let after_from = &line[from_pos + 5..];
-    let trimmed = after_from.trim();
-    let quote_char = trimmed.chars().next()?;
-    if quote_char != '\'' && quote_char != '"' {
-        return None;
-    }
-    let inner = &trimmed[1..];
-    let end = inner.find(quote_char)?;
-    Some(&inner[..end])
 }
 
 /// Parse CSS source to extract class names from selectors.
@@ -265,68 +250,52 @@ pub(crate) fn generate_css_module_proxy(class_map: &HashMap<String, String>) -> 
 }
 
 /// Absolutize relative imports in a source file so it can be moved to a temp directory.
+///
+/// Uses the OXC parser to find import/export declarations with relative source
+/// specifiers, then performs span-based replacements on the source string value.
 pub(crate) fn absolutize_relative_imports(source: &str, source_dir: &Path) -> String {
-    let mut result = String::new();
+    use oxc_ast::ast::Statement;
+    use oxc_span::GetSpan;
 
-    for line in source.lines() {
-        let trimmed = line.trim();
+    let allocator = oxc_allocator::Allocator::default();
+    let source_type = oxc_span::SourceType::tsx();
+    let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
 
-        // Handle: import X from './relative' or import X from '../relative'
-        if trimmed.starts_with("import ") || trimmed.starts_with("export ") {
-            if let Some(from_pos) = trimmed.find("from ") {
-                let after_from = &trimmed[from_pos + 5..];
-                let after_from_trimmed = after_from.trim();
-                if let Some(quote_char) = after_from_trimmed.chars().next() {
-                    if (quote_char == '\'' || quote_char == '"') && after_from_trimmed.len() > 1 {
-                        let inner = &after_from_trimmed[1..];
-                        if let Some(end) = inner.find(quote_char) {
-                            let specifier = &inner[..end];
-                            if specifier.starts_with("./") || specifier.starts_with("../") {
-                                let abs = source_dir.join(specifier);
-                                let abs_str = abs.to_string_lossy().replace('\\', "/");
-                                let new_line = format!(
-                                    "{}{}{}{}{}",
-                                    &trimmed[..from_pos + 5],
-                                    quote_char,
-                                    abs_str,
-                                    quote_char,
-                                    &inner[end + 1..]
-                                );
-                                result.push_str(&new_line);
-                                result.push('\n');
-                                continue;
-                            }
-                        }
-                    }
-                }
-            }
-            // Handle side-effect imports: import './foo.css'
-            if trimmed.starts_with("import '") || trimmed.starts_with("import \"") {
-                let quote_char = if trimmed.starts_with("import '") {
-                    '\''
-                } else {
-                    '"'
-                };
-                let after_quote = &trimmed[8..]; // after `import '` or `import "`
-                if let Some(end) = after_quote.find(quote_char) {
-                    let specifier = &after_quote[..end];
-                    if specifier.starts_with("./") || specifier.starts_with("../") {
-                        let abs = source_dir.join(specifier);
-                        let abs_str = abs.to_string_lossy().replace('\\', "/");
-                        let new_line = format!(
-                            "import {quote_char}{abs_str}{quote_char}{}",
-                            &after_quote[end + 1..]
-                        );
-                        result.push_str(&new_line);
-                        result.push('\n');
-                        continue;
-                    }
-                }
+    // Collect (span_start, span_end, replacement) for source string literals.
+    // The span covers the full StringLiteral including quotes.
+    let mut replacements: Vec<(u32, u32, String)> = Vec::new();
+
+    for stmt in &parsed.program.body {
+        let source_lit = match stmt {
+            Statement::ImportDeclaration(import) => Some(&import.source),
+            Statement::ExportNamedDeclaration(export) => export.source.as_ref(),
+            Statement::ExportAllDeclaration(export) => Some(&export.source),
+            _ => None,
+        };
+        if let Some(lit) = source_lit {
+            let specifier = lit.value.as_str();
+            if specifier.starts_with("./") || specifier.starts_with("../") {
+                let abs = source_dir.join(specifier);
+                let abs_str = abs.to_string_lossy().replace('\\', "/");
+                let span = lit.span();
+                // Reconstruct the string literal with its original quote style.
+                // The first char of the span in source is the quote character.
+                let quote = &source[span.start as usize..span.start as usize + 1];
+                let replacement = format!("{quote}{abs_str}{quote}");
+                replacements.push((span.start, span.end, replacement));
             }
         }
+    }
 
-        result.push_str(line);
-        result.push('\n');
+    if replacements.is_empty() {
+        return source.to_string();
+    }
+
+    // Apply replacements from back to front to preserve positions.
+    replacements.sort_by_key(|(start, _, _)| std::cmp::Reverse(*start));
+    let mut result = source.to_string();
+    for (start, end, replacement) in replacements {
+        result.replace_range(start as usize..end as usize, &replacement);
     }
 
     result
@@ -361,35 +330,10 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_import_specifier_single_quotes() {
-        let line = "import styles from './Button.module.css';";
-        assert_eq!(
-            extract_import_from_specifier(line),
-            Some("./Button.module.css")
-        );
-    }
-
-    #[test]
-    fn test_extract_import_specifier_double_quotes() {
-        let line = r#"import styles from "./Button.module.css";"#;
-        assert_eq!(
-            extract_import_from_specifier(line),
-            Some("./Button.module.css")
-        );
-    }
-
-    #[test]
-    fn test_extract_import_specifier_no_from() {
-        let line = "import './globals.css';";
-        assert_eq!(extract_import_from_specifier(line), None);
-    }
-
-    #[test]
     fn test_absolutize_relative_imports() {
         let source = "import Foo from './foo';\nimport React from 'react';\n";
         let dir = Path::new("/project/src");
         let result = absolutize_relative_imports(source, dir);
-        // join("./foo") produces "/project/src/./foo" which is fine — rolldown resolves it
         assert!(
             result.contains("/project/src/"),
             "relative import should be absolutized: {result}"
@@ -399,5 +343,32 @@ mod tests {
             "specifier name should be preserved: {result}"
         );
         assert!(result.contains("from 'react'"), "bare specifiers unchanged");
+    }
+
+    #[test]
+    fn test_absolutize_side_effect_import() {
+        let source = "import './styles.css';\nimport React from 'react';\n";
+        let dir = Path::new("/project/src");
+        let result = absolutize_relative_imports(source, dir);
+        assert!(
+            result.contains("/project/src/"),
+            "side-effect import should be absolutized: {result}"
+        );
+        assert!(
+            result.contains("styles.css"),
+            "filename preserved: {result}"
+        );
+        assert!(result.contains("from 'react'"), "bare specifiers unchanged");
+    }
+
+    #[test]
+    fn test_absolutize_export_from() {
+        let source = "export { Foo } from './foo';\n";
+        let dir = Path::new("/project/src");
+        let result = absolutize_relative_imports(source, dir);
+        assert!(
+            result.contains("/project/src/"),
+            "export from should be absolutized: {result}"
+        );
     }
 }
