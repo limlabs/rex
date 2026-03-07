@@ -3,6 +3,7 @@
 //! Contains helpers shared across the RSC server, SSR, and client bundle builders:
 //! resolve aliases, treeshake options, common rolldown config fragments.
 
+use crate::build_utils::runtime_server_dir;
 use crate::bundler::runtime_client_dir;
 use anyhow::Result;
 use rex_core::RexConfig;
@@ -89,6 +90,22 @@ pub(crate) fn build_rex_aliases() -> Result<Vec<(String, Vec<Option<String>>)>> 
     for (specifier, file_stem) in &mappings {
         for ext in &["ts", "tsx", "js", "jsx"] {
             let candidate = client_dir.join(format!("{file_stem}.{ext}"));
+            if candidate.exists() {
+                aliases.push((
+                    specifier.to_string(),
+                    vec![Some(candidate.to_string_lossy().to_string())],
+                ));
+                break;
+            }
+        }
+    }
+
+    // Server-side aliases (rex/actions → runtime/server/actions.ts)
+    let server_dir = runtime_server_dir()?;
+    let server_mappings = [("rex/actions", "actions")];
+    for (specifier, file_stem) in &server_mappings {
+        for ext in &["ts", "tsx", "js", "jsx"] {
+            let candidate = server_dir.join(format!("{file_stem}.{ext}"));
             if candidate.exists() {
                 aliases.push((
                     specifier.to_string(),
