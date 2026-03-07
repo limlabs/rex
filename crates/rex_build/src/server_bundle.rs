@@ -10,7 +10,9 @@ use tracing::debug;
 /// V8 polyfills for bare V8 environment (React 19 needs these).
 /// Injected as a rolldown banner so they run before any bundled code.
 /// Compiled from TypeScript at build time by build.rs.
-pub(crate) const V8_POLYFILLS: &str = include_str!(concat!(env!("OUT_DIR"), "/v8-polyfills.js"));
+/// Compiled V8 polyfills JS, concatenated from `runtime/server/polyfills/*.ts`.
+/// Public so `rex_v8` tests can use the real polyfills instead of duplicating them.
+pub const V8_POLYFILLS: &str = include_str!(concat!(env!("OUT_DIR"), "/v8-polyfills.js"));
 
 /// SSR runtime functions appended to the virtual entry.
 /// These are bundled into the IIFE by rolldown alongside React and page code.
@@ -289,6 +291,19 @@ pub(crate) async fn build_server_bundle(
             "node:buffer".to_string(),
             vec![Some(
                 runtime_dir.join("buffer.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        // Node.js crypto module polyfill (re-exports globalThis.crypto from banner)
+        (
+            "crypto".to_string(),
+            vec![Some(
+                runtime_dir.join("crypto.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "node:crypto".to_string(),
+            vec![Some(
+                runtime_dir.join("crypto.ts").to_string_lossy().to_string(),
             )],
         ),
     ];
