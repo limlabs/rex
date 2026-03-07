@@ -31,4 +31,4 @@ runs:
     - name: Set up Python virtualenv
       if: inputs.python == 'true'
       shell: bash
-      run: cd crates/rex_python && uv sync --group dev
+      run: cd crates/rex_python && uv sync --group dev --no-install-project
