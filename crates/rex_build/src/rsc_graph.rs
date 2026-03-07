@@ -242,13 +242,25 @@ pub fn analyze_module_graph(entries: &[PathBuf], root: &Path) -> Result<ModuleGr
     while let Some(path) = queue.pop_front() {
         let info = analyze_module(&path, root)?;
 
-        // Don't walk into client modules' dependencies — they are leaf nodes
-        // for the server graph. The client bundler handles their deps separately.
         if !info.is_client {
+            // Server modules: walk all imports normally.
             for import in &info.imports {
                 if !visited.contains(import) {
                     visited.insert(import.clone());
                     queue.push_back(import.clone());
+                }
+            }
+        } else {
+            // Client boundary modules: don't fully recurse, but check imports
+            // for "use server" modules so we can generate action stubs.
+            for import in &info.imports {
+                if !visited.contains(import) {
+                    if let Ok(dep_info) = analyze_module(import, root) {
+                        if dep_info.is_server {
+                            visited.insert(import.clone());
+                            graph.modules.insert(import.clone(), dep_info);
+                        }
+                    }
                 }
             }
         }
@@ -631,6 +643,49 @@ export function add(a: number, b: number) { return a + b; }
         assert_eq!(sa_modules.len(), 1);
         assert!(sa_modules[0].path.ends_with("actions.ts"));
         assert!(sa_modules[0].exports.contains(&"inc".to_string()));
+    }
+
+    #[test]
+    fn client_component_importing_use_server_module() {
+        let dir = setup_temp_dir();
+        let root = dir.path();
+
+        // Server component page imports a client component
+        fs::write(
+            root.join("page.tsx"),
+            "import Counter from './Counter';\nexport default function Page() { return null; }\n",
+        )
+        .unwrap();
+
+        // Client component imports from a "use server" module
+        fs::write(
+            root.join("Counter.tsx"),
+            "\"use client\";\nimport { increment } from './actions';\nexport default function Counter() { return null; }\n",
+        )
+        .unwrap();
+
+        // "use server" module
+        fs::write(
+            root.join("actions.ts"),
+            "\"use server\";\nexport async function increment(n: number) { return n + 1; }\n",
+        )
+        .unwrap();
+
+        let entries = vec![root.join("page.tsx")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+
+        // page.tsx, Counter.tsx (client boundary), and actions.ts (server action) should all be in graph
+        assert_eq!(graph.modules.len(), 3);
+
+        let actions_canonical = root.join("actions.ts").canonicalize().unwrap();
+        let actions = graph.modules.get(&actions_canonical).unwrap();
+        assert!(actions.is_server);
+        assert_eq!(actions.exports, vec!["increment"]);
+
+        // server_action_modules should include actions.ts
+        let sa_modules = graph.server_action_modules();
+        assert_eq!(sa_modules.len(), 1);
+        assert!(sa_modules[0].path.ends_with("actions.ts"));
     }
 
     #[test]
