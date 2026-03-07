@@ -52,6 +52,10 @@ impl HotState {
         if !manifest.app_routes.is_empty() {
             json["app_routes"] = serde_json::to_value(&manifest.app_routes).unwrap_or_default();
         }
+        if !manifest.server_actions.is_empty() {
+            json["server_actions"] =
+                serde_json::to_value(&manifest.server_actions).unwrap_or_default();
+        }
         serde_json::to_string(&json).expect("JSON serialization")
     }
 }

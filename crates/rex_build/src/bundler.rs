@@ -160,6 +160,13 @@ pub async fn build_bundles(
             Some(rsc_result.server_bundle_path.to_string_lossy().to_string());
         manifest.rsc_ssr_bundle = Some(rsc_result.ssr_bundle_path.to_string_lossy().to_string());
 
+        // Expose server action IDs so clients can discover them
+        for (action_id, entry) in &rsc_result.server_action_manifest.actions {
+            manifest
+                .server_actions
+                .insert(action_id.clone(), entry.export_name.clone());
+        }
+
         debug!(app_routes = manifest.app_routes.len(), "RSC bundles built");
     }
 
