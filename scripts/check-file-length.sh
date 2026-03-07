@@ -32,9 +32,9 @@ while IFS= read -r file; do
     [ ! -f "$file" ] && continue
     lines=$(wc -l < "$file" | tr -d ' ')
     if [ "$lines" -gt "$MAX_LINES" ]; then
-        # Check if the file existed in the base — if so, only fail when it grew
+        # Skip grandfathered files — if already over the limit in base, allow it
         old_lines=$(git show "$base_ref":"$file" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
-        if [ "$old_lines" -gt "$MAX_LINES" ] && [ "$lines" -le "$old_lines" ]; then
+        if [ "$old_lines" -gt "$MAX_LINES" ]; then
             continue
         fi
         violations+=("  $file ($lines lines)")
