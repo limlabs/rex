@@ -343,6 +343,47 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_css_classes_from_selectors() {
+        let css = r#"
+.container { padding: 20px; }
+.title { font-size: 24px; }
+.btn-primary { background: blue; }
+.btn-primary:hover { background: darkblue; }
+/* .commented { display: none; } */
+"#;
+        let classes = parse_css_classes(css);
+        assert!(classes.contains(&"container".to_string()));
+        assert!(classes.contains(&"title".to_string()));
+        assert!(classes.contains(&"btn-primary".to_string()));
+    }
+
+    #[test]
+    fn test_scope_css_rewrites_classes() {
+        let css = ".container { padding: 20px; }\n.title { font-size: 24px; }\n";
+        let mut class_map = HashMap::new();
+        class_map.insert("container".to_string(), "Home_container_abc".to_string());
+        class_map.insert("title".to_string(), "Home_title_abc".to_string());
+
+        let scoped = scope_css(css, &class_map);
+        assert!(scoped.contains(".Home_container_abc"));
+        assert!(scoped.contains(".Home_title_abc"));
+        assert!(!scoped.contains(".container"));
+        assert!(!scoped.contains(".title"));
+    }
+
+    #[test]
+    fn test_generate_css_module_proxy_content() {
+        let mut class_map = HashMap::new();
+        class_map.insert("container".to_string(), "Home_container_abc".to_string());
+        class_map.insert("title".to_string(), "Home_title_abc".to_string());
+
+        let proxy = generate_css_module_proxy(&class_map);
+        assert!(proxy.contains("\"container\": \"Home_container_abc\""));
+        assert!(proxy.contains("\"title\": \"Home_title_abc\""));
+        assert!(proxy.contains("export default"));
+    }
+
+    #[test]
     fn test_absolutize_relative_imports() {
         let source = "import Foo from './foo';\nimport React from 'react';\n";
         let dir = Path::new("/project/src");

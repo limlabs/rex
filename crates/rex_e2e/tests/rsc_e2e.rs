@@ -253,9 +253,11 @@ mod rsc {
             );
 
             let flight = resp.text().await.unwrap();
+            // React RSC flight format uses hex-id prefixed rows:
+            //   <id>:I[...] for client imports, <id>:{...} for elements, <id>:D{...} for debug
             assert!(
-                flight.contains("J:") || flight.contains("R:"),
-                "Flight data should contain J: or R: rows"
+                flight.contains(":I[") || flight.contains("[\"$\""),
+                "Flight data should contain RSC wire format rows (client refs or element trees)"
             );
         } else {
             panic!("Could not extract build_id from page HTML");
@@ -911,7 +913,7 @@ mod rsc {
     #[tokio::test]
     #[ignore]
     async fn rsc_server_action_increment_works() {
-        // Get the page HTML and extract build_id + flight data
+        // Get the page HTML and extract build_id + server action IDs from manifest
         let body = reqwest::get(&format!("{}/", base_url()))
             .await
             .unwrap()
@@ -920,35 +922,40 @@ mod rsc {
             .unwrap();
         let build_id = extract_build_id(&body);
 
-        // Get the flight data for the dashboard/settings page which uses ActionCounter
-        let rsc_url = format!("{}/_rex/rsc/{}/dashboard/settings", base_url(), build_id);
-        let flight = reqwest::get(&rsc_url).await.unwrap().text().await.unwrap();
+        // Server action IDs are exposed in __REX_MANIFEST__.server_actions
+        // Extract from the inline manifest JSON in the page HTML
+        let manifest_start = body
+            .find("__REX_MANIFEST__=")
+            .expect("Missing __REX_MANIFEST__ in HTML");
+        let json_start = manifest_start + "__REX_MANIFEST__=".len();
+        let json_end = body[json_start..]
+            .find("</script>")
+            .expect("Missing closing script tag for manifest");
+        let manifest_json = &body[json_start..json_start + json_end];
+        let manifest: serde_json::Value =
+            serde_json::from_str(manifest_json).expect("Invalid manifest JSON");
 
-        // Flight data should contain server action references (T: rows for server references)
-        // Extract an action ID from the flight data — look for the action hash pattern
-        // Server action IDs are 14-char hex strings referenced in flight I rows
-        let action_id = {
-            let mut found = None;
-            for line in flight.lines() {
-                // Look for server reference markers in the flight protocol
-                // These appear as {"id":"<hash>","bound":null} in T: rows
-                if let Some(pos) = line.find("\"id\":\"") {
-                    let rest = &line[pos + 6..];
-                    if let Some(end) = rest.find('"') {
-                        let id = &rest[..end];
-                        // Server action IDs are hex strings (14 chars)
-                        if id.len() == 14 && id.chars().all(|c| c.is_ascii_hexdigit()) {
-                            found = Some(id.to_string());
-                            break;
-                        }
-                    }
-                }
-            }
-            found.expect("Should find a server action ID in flight data")
-        };
+        let server_actions = manifest
+            .get("server_actions")
+            .expect("Missing server_actions in manifest");
+        assert!(
+            server_actions.is_object() && !server_actions.as_object().unwrap().is_empty(),
+            "server_actions should be a non-empty object, got: {server_actions}"
+        );
 
-        // Call the server action with argument [42] — should return 43 (incrementCounter)
-        // or 41 (decrementCounter). Either confirms the action executes.
+        // Find an incrementCounter or decrementCounter action
+        let action_id = server_actions
+            .as_object()
+            .unwrap()
+            .iter()
+            .find(|(_, name)| {
+                name.as_str()
+                    .is_some_and(|n| n == "incrementCounter" || n == "decrementCounter")
+            })
+            .map(|(id, _)| id.clone())
+            .expect("Should find incrementCounter or decrementCounter in server_actions");
+
+        // Call the server action with argument [42]
         let client = reqwest::Client::new();
         let resp = client
             .post(format!(

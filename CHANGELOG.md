@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.10.0](https://github.com/limlabs/rex/compare/v0.9.0...v0.10.0) (2026-03-07)
+
+
+### Features
+
+* **build:** add Buffer polyfill for V8 SSR environment ([#49](https://github.com/limlabs/rex/issues/49)) ([bfd4f21](https://github.com/limlabs/rex/commit/bfd4f21c12415bcc5b93322919ad16d09e4cd4ed))
+* **build:** add React Server Functions ("use server") support ([#53](https://github.com/limlabs/rex/issues/53)) ([13805f0](https://github.com/limlabs/rex/commit/13805f065c9332acae6123969ac8bf6ba62a42bd))
+* **cli:** use Rust oxc_linter crate instead of npm oxlint binary ([#52](https://github.com/limlabs/rex/issues/52)) ([8933c7f](https://github.com/limlabs/rex/commit/8933c7fb271635cfcb6d438ba9b548dbf9a5f7f4))
+* **lint:** dogfood rex lint on fixtures and benchmarks ([#58](https://github.com/limlabs/rex/issues/58)) ([1d0476e](https://github.com/limlabs/rex/commit/1d0476e15d9680c315d413e4bcf7d6aed93a8290))
+* **v8:** polyfill crypto with randomUUID and createHash ([#68](https://github.com/limlabs/rex/issues/68)) ([ed94b3b](https://github.com/limlabs/rex/commit/ed94b3bf90dfbeac60abe679d6103fd183995a41))
+
+
+### Bug Fixes
+
+* **build:** add @tailwindcss/cli for Tailwind v4 compatibility ([#74](https://github.com/limlabs/rex/issues/74)) ([dc46191](https://github.com/limlabs/rex/commit/dc4619175cc228fa05bc0bf744c86c488e0814e7))
+* **ci:** allow any edits to grandfathered files in length check ([#73](https://github.com/limlabs/rex/issues/73)) ([2906290](https://github.com/limlabs/rex/commit/290629097208fc74f1cf43d47dd50e312a8d6812))
+* **ci:** prevent beta release double-trigger on Cargo.lock update ([#48](https://github.com/limlabs/rex/issues/48)) ([462cb18](https://github.com/limlabs/rex/commit/462cb184fc68815de8dea480c82a4b66e79fc4bb))
+* **ci:** skip file-length check for grandfathered files ([#72](https://github.com/limlabs/rex/issues/72)) ([b19ed80](https://github.com/limlabs/rex/commit/b19ed806e1c9756c1478f7114fb35a659580fabc))
+* **ci:** wait for npm package propagation before smoke tests ([#78](https://github.com/limlabs/rex/issues/78)) ([69764af](https://github.com/limlabs/rex/commit/69764aff2946e210e8009bc8d3476cf996eb734b))
+* **hooks:** prevent lockfile mutation in pre-commit hooks ([#59](https://github.com/limlabs/rex/issues/59)) ([e4e5880](https://github.com/limlabs/rex/commit/e4e58807ff7505d5a09e5ee7a1237d9a39473d44))
+* run npm and cargo installs on worktree creation ([#57](https://github.com/limlabs/rex/issues/57)) ([ca5f2ae](https://github.com/limlabs/rex/commit/ca5f2aed9d69c76def76096def629fdb4eeebd6c))
+
 ## [0.9.0](https://github.com/limlabs/rex/compare/v0.8.0...v0.9.0) (2026-03-03)
 
 

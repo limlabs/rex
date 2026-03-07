@@ -386,6 +386,126 @@ export const config = {
     }
 
     #[test]
+    fn test_detect_strategy_gssp() {
+        let source = r#"
+            import React from 'react';
+            export default function Page() { return <div/>; }
+            export function getServerSideProps(ctx) { return { props: {} }; }
+        "#;
+        assert_eq!(
+            detect_data_strategy_from_source(source).unwrap(),
+            DataStrategy::GetServerSideProps,
+        );
+    }
+
+    #[test]
+    fn test_detect_strategy_gssp_async() {
+        let source = r#"
+            export default function Page() { return <div/>; }
+            export async function getServerSideProps(ctx) { return { props: {} }; }
+        "#;
+        assert_eq!(
+            detect_data_strategy_from_source(source).unwrap(),
+            DataStrategy::GetServerSideProps,
+        );
+    }
+
+    #[test]
+    fn test_detect_strategy_gsp() {
+        let source = r#"
+            export default function Page() { return <div/>; }
+            export function getStaticProps() { return { props: {} }; }
+        "#;
+        assert_eq!(
+            detect_data_strategy_from_source(source).unwrap(),
+            DataStrategy::GetStaticProps,
+        );
+    }
+
+    #[test]
+    fn test_detect_strategy_none() {
+        let source = r#"
+            import React from 'react';
+            export default function Page() { return <div>Static</div>; }
+        "#;
+        assert_eq!(
+            detect_data_strategy_from_source(source).unwrap(),
+            DataStrategy::None,
+        );
+    }
+
+    #[test]
+    fn test_detect_strategy_both_errors() {
+        let source = r#"
+            export default function Page() { return <div/>; }
+            export function getServerSideProps() { return { props: {} }; }
+            export function getStaticProps() { return { props: {} }; }
+        "#;
+        let err = detect_data_strategy_from_source(source).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("both getStaticProps and getServerSideProps"),
+            "expected dual-export error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_detect_strategy_reexport_syntax() {
+        let source = r#"
+            export default function Page() { return <div/>; }
+            export{ getServerSideProps } from './data';
+        "#;
+        assert_eq!(
+            detect_data_strategy_from_source(source).unwrap(),
+            DataStrategy::GetServerSideProps,
+        );
+    }
+
+    #[test]
+    fn test_extract_middleware_matchers_array() {
+        let source = r#"
+export function middleware(request) {}
+
+export const config = {
+    matcher: ['/dashboard/:path*', '/api/admin/:path*']
+}
+"#;
+        let matchers = extract_middleware_matchers(source);
+        assert_eq!(matchers, vec!["/dashboard/:path*", "/api/admin/:path*"]);
+    }
+
+    #[test]
+    fn test_extract_middleware_matchers_single_line() {
+        let source = r#"
+export function middleware(req) { return NextResponse.next(); }
+export const config = { matcher: ['/protected'] }
+"#;
+        let matchers = extract_middleware_matchers(source);
+        assert_eq!(matchers, vec!["/protected"]);
+    }
+
+    #[test]
+    fn test_extract_middleware_matchers_no_config() {
+        let source = r#"
+export function middleware(request) {
+    return NextResponse.next();
+}
+"#;
+        let matchers = extract_middleware_matchers(source);
+        assert!(matchers.is_empty());
+    }
+
+    #[test]
+    fn test_extract_middleware_matchers_no_matcher() {
+        let source = r#"
+export function middleware(request) {}
+export const config = { runtime: 'edge' }
+"#;
+        let matchers = extract_middleware_matchers(source);
+        assert!(matchers.is_empty());
+    }
+
+    #[test]
     fn test_runtime_server_dir_exists() {
         let dir = runtime_server_dir().unwrap();
         assert!(dir.exists());
