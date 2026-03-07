@@ -36,6 +36,8 @@ pub struct SsrIsolate {
     rsc_to_html_fn: Option<v8::Global<v8::Function>>,
     mcp_call_fn: Option<v8::Global<v8::Function>>,
     mcp_list_fn: Option<v8::Global<v8::Function>>,
+    /// Server action dispatch function (app/ routes only)
+    server_action_fn: Option<v8::Global<v8::Function>>,
     /// Last successfully loaded bundle, used to restore state on failed reload.
     /// Uses `Arc<String>` to share memory across pool isolates instead of cloning.
     last_bundle: std::sync::Arc<String>,
@@ -156,6 +158,7 @@ impl SsrIsolate {
             rsc_to_html_fn,
             mcp_call_fn,
             mcp_list_fn,
+            server_action_fn,
         ) = {
             v8::scope!(scope, &mut isolate);
 
@@ -267,6 +270,9 @@ impl SsrIsolate {
             let mcp_call_fn = v8_get_optional_fn!(scope, global, "__rex_call_mcp_tool");
             let mcp_list_fn = v8_get_optional_fn!(scope, global, "__rex_list_mcp_tools");
 
+            // Server actions — only present when "use server" modules exist
+            let server_action_fn = v8_get_optional_fn!(scope, global, "__rex_call_server_action");
+
             (
                 v8::Global::new(scope, context),
                 v8::Global::new(scope, render_fn),
@@ -279,6 +285,7 @@ impl SsrIsolate {
                 rsc_to_html_fn,
                 mcp_call_fn,
                 mcp_list_fn,
+                server_action_fn,
             )
         };
 
@@ -295,6 +302,7 @@ impl SsrIsolate {
             rsc_to_html_fn,
             mcp_call_fn,
             mcp_list_fn,
+            server_action_fn,
             last_bundle: std::sync::Arc::new(server_bundle_js.to_string()),
         })
     }
@@ -322,6 +330,7 @@ impl SsrIsolate {
 
             self.rsc_flight_fn = v8_get_optional_fn!(scope, global, "__rex_render_flight");
             self.rsc_to_html_fn = v8_get_optional_fn!(scope, global, "__rex_render_rsc_to_html");
+            self.server_action_fn = v8_get_optional_fn!(scope, global, "__rex_call_server_action");
         }
 
         debug!("RSC bundles loaded into V8 context");
@@ -702,6 +711,81 @@ impl SsrIsolate {
         }
     }
 
+    /// Call __rex_call_server_action(actionId, argsJson) and return JSON response.
+    /// Handles async actions by pumping V8's microtask queue + fetch loop.
+    pub fn call_server_action(&mut self, action_id: &str, args_json: &str) -> Result<String> {
+        let action_fn = self
+            .server_action_fn
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Server actions not loaded"))?;
+
+        let result_str = {
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+            let func = v8::Local::new(scope, action_fn);
+            let undef = v8::undefined(scope);
+            let arg0 = v8::String::new(scope, action_id)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+            let arg1 = v8::String::new(scope, args_json)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+
+            let result = v8_call!(scope, func, undef.into(), &[arg0.into(), arg1.into()])
+                .map_err(|e| anyhow::anyhow!("Server action error: {e}"))?;
+
+            result.to_rust_string_lossy(scope)
+        };
+
+        if result_str == "__REX_ACTION_ASYNC__" {
+            // Run fetch loop + microtask pump for async server actions
+            crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
+
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            loop {
+                if std::time::Instant::now() > deadline {
+                    return Err(anyhow::anyhow!("Server action timed out after 30s"));
+                }
+
+                crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
+
+                let status = {
+                    v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+                    let result = v8_eval!(
+                        scope,
+                        "globalThis.__rex_resolve_action_pending()",
+                        "<action-resolve>"
+                    )
+                    .map_err(|e| anyhow::anyhow!("Server action resolve error: {e}"))?;
+                    result.to_rust_string_lossy(scope)
+                };
+
+                match status.as_str() {
+                    "done" => break,
+                    "pending" => {
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                        continue;
+                    }
+                    other => {
+                        return Err(anyhow::anyhow!(
+                            "Unexpected action resolve status: {}",
+                            other
+                        ));
+                    }
+                }
+            }
+
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+            let resolve_result = v8_eval!(
+                scope,
+                "globalThis.__rex_finalize_action()",
+                "<action-finalize>"
+            )
+            .map_err(|e| anyhow::anyhow!("Server action finalize error: {e}"))?;
+            Ok(resolve_result.to_rust_string_lossy(scope))
+        } else {
+            Ok(result_str)
+        }
+    }
+
     /// Reload the server bundle (for dev mode hot reload)
     pub fn reload(&mut self, server_bundle_js: &str) -> Result<()> {
         v8::scope_with_context!(scope, &mut self.isolate, &self.context);
@@ -744,6 +828,9 @@ impl SsrIsolate {
         // Re-lookup MCP tools (may be added/removed on reload)
         self.mcp_call_fn = v8_get_optional_fn!(scope, global, "__rex_call_mcp_tool");
         self.mcp_list_fn = v8_get_optional_fn!(scope, global, "__rex_list_mcp_tools");
+
+        // Re-lookup server action dispatch (may be added/removed on reload)
+        self.server_action_fn = v8_get_optional_fn!(scope, global, "__rex_call_server_action");
 
         self.last_bundle = std::sync::Arc::new(server_bundle_js.to_string());
         debug!("SSR isolate reloaded");
@@ -1921,5 +2008,167 @@ globalThis.__rex_resolve_gsp = function() {
                     && msg.contains("error from ssr")),
             "console.error should emit ERROR-level event, captured: {captured:?}"
         );
+    }
+
+    fn make_isolate_with_actions(actions_js: &str) -> SsrIsolate {
+        crate::init_v8();
+        let bundle = format!(
+            "{}\n{}\n{}",
+            MOCK_REACT_RUNTIME,
+            make_server_bundle(&[]),
+            actions_js
+        );
+        SsrIsolate::new(&bundle, None).expect("failed to create isolate")
+    }
+
+    #[test]
+    fn test_call_server_action_sync() {
+        let mut iso = make_isolate_with_actions(
+            r#"
+            globalThis.__rex_server_actions = {
+                "act123": function(x) { return x + 1; }
+            };
+            globalThis.__rex_call_server_action = function(actionId, argsJson) {
+                var actions = globalThis.__rex_server_actions || {};
+                var fn = actions[actionId];
+                if (!fn) return JSON.stringify({ error: "not found: " + actionId });
+                var args = JSON.parse(argsJson);
+                try {
+                    var result = fn.apply(null, args);
+                    return JSON.stringify({ result: result });
+                } catch (e) {
+                    return JSON.stringify({ error: String(e) });
+                }
+            };
+            "#,
+        );
+        let result = iso.call_server_action("act123", "[42]").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["result"], 43);
+    }
+
+    #[test]
+    fn test_call_server_action_not_found() {
+        let mut iso = make_isolate_with_actions(
+            r#"
+            globalThis.__rex_server_actions = {};
+            globalThis.__rex_call_server_action = function(actionId, argsJson) {
+                var actions = globalThis.__rex_server_actions || {};
+                var fn = actions[actionId];
+                if (!fn) return JSON.stringify({ error: "Server action not found: " + actionId });
+                return JSON.stringify({ result: null });
+            };
+            "#,
+        );
+        let result = iso.call_server_action("nonexistent", "[]").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert!(parsed["error"].as_str().unwrap().contains("not found"));
+    }
+
+    #[test]
+    fn test_call_server_action_not_loaded() {
+        let mut iso = make_isolate(&[]);
+        let err = iso.call_server_action("act123", "[]").unwrap_err();
+        assert!(
+            err.to_string().contains("not loaded"),
+            "Should error when server actions not loaded, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_call_server_action_async() {
+        let mut iso = make_isolate_with_actions(
+            r#"
+            var _actionResult = null;
+            var _actionDone = false;
+            globalThis.__rex_call_server_action = function(actionId, argsJson) {
+                _actionResult = null;
+                _actionDone = false;
+                var args = JSON.parse(argsJson);
+                Promise.resolve(args[0] * 2).then(function(val) {
+                    _actionResult = JSON.stringify({ result: val });
+                    _actionDone = true;
+                });
+                return "__REX_ACTION_ASYNC__";
+            };
+            globalThis.__rex_resolve_action_pending = function() {
+                return _actionDone ? "done" : "pending";
+            };
+            globalThis.__rex_finalize_action = function() {
+                return _actionResult || JSON.stringify({ error: "no result" });
+            };
+            "#,
+        );
+        let result = iso.call_server_action("async_act", "[21]").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["result"], 42);
+    }
+
+    #[test]
+    fn test_load_rsc_bundles() {
+        crate::init_v8();
+        let bundle = format!("{}\n{}", MOCK_REACT_RUNTIME, make_server_bundle(&[]));
+        let mut iso = SsrIsolate::new(&bundle, None).expect("failed to create isolate");
+
+        // Before loading RSC bundles, flight functions should be None
+        assert!(iso.rsc_flight_fn.is_none());
+
+        // Minimal flight bundle that sets __rex_render_flight
+        let flight_js = r#"
+            globalThis.__rex_render_flight = function(routeKey, propsJson) {
+                return "flight:" + routeKey;
+            };
+            globalThis.__rex_render_rsc_to_html = function(routeKey, propsJson) {
+                return JSON.stringify({ body: "html:" + routeKey, head: "", flight: "" });
+            };
+            globalThis.__rex_call_server_action = function(actionId, argsJson) {
+                return JSON.stringify({ result: "action:" + actionId });
+            };
+        "#;
+        let ssr_js = r#"
+            globalThis.__rex_rsc_flight_to_html = function(flight) {
+                return JSON.stringify({ body: "ssr", head: "", flight: flight });
+            };
+        "#;
+
+        iso.load_rsc_bundles(flight_js, ssr_js).unwrap();
+
+        // After loading, flight function should be set
+        assert!(iso.rsc_flight_fn.is_some());
+        assert!(iso.rsc_to_html_fn.is_some());
+        assert!(iso.server_action_fn.is_some());
+
+        // Server action should work through the loaded function
+        let result = iso.call_server_action("test_id", "[]").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["result"], "action:test_id");
+    }
+
+    #[test]
+    fn test_reload_preserves_server_action_fn() {
+        let mut iso = make_isolate_with_actions(
+            r#"
+            globalThis.__rex_call_server_action = function(actionId, argsJson) {
+                return JSON.stringify({ result: "v1" });
+            };
+            "#,
+        );
+        let r1 = iso.call_server_action("x", "[]").unwrap();
+        assert!(r1.contains("v1"));
+
+        // Reload with new bundle that has updated action
+        let new_bundle = format!(
+            "{}\n{}\n{}",
+            MOCK_REACT_RUNTIME,
+            make_server_bundle(&[]),
+            r#"
+            globalThis.__rex_call_server_action = function(actionId, argsJson) {
+                return JSON.stringify({ result: "v2" });
+            };
+            "#
+        );
+        iso.reload(&new_bundle).unwrap();
+        let r2 = iso.call_server_action("x", "[]").unwrap();
+        assert!(r2.contains("v2"));
     }
 }

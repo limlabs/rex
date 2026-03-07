@@ -16,3 +16,5 @@ benchmarks/results*.json
 .env*
 .claude/
 dist/
+
+*.tsbuildinfo
