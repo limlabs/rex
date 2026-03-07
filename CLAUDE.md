@@ -51,6 +51,10 @@ All commits must use [Conventional Commits](https://www.conventionalcommits.org/
 - `feat!: redesign config format` — breaking change (major bump)
 - Types: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`
 
+## 700-Line Rule
+
+Source files must not exceed **700 lines**. This is enforced by CI. When a file crosses this threshold, it needs to be broken down into smaller, focused modules for better maintainability and testability.
+
 ## Quick Reference
 
 - **Build**: `cargo build`
