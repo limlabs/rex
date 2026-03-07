@@ -15,6 +15,7 @@
 use crate::bundler::runtime_client_dir;
 use crate::client_manifest::{client_reference_id, ClientReferenceManifest};
 use crate::rsc_graph::{analyze_module_graph, ModuleGraph};
+use crate::server_action_manifest::{server_action_id, ServerActionManifest};
 use anyhow::Result;
 use rex_core::app_route::AppScanResult;
 use rex_core::RexConfig;
@@ -33,6 +34,8 @@ pub struct RscBuildResult {
     pub client_manifest: ClientReferenceManifest,
     /// Client chunk files produced (relative paths from client output dir).
     pub client_chunks: Vec<String>,
+    /// Server action manifest mapping action IDs to their module/export.
+    pub server_action_manifest: ServerActionManifest,
 }
 
 /// Build RSC bundles for an app/ directory.
@@ -106,6 +109,22 @@ pub async fn build_rsc_bundles(
         }
     }
 
+    // Build server action manifest from "use server" modules
+    let server_action_modules = graph.server_action_modules();
+    let mut server_action_manifest = ServerActionManifest::new();
+    for module in &server_action_modules {
+        let rel_path = module
+            .path
+            .strip_prefix(&project_root)
+            .unwrap_or(&module.path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        for export in &module.exports {
+            let action_id = server_action_id(&rel_path, export, build_id);
+            server_action_manifest.add(&action_id, rel_path.clone(), export.clone());
+        }
+    }
+
     // Build rex/* → stub aliases for client boundaries discovered via rex/* imports.
     // The stub_aliases map absolute paths, but rolldown also needs the specifier alias
     // (e.g. "rex/link" → stub) for when source code uses `import Link from 'rex/link'`.
@@ -137,6 +156,7 @@ pub async fn build_rsc_bundles(
         define,
         &mut client_manifest,
         &module_dirs,
+        &server_action_modules,
     )
     .await?;
 
@@ -150,6 +170,7 @@ pub async fn build_rsc_bundles(
         define,
         &client_manifest,
         &module_dirs,
+        &server_action_manifest,
     )
     .await?;
 
@@ -173,6 +194,7 @@ pub async fn build_rsc_bundles(
         ssr_bundle_path,
         client_manifest,
         client_chunks,
+        server_action_manifest,
     })
 }
 
@@ -202,6 +224,34 @@ fn generate_client_stub(rel_path: &str, exports: &[String], build_id: &str) -> S
     source
 }
 
+/// Generate a server action stub module for a `"use server"` module in the client bundle.
+///
+/// For each export, produces:
+/// ```js
+/// import { createServerReference } from 'react-server-dom-webpack/client';
+/// export const increment = createServerReference("actionId", window.__REX_CALL_SERVER);
+/// ```
+fn generate_server_action_stub(rel_path: &str, exports: &[String], build_id: &str) -> String {
+    let mut source = String::new();
+    source.push_str("// Auto-generated server action stub\n");
+    source.push_str("import { createServerReference } from 'react-server-dom-webpack/client';\n");
+
+    for export in exports {
+        let action_id = server_action_id(rel_path, export, build_id);
+        if export == "default" {
+            source.push_str(&format!(
+                "export default createServerReference(\"{action_id}\", window.__REX_CALL_SERVER);\n"
+            ));
+        } else {
+            source.push_str(&format!(
+                "export var {export} = createServerReference(\"{action_id}\", window.__REX_CALL_SERVER);\n"
+            ));
+        }
+    }
+
+    source
+}
+
 /// Build the server RSC flight bundle (IIFE, `react-server` condition).
 ///
 /// This bundle includes all server components, with `"use client"` modules
@@ -217,6 +267,7 @@ async fn build_rsc_server_bundle(
     define: &[(String, String)],
     client_manifest: &ClientReferenceManifest,
     module_dirs: &[String],
+    server_action_manifest: &ServerActionManifest,
 ) -> Result<PathBuf> {
     let entries_dir = output_dir.join("_rsc_server_entry");
     fs::create_dir_all(&entries_dir)?;
@@ -274,6 +325,50 @@ async fn build_rsc_server_bundle(
     entry.push_str(&format!(
         "\nglobalThis.__rex_webpack_bundler_config = {bundler_config_json};\n"
     ));
+
+    // Server actions: import "use server" modules and build dispatch table
+    if !server_action_manifest.actions.is_empty() {
+        entry.push_str("\n// --- Server Actions Registration ---\n");
+        entry.push_str(
+            "import { registerServerReference } from 'react-server-dom-webpack/server';\n",
+        );
+
+        // Group actions by module_path to deduplicate imports
+        let mut modules_by_path: std::collections::HashMap<&str, Vec<(&str, &str)>> =
+            std::collections::HashMap::new();
+        for (action_id, action_entry) in &server_action_manifest.actions {
+            modules_by_path
+                .entry(&action_entry.module_path)
+                .or_default()
+                .push((action_id.as_str(), action_entry.export_name.as_str()));
+        }
+
+        let project_root_str = config
+            .project_root
+            .canonicalize()
+            .unwrap_or_else(|_| config.project_root.clone())
+            .to_string_lossy()
+            .to_string();
+
+        entry.push_str("globalThis.__rex_server_actions = {};\n");
+
+        for (i, (module_path, actions)) in modules_by_path.iter().enumerate() {
+            let abs_path = format!("{}/{}", project_root_str.trim_end_matches('/'), module_path);
+            let import_var = format!("__sa_{i}");
+            entry.push_str(&format!("import * as {import_var} from '{abs_path}';\n"));
+
+            for (action_id, export_name) in actions {
+                // Register with React's server reference system
+                entry.push_str(&format!(
+                    "registerServerReference({import_var}.{export_name}, \"{action_id}\", \"{export_name}\");\n"
+                ));
+                // Build dispatch table for direct invocation
+                entry.push_str(&format!(
+                    "globalThis.__rex_server_actions[\"{action_id}\"] = {import_var}.{export_name};\n"
+                ));
+            }
+        }
+    }
 
     // RSC runtime: flight protocol using React's renderToReadableStream
     let flight_runtime = include_str!("../../../runtime/rsc/flight.ts");
@@ -514,6 +609,7 @@ async fn build_rsc_ssr_bundle(
 ///
 /// Each client boundary module becomes a separate entry. Rolldown handles
 /// code splitting so shared dependencies (React) become shared chunks.
+#[allow(clippy::too_many_arguments)]
 async fn build_rsc_client_bundles(
     config: &RexConfig,
     graph: &ModuleGraph,
@@ -522,9 +618,10 @@ async fn build_rsc_client_bundles(
     define: &[(String, String)],
     client_manifest: &mut ClientReferenceManifest,
     module_dirs: &[String],
+    server_action_modules: &[&crate::rsc_graph::ModuleInfo],
 ) -> Result<Vec<String>> {
     let client_boundaries = graph.client_boundary_modules();
-    if client_boundaries.is_empty() {
+    if client_boundaries.is_empty() && server_action_modules.is_empty() {
         return Ok(vec![]);
     }
 
@@ -537,7 +634,7 @@ async fn build_rsc_client_bundles(
     fs::create_dir_all(&entries_dir)?;
 
     let hydrate_code = include_str!("../../../runtime/client/rsc-hydrate.ts");
-    let hydrate_path = entries_dir.join("__rsc_hydrate.js");
+    let hydrate_path = entries_dir.join("__rsc_hydrate.ts");
     fs::write(&hydrate_path, hydrate_code)?;
 
     // Create entries: hydrate entry + each client boundary module
@@ -567,7 +664,43 @@ async fn build_rsc_client_bundles(
     };
 
     // Rex built-in aliases for client bundle (rex/link → client runtime, etc.)
-    let client_aliases = build_rex_aliases()?;
+    let mut client_aliases = build_rex_aliases()?;
+
+    // Generate server action stubs for "use server" modules in the client bundle.
+    // Each stub replaces the real module with createServerReference calls.
+    if !server_action_modules.is_empty() {
+        let project_root = config.project_root.canonicalize().unwrap_or_else(|e| {
+            debug!(
+                path = %config.project_root.display(),
+                error = %e,
+                "Failed to canonicalize project root, using original path"
+            );
+            config.project_root.clone()
+        });
+
+        let sa_stubs_dir = entries_dir.join("_server_action_stubs");
+        fs::create_dir_all(&sa_stubs_dir)?;
+
+        for module in server_action_modules {
+            let rel_path = module
+                .path
+                .strip_prefix(&project_root)
+                .unwrap_or(&module.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+
+            let stub_source = generate_server_action_stub(&rel_path, &module.exports, build_id);
+            let stub_name = sanitize_filename(&rel_path);
+            let stub_path = sa_stubs_dir.join(format!("{stub_name}.js"));
+            fs::write(&stub_path, &stub_source)?;
+
+            // Map original module path → stub for rolldown resolution
+            client_aliases.push((
+                module.path.to_string_lossy().to_string(),
+                vec![Some(stub_path.to_string_lossy().to_string())],
+            ));
+        }
+    }
 
     // Split React packages into cacheable vendor chunks:
     // 1. react-server-dom-webpack (flight client) — changes rarely, cached independently
@@ -822,6 +955,26 @@ mod tests {
             "export function renderToString(el) { return '<div></div>'; }\n",
         )
         .unwrap();
+
+        // react-server-dom-webpack
+        let rsdw_dir = nm.join("react-server-dom-webpack");
+        fs::create_dir_all(&rsdw_dir).unwrap();
+        fs::write(
+            rsdw_dir.join("package.json"),
+            r#"{"name":"react-server-dom-webpack","version":"19.0.0","main":"index.js","exports":{".":{"default":"./index.js"},"./client":{"default":"./client.js"},"./server":{"default":"./server.js"}}}"#,
+        )
+        .unwrap();
+        fs::write(rsdw_dir.join("index.js"), "export default {};\n").unwrap();
+        fs::write(
+            rsdw_dir.join("client.js"),
+            "export function createFromReadableStream(s) { return {}; }\nexport function createServerReference(id, callServer) { return function(...args) { return callServer(id, args); }; }\n",
+        )
+        .unwrap();
+        fs::write(
+            rsdw_dir.join("server.js"),
+            "export function renderToReadableStream(el, config) { return new ReadableStream(); }\nexport function registerServerReference(fn, id, name) { return fn; }\n",
+        )
+        .unwrap();
     }
 
     #[tokio::test]
@@ -949,5 +1102,226 @@ mod tests {
             "components_Counter_tsx"
         );
         assert_eq!(sanitize_filename("app/page.tsx"), "app_page_tsx");
+    }
+
+    #[test]
+    fn generate_server_action_stub_named_exports() {
+        let stub = generate_server_action_stub(
+            "app/actions.ts",
+            &["increment".to_string(), "decrement".to_string()],
+            "abc",
+        );
+        assert!(stub.contains("import { createServerReference }"));
+        assert!(stub.contains("export var increment = createServerReference("));
+        assert!(stub.contains("export var decrement = createServerReference("));
+        assert!(stub.contains("window.__REX_CALL_SERVER"));
+    }
+
+    #[test]
+    fn generate_server_action_stub_default_export() {
+        let stub = generate_server_action_stub("app/actions.ts", &["default".to_string()], "abc");
+        assert!(stub.contains("export default createServerReference("));
+    }
+
+    #[tokio::test]
+    async fn test_rsc_build_with_server_actions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        setup_rsc_mock_node_modules(&root);
+
+        let app_dir = root.join("app");
+        fs::create_dir_all(&app_dir).unwrap();
+
+        let layout_path = app_dir.join("layout.tsx");
+        fs::write(
+            &layout_path,
+            "export default function RootLayout({ children }) { return children; }\n",
+        )
+        .unwrap();
+
+        // Page that imports from a "use server" module
+        let page_path = app_dir.join("page.tsx");
+        fs::write(
+            &page_path,
+            "import { increment } from './actions';\nexport default function Home() { return 'Hello'; }\n",
+        )
+        .unwrap();
+
+        // "use server" module
+        let actions_path = app_dir.join("actions.ts");
+        fs::write(
+            &actions_path,
+            "\"use server\";\nexport async function increment(n: number) { return n + 1; }\nexport async function decrement(n: number) { return n - 1; }\n",
+        )
+        .unwrap();
+
+        let config = rex_core::RexConfig::new(root.clone()).with_dev(true);
+
+        let app_scan = AppScanResult {
+            root: AppSegment {
+                segment: String::new(),
+                layout: Some(layout_path.clone()),
+                page: Some(page_path.clone()),
+                loading: None,
+                error_boundary: None,
+                not_found: None,
+                children: vec![],
+            },
+            routes: vec![AppRoute {
+                pattern: "/".to_string(),
+                page_path: page_path.clone(),
+                layout_chain: vec![layout_path.clone()],
+                loading_chain: vec![None],
+                error_chain: vec![None],
+                dynamic_segments: vec![],
+                specificity: 10,
+            }],
+            root_layout: layout_path,
+        };
+
+        let define = vec![(
+            "process.env.NODE_ENV".to_string(),
+            "\"development\"".to_string(),
+        )];
+
+        let result = build_rsc_bundles(&config, &app_scan, "test-sa-build", &define)
+            .await
+            .expect("build_rsc_bundles should succeed");
+
+        // Server action manifest should have 2 actions
+        assert_eq!(
+            result.server_action_manifest.actions.len(),
+            2,
+            "Should have 2 server actions (increment + decrement)"
+        );
+
+        // Verify actions are in the manifest
+        let has_increment = result
+            .server_action_manifest
+            .actions
+            .values()
+            .any(|a| a.export_name == "increment");
+        assert!(has_increment, "Manifest should contain increment action");
+
+        let has_decrement = result
+            .server_action_manifest
+            .actions
+            .values()
+            .any(|a| a.export_name == "decrement");
+        assert!(has_decrement, "Manifest should contain decrement action");
+
+        // Server bundle should contain server action dispatch code
+        let server_content = fs::read_to_string(&result.server_bundle_path).unwrap();
+        assert!(
+            server_content.contains("__rex_server_actions"),
+            "Server bundle should contain action dispatch table"
+        );
+        assert!(
+            server_content.contains("__rex_call_server_action"),
+            "Server bundle should contain action call function"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_client_bundle_uses_stubs_for_server_actions_imported_by_client_component() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        setup_rsc_mock_node_modules(&root);
+
+        let app_dir = root.join("app");
+        fs::create_dir_all(&app_dir).unwrap();
+
+        let layout_path = app_dir.join("layout.tsx");
+        fs::write(
+            &layout_path,
+            "export default function RootLayout({ children }) { return children; }\n",
+        )
+        .unwrap();
+
+        // Server page imports a client component (not the actions directly)
+        let page_path = app_dir.join("page.tsx");
+        fs::write(
+            &page_path,
+            "import ActionCounter from '../components/ActionCounter';\nexport default function Home() { return 'Hello'; }\n",
+        )
+        .unwrap();
+
+        // "use client" component imports from a "use server" module
+        let comp_dir = root.join("components");
+        fs::create_dir_all(&comp_dir).unwrap();
+        fs::write(
+            comp_dir.join("ActionCounter.tsx"),
+            "\"use client\";\nimport { increment } from '../app/actions';\nexport default function ActionCounter() { return 'count: ' + increment(0); }\n",
+        )
+        .unwrap();
+
+        // "use server" module
+        fs::write(
+            app_dir.join("actions.ts"),
+            "\"use server\";\nexport async function increment(n: number) { return n + 1; }\n",
+        )
+        .unwrap();
+
+        let config = rex_core::RexConfig::new(root.clone()).with_dev(true);
+
+        let app_scan = AppScanResult {
+            root: AppSegment {
+                segment: String::new(),
+                layout: Some(layout_path.clone()),
+                page: Some(page_path.clone()),
+                loading: None,
+                error_boundary: None,
+                not_found: None,
+                children: vec![],
+            },
+            routes: vec![AppRoute {
+                pattern: "/".to_string(),
+                page_path: page_path.clone(),
+                layout_chain: vec![layout_path.clone()],
+                loading_chain: vec![None],
+                error_chain: vec![None],
+                dynamic_segments: vec![],
+                specificity: 10,
+            }],
+            root_layout: layout_path,
+        };
+
+        let define = vec![(
+            "process.env.NODE_ENV".to_string(),
+            "\"development\"".to_string(),
+        )];
+
+        let result = build_rsc_bundles(&config, &app_scan, "test-sa-client", &define)
+            .await
+            .expect("build_rsc_bundles should succeed");
+
+        // Server action manifest should have the increment action
+        assert_eq!(
+            result.server_action_manifest.actions.len(),
+            1,
+            "Should have 1 server action (increment)"
+        );
+
+        // Find the client bundle for ActionCounter
+        let client_dir = root.join(".rex/build/client/rsc");
+        let action_counter_chunk = fs::read_dir(&client_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .find(|e| e.file_name().to_string_lossy().contains("ActionCounter"))
+            .expect("ActionCounter client chunk should exist");
+
+        let client_content = fs::read_to_string(action_counter_chunk.path()).unwrap();
+
+        // The client bundle must use createServerReference, NOT inline the function body
+        assert!(
+            client_content.contains("createServerReference"),
+            "Client bundle should use createServerReference proxy, not inline the function. Got: {client_content}"
+        );
+        assert!(
+            !client_content.contains("return n + 1"),
+            "Client bundle should NOT contain the server action implementation. Got: {client_content}"
+        );
     }
 }

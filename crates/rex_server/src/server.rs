@@ -130,6 +130,11 @@ impl RexServer {
             .route("/_rex/image", get(handlers::image_handler))
             // RSC flight data endpoint (app/ router client navigation)
             .route("/_rex/rsc/{build_id}/{*path}", get(handlers::rsc_handler))
+            // Server action endpoint (app/ router server functions)
+            .route(
+                "/_rex/action/{build_id}/{action_id}",
+                post(handlers::server_action_handler),
+            )
             // MCP endpoint (JSON-RPC 2.0 over POST)
             .route("/mcp", post(crate::mcp::mcp_handler))
             // Client-side router script

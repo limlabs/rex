@@ -6,6 +6,7 @@ pub mod embedded_runtime;
 pub mod manifest;
 pub mod rsc_bundler;
 pub mod rsc_graph;
+pub mod server_action_manifest;
 
 // Internal modules extracted from bundler.rs
 pub(crate) mod build_utils;

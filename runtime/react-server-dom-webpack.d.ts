@@ -8,13 +8,23 @@ declare module "react-server-dom-webpack/client" {
     moduleLoading: null;
   }
 
+  interface ClientOptions {
+    ssrManifest: SsrManifest;
+    callServer?: (id: string, args: unknown[]) => Promise<unknown>;
+  }
+
   export function createFromReadableStream(
     stream: ReadableStream<Uint8Array>,
-    options: { ssrManifest: SsrManifest },
+    options: ClientOptions,
   ): PromiseLike<ReactElement>;
 
   export function createFromFetch(
     fetchPromise: Promise<Response>,
-    options: { ssrManifest: SsrManifest },
+    options: ClientOptions,
   ): PromiseLike<ReactElement>;
+
+  export function createServerReference(
+    id: string,
+    callServer: (...args: unknown[]) => Promise<unknown>,
+  ): (...args: unknown[]) => Promise<unknown>;
 }

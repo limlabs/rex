@@ -1,4 +1,5 @@
 import React from 'react';
+import ActionCounter from '../components/ActionCounter';
 
 // Server component (default) — no "use client" directive
 export default function Home() {
@@ -10,6 +11,7 @@ export default function Home() {
       <h1>Rex App Router</h1>
       <p>{message}</p>
       <p>Rendered at: {timestamp}</p>
+      <ActionCounter />
     </div>
   );
 }

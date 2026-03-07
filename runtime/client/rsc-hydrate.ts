@@ -16,6 +16,25 @@ import { createFromReadableStream, createFromFetch } from 'react-server-dom-webp
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
+// --- callServer: server action RPC ---
+// Must be defined before module loading since stubs reference it at module scope.
+function callServer(id: string, args: unknown[]): Promise<unknown> {
+  const manifest = window.__REX_MANIFEST__;
+  const buildId = manifest ? manifest.build_id : '';
+  return fetch('/_rex/action/' + buildId + '/' + id, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args),
+  }).then(function(r: Response) {
+    return r.json();
+  }).then(function(d: { result?: unknown; error?: string }) {
+    if (d.error) throw new Error(d.error);
+    return d.result;
+  });
+}
+
+(window as any).__REX_CALL_SERVER = callServer;
+
 // --- Client-side webpack shims ---
 // The actual __webpack_require__ and __webpack_chunk_load__ are set up by an
 // inline <script> in the HTML (before this module loads) because
@@ -23,7 +42,7 @@ import ReactDOM from 'react-dom/client';
 // factory initialization, before our module-level code can run.
 //
 // We just reference the shared module cache for pre-loading:
-var moduleCache: Record<string, unknown> = window.__rexModuleCache || {};
+const moduleCache: Record<string, unknown> = window.__rexModuleCache || {};
 
 // --- Pre-load client modules ---
 // Load all client component modules into the webpack cache before hydrating.
@@ -31,13 +50,13 @@ var moduleCache: Record<string, unknown> = window.__rexModuleCache || {};
 // After loading, __webpack_require__(ref_id) returns the module.
 
 function preloadClientModules(): Promise<void | unknown[]> {
-  var rawMap = window.__REX_RSC_MODULE_MAP__ || {};
-  var entries = (rawMap.entries || rawMap) as Record<string, RexRscModuleMapEntry>;
-  var promises: Promise<void>[] = [];
+  const rawMap = window.__REX_RSC_MODULE_MAP__ || {};
+  const entries = (rawMap.entries || rawMap) as Record<string, RexRscModuleMapEntry>;
+  const promises: Promise<void>[] = [];
 
-  for (var refId in entries) {
+  for (const refId in entries) {
     if (!Object.prototype.hasOwnProperty.call(entries, refId)) continue;
-    var entry = entries[refId];
+    const entry = entries[refId];
     // Use an IIFE to capture refId in closure
     (function(id: string, url: string) {
       promises.push(
@@ -56,14 +75,14 @@ function preloadClientModules(): Promise<void | unknown[]> {
 // that React's flight decoder expects: { [refId]: { [exportName]: { id, chunks, name } } }
 
 function buildSSRManifest(): Record<string, Record<string, { id: string; chunks: string[]; name: string }>> {
-  var rawMap = window.__REX_RSC_MODULE_MAP__ || {};
-  var entries = (rawMap.entries || rawMap) as Record<string, RexRscModuleMapEntry>;
-  var moduleMap: Record<string, Record<string, { id: string; chunks: string[]; name: string }>> = {};
+  const rawMap = window.__REX_RSC_MODULE_MAP__ || {};
+  const entries = (rawMap.entries || rawMap) as Record<string, RexRscModuleMapEntry>;
+  const moduleMap: Record<string, Record<string, { id: string; chunks: string[]; name: string }>> = {};
 
-  for (var refId in entries) {
+  for (const refId in entries) {
     if (!Object.prototype.hasOwnProperty.call(entries, refId)) continue;
-    var entry = entries[refId];
-    var exportMap: Record<string, { id: string; chunks: string[]; name: string }> = {};
+    const entry = entries[refId];
+    const exportMap: Record<string, { id: string; chunks: string[]; name: string }> = {};
     exportMap[entry.export_name] = {
       id: refId,
       chunks: [],
@@ -83,10 +102,10 @@ function buildSSRManifest(): Record<string, Record<string, { id: string; chunks:
 
 // --- Hydration ---
 
-var rscRoot: ReturnType<typeof ReactDOM.hydrateRoot> | ReturnType<typeof ReactDOM.createRoot> | null = null;
+let rscRoot: ReturnType<typeof ReactDOM.hydrateRoot> | ReturnType<typeof ReactDOM.createRoot> | null = null;
 
 function stringToReadableStream(str: string): ReadableStream<Uint8Array> {
-  var encoder = new TextEncoder();
+  const encoder = new TextEncoder();
   return new ReadableStream({
     start: function(controller: ReadableStreamDefaultController<Uint8Array>) {
       controller.enqueue(encoder.encode(str));
@@ -96,26 +115,27 @@ function stringToReadableStream(str: string): ReadableStream<Uint8Array> {
 }
 
 function hydrateFromInlineData(): void {
-  var dataEl = document.getElementById('__REX_RSC_DATA__');
+  const dataEl = document.getElementById('__REX_RSC_DATA__');
   if (!dataEl) return;
 
-  var flightData = dataEl.textContent;
+  const flightData = dataEl.textContent;
   if (!flightData) return;
 
   // Build the SSR manifest for React's flight decoder
-  var ssrManifest = buildSSRManifest();
+  const ssrManifest = buildSSRManifest();
 
   // Pre-load all client modules, then hydrate
   preloadClientModules().then(function() {
-    var stream = stringToReadableStream(flightData);
+    const stream = stringToReadableStream(flightData);
     // Wrap in Promise.resolve() because React's createFromReadableStream returns
     // a custom thenable whose .then() doesn't return a chainable Promise
-    var treePromise = Promise.resolve(
+    const treePromise = Promise.resolve(
       createFromReadableStream(stream, {
         ssrManifest: {
           moduleMap: ssrManifest,
           moduleLoading: null
-        }
+        },
+        callServer: callServer
       })
     );
 
@@ -139,16 +159,17 @@ function hydrateFromInlineData(): void {
 // --- Client-side navigation ---
 
 function navigateRsc(pathname: string): Promise<void> {
-  var manifest = window.__REX_MANIFEST__;
+  const manifest = window.__REX_MANIFEST__;
   if (!manifest) return Promise.reject(new Error('No manifest'));
 
-  var buildId = manifest.build_id;
-  var url = '/_rex/rsc/' + buildId + pathname;
-  var ssrManifest = buildSSRManifest();
+  const buildId = manifest.build_id;
+  const url = '/_rex/rsc/' + buildId + pathname;
+  const ssrManifest = buildSSRManifest();
 
-  var treePromise = Promise.resolve(
+  const treePromise = Promise.resolve(
     createFromFetch(fetch(url), {
-      ssrManifest: { moduleMap: ssrManifest, moduleLoading: null }
+      ssrManifest: { moduleMap: ssrManifest, moduleLoading: null },
+      callServer: callServer
     })
   );
 
