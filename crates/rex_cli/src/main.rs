@@ -613,13 +613,14 @@ fn cmd_lint(root: PathBuf, fix: bool, deny_warnings: bool, paths: Vec<PathBuf>) 
             .collect()
     };
 
-    // Discover source files
+    // Discover source files (respecting .gitignore + hardcoded skip dirs)
+    let gitignore = load_gitignore_patterns(&root);
     let mut files: Vec<PathBuf> = Vec::new();
     for dir in &lint_dirs {
         if dir.is_file() {
             files.push(dir.clone());
         } else if dir.is_dir() {
-            walk_lint_dir(dir, &mut files);
+            walk_lint_dir(dir, &root, &gitignore, &mut files);
         }
     }
 
@@ -705,7 +706,16 @@ fn cmd_lint(root: PathBuf, fix: bool, deny_warnings: bool, paths: Vec<PathBuf>) 
 }
 
 /// Walk a directory recursively, collecting lintable source files.
-fn walk_lint_dir(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+/// Hardcoded directories that should always be skipped during linting,
+/// even when no `.gitignore` is present.
+const LINT_SKIP_DIRS: &[&str] = &["node_modules", ".rex", ".git", "dist", "target", ".next"];
+
+fn walk_lint_dir(
+    dir: &std::path::Path,
+    root: &std::path::Path,
+    gitignore: &[String],
+    out: &mut Vec<PathBuf>,
+) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -714,10 +724,13 @@ fn walk_lint_dir(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
         if path.is_dir() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if name == "node_modules" || name == ".rex" || name.starts_with('.') {
+            if LINT_SKIP_DIRS.contains(&name.as_ref()) || name.starts_with('.') {
                 continue;
             }
-            walk_lint_dir(&path, out);
+            if !gitignore.is_empty() && is_ignored(&path, root, gitignore) {
+                continue;
+            }
+            walk_lint_dir(&path, root, gitignore, out);
         } else if path.is_file() {
             if let Some("js" | "jsx" | "ts" | "tsx" | "mjs" | "mts") =
                 path.extension().and_then(|e| e.to_str())
@@ -727,11 +740,31 @@ fn walk_lint_dir(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
                     .file_name()
                     .is_some_and(|n| n.to_string_lossy().ends_with(".d.ts"))
                 {
+                    if !gitignore.is_empty() && is_ignored(&path, root, gitignore) {
+                        continue;
+                    }
                     out.push(path);
                 }
             }
         }
     }
+}
+
+/// Load ignore patterns from `.gitignore` (if present).
+fn load_gitignore_patterns(root: &std::path::Path) -> Vec<String> {
+    let gitignore_path = root.join(".gitignore");
+    let content = match std::fs::read_to_string(&gitignore_path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    content
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        // Strip leading "/" — .gitignore uses it for root-relative, our is_ignored already does prefix matching
+        .map(|l| l.strip_prefix('/').unwrap_or(l).to_string())
+        .collect()
 }
 
 fn cmd_typecheck(root: PathBuf, extra_args: Vec<String>) -> Result<()> {

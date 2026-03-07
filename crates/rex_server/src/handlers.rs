@@ -721,7 +721,41 @@ async fn page_handler_inner(
                             .execute(move |iso| iso.call_form_action(&fields_json))
                             .await
                         {
-                            Ok(Ok(_)) => {}
+                            Ok(Ok(json_result)) => {
+                                // Check for redirect/notFound before rendering the page
+                                if let Ok(parsed) =
+                                    serde_json::from_str::<serde_json::Value>(&json_result)
+                                {
+                                    if let Some(redirect_url) =
+                                        parsed.get("redirect").and_then(|v| v.as_str())
+                                    {
+                                        let status = parsed
+                                            .get("redirectStatus")
+                                            .and_then(|v| v.as_u64())
+                                            .unwrap_or(303)
+                                            as u16;
+                                        return Response::builder()
+                                            .status(
+                                                StatusCode::from_u16(status)
+                                                    .unwrap_or(StatusCode::SEE_OTHER),
+                                            )
+                                            .header("Location", redirect_url)
+                                            .body(Body::empty())
+                                            .expect("response build");
+                                    }
+                                    if parsed
+                                        .get("notFound")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false)
+                                    {
+                                        return Response::builder()
+                                            .status(StatusCode::NOT_FOUND)
+                                            .body(Body::from("404 - Not Found"))
+                                            .expect("response build");
+                                    }
+                                }
+                                // Success — fall through to render the page with updated state
+                            }
                             Ok(Err(e)) => error!("Form action error: {e}"),
                             Err(e) => error!("Form action pool error: {e}"),
                         }
