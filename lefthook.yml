@@ -22,6 +22,9 @@ pre-commit:
     typecheck-fixtures:
       run: scripts/typecheck-fixtures.sh
       fail_text: "Fix TypeScript errors in fixtures/benchmarks before committing"
+    file-length:
+      run: scripts/check-file-length.sh --staged
+      fail_text: "Files must not exceed 700 lines — split large files into smaller modules"
     coverage-ratchet:
       run: scripts/coverage-ratchet.sh
       fail_text: "Coverage dropped below the threshold in .coverage-threshold"
