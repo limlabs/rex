@@ -230,7 +230,58 @@ pub(crate) fn check_redirects(path: &str, config: &ProjectConfig) -> Option<Resp
 
 #[cfg(test)]
 mod test_support;
+
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
-mod tests_coverage;
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dev_error_overlay_escapes_html() {
+        let overlay = dev_error_overlay("Test Error", "<script>alert('xss')</script>", None);
+        assert!(overlay.contains("&lt;script&gt;"));
+        assert!(!overlay.contains("<script>alert"));
+        assert!(overlay.contains("Test Error"));
+    }
+
+    #[test]
+    fn test_dev_error_overlay_with_file_section() {
+        let overlay = dev_error_overlay("Build Error", "some error", Some("pages/index.tsx"));
+        assert!(overlay.contains("pages/index.tsx"));
+        assert!(overlay.contains("Build Error"));
+    }
+
+    #[test]
+    fn test_dev_error_overlay_hmr_script() {
+        let overlay = dev_error_overlay("Error", "msg", None);
+        assert!(
+            overlay.contains("/_rex/hmr"),
+            "should include HMR WebSocket"
+        );
+        assert!(
+            overlay.contains("WebSocket"),
+            "should include WebSocket reconnect"
+        );
+    }
+
+    #[test]
+    fn test_check_redirects_no_match() {
+        let config = rex_core::ProjectConfig::default();
+        assert!(check_redirects("/anything", &config).is_none());
+    }
+
+    #[test]
+    fn test_check_redirects_match() {
+        let config = rex_core::ProjectConfig {
+            redirects: vec![rex_core::RedirectRule {
+                source: "/old".to_string(),
+                destination: "/new".to_string(),
+                status_code: 301,
+                permanent: false,
+            }],
+            ..Default::default()
+        };
+        let resp = check_redirects("/old", &config).unwrap();
+        assert_eq!(resp.status(), 301);
+    }
+}

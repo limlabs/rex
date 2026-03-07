@@ -1,12 +1,9 @@
 #![allow(clippy::unwrap_used)]
 
-use super::*;
+use crate::handlers::test_support::*;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use axum::routing::post;
-use axum::Router;
 use rex_core::DynamicSegment;
-use test_support::*;
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -155,88 +152,6 @@ async fn test_dynamic_route_params() {
         html.contains("<h1>my-post</h1>"),
         "dynamic param not passed: {html}"
     );
-}
-
-#[tokio::test]
-async fn test_data_handler_returns_json() {
-    let app = TestAppBuilder::new()
-        .routes(
-            vec![make_route("/about", "about.tsx", vec![])],
-            vec![(
-                "about",
-                "function About() { return React.createElement('div'); }",
-                Some("function(ctx) { return { props: { title: 'data test' } }; }"),
-            )],
-        )
-        .build();
-
-    let resp = app
-        .oneshot(
-            Request::get("/_rex/data/test-build-id/about.json")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(
-        resp.headers().get("content-type").unwrap(),
-        "application/json"
-    );
-    let json = body_string(resp.into_body()).await;
-    let val: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(val["props"]["title"], "data test");
-}
-
-#[tokio::test]
-async fn test_data_handler_stale_build_id() {
-    let app = TestAppBuilder::new()
-        .routes(
-            vec![make_route("/", "index.tsx", vec![])],
-            vec![(
-                "index",
-                "function Index() { return React.createElement('div'); }",
-                None,
-            )],
-        )
-        .build();
-
-    let resp = app
-        .oneshot(
-            Request::get("/_rex/data/wrong-build-id/index.json")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn test_data_handler_no_route() {
-    let app = TestAppBuilder::new()
-        .routes(
-            vec![make_route("/", "index.tsx", vec![])],
-            vec![(
-                "index",
-                "function Index() { return React.createElement('div'); }",
-                None,
-            )],
-        )
-        .build();
-
-    let resp = app
-        .oneshot(
-            Request::get("/_rex/data/test-build-id/nonexistent.json")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -481,111 +396,205 @@ async fn test_middleware_next_passthrough() {
 }
 
 #[tokio::test]
-async fn test_server_action_stale_build_id() {
+async fn test_custom_404_page() {
     let app = TestAppBuilder::new()
-        .extra_bundle(TEST_ACTION_RUNTIME)
-        .custom_router(|state| {
-            Router::new()
-                .route(
-                    "/_rex/action/{build_id}/{action_id}",
-                    post(server_action_handler),
-                )
-                .with_state(state)
-        })
+        .routes(
+            vec![
+                make_route("/", "index.tsx", vec![]),
+                make_route("/404", "404.tsx", vec![]),
+            ],
+            vec![
+                (
+                    "index",
+                    "function Index() { return React.createElement('div', null, 'Home'); }",
+                    None,
+                ),
+                (
+                    "404",
+                    "function NotFound() { return React.createElement('h1', null, 'Custom 404'); }",
+                    None,
+                ),
+            ],
+        )
+        .custom_404()
         .build();
 
     let resp = app
-        .oneshot(
-            Request::post("/_rex/action/wrong-build-id/test_action_id")
-                .header("Content-Type", "application/json")
-                .body(Body::from("[42]"))
-                .unwrap(),
-        )
+        .oneshot(Request::get("/nonexistent").body(Body::empty()).unwrap())
         .await
         .unwrap();
+
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let html = body_string(resp.into_body()).await;
+    assert!(
+        html.contains("Custom 404"),
+        "custom 404 page not rendered: {html}"
+    );
 }
 
 #[tokio::test]
-async fn test_server_action_success() {
+async fn test_custom_error_page_on_gssp_failure() {
     let app = TestAppBuilder::new()
-        .extra_bundle(TEST_ACTION_RUNTIME)
-        .custom_router(|state| {
-            Router::new()
-                .route(
-                    "/_rex/action/{build_id}/{action_id}",
-                    post(server_action_handler),
-                )
-                .with_state(state)
-        })
+        .routes(
+            vec![
+                make_route("/broken", "broken.tsx", vec![]),
+                make_route("/_error", "_error.tsx", vec![]),
+            ],
+            vec![
+                (
+                    "broken",
+                    "function Broken() { return React.createElement('div'); }",
+                    Some("function(ctx) { throw new Error('boom'); }"),
+                ),
+                (
+                    "_error",
+                    "function ErrorPage(props) { return React.createElement('h1', null, 'Error ' + props.statusCode); }",
+                    None,
+                ),
+            ],
+        )
+        .custom_error()
         .build();
 
     let resp = app
-        .oneshot(
-            Request::post("/_rex/action/test-build-id/test_action_id")
-                .header("Content-Type", "application/json")
-                .body(Body::from("[42]"))
-                .unwrap(),
-        )
+        .oneshot(Request::get("/broken").body(Body::empty()).unwrap())
         .await
         .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let html = body_string(resp.into_body()).await;
+    assert!(
+        html.contains("Error 500"),
+        "custom error page not rendered: {html}"
+    );
+}
+
+#[tokio::test]
+async fn test_middleware_rewrite() {
+    let app = TestAppBuilder::new()
+        .routes(
+            vec![make_route("/", "index.tsx", vec![])],
+            vec![(
+                "index",
+                "function Index() { return React.createElement('h1', null, 'Home'); }",
+                None,
+            )],
+        )
+        .middleware(TEST_MIDDLEWARE_REWRITE, vec!["/rewrite-me".to_string()])
+        .build();
+
+    let resp = app
+        .oneshot(Request::get("/rewrite-me").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
     assert_eq!(resp.status(), StatusCode::OK);
-    let body = body_string(resp.into_body()).await;
-    let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(parsed["result"], 43);
+    let html = body_string(resp.into_body()).await;
+    assert!(
+        html.contains("Home"),
+        "rewrite should serve index page: {html}"
+    );
 }
 
 #[tokio::test]
-async fn test_server_action_not_found() {
+async fn test_config_rewrite_with_params() {
+    let config = rex_core::ProjectConfig {
+        rewrites: vec![rex_core::RewriteRule {
+            source: "/articles/:slug".to_string(),
+            destination: "/blog/:slug".to_string(),
+        }],
+        ..Default::default()
+    };
+
     let app = TestAppBuilder::new()
-        .extra_bundle(TEST_ACTION_RUNTIME)
-        .custom_router(|state| {
-            Router::new()
-                .route(
-                    "/_rex/action/{build_id}/{action_id}",
-                    post(server_action_handler),
-                )
-                .with_state(state)
-        })
+        .routes(
+            vec![make_route(
+                "/blog/:slug",
+                "blog/[slug].tsx",
+                vec![DynamicSegment::Single("slug".into())],
+            )],
+            vec![(
+                "blog/[slug]",
+                "function Post(props) { return React.createElement('h1', null, props.slug); }",
+                Some("function(ctx) { return { props: { slug: ctx.params.slug } }; }"),
+            )],
+        )
+        .config(config)
         .build();
 
     let resp = app
         .oneshot(
-            Request::post("/_rex/action/test-build-id/nonexistent")
-                .header("Content-Type", "application/json")
-                .body(Body::from("[]"))
+            Request::get("/articles/my-post")
+                .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
+
     assert_eq!(resp.status(), StatusCode::OK);
-    let body = body_string(resp.into_body()).await;
-    let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert!(parsed["error"].as_str().unwrap().contains("not found"));
+    let html = body_string(resp.into_body()).await;
+    assert!(
+        html.contains("<h1>my-post</h1>"),
+        "rewrite with params should render: {html}"
+    );
 }
 
 #[tokio::test]
-async fn test_server_action_invalid_utf8() {
+async fn test_catch_all_route() {
     let app = TestAppBuilder::new()
-        .extra_bundle(TEST_ACTION_RUNTIME)
-        .custom_router(|state| {
-            Router::new()
-                .route(
-                    "/_rex/action/{build_id}/{action_id}",
-                    post(server_action_handler),
-                )
-                .with_state(state)
-        })
+        .routes(
+            vec![make_route(
+                "/docs/*path",
+                "docs/[...path].tsx",
+                vec![DynamicSegment::CatchAll("path".into())],
+            )],
+            vec![(
+                "docs/[...path]",
+                "function Docs(props) { return React.createElement('p', null, props.path); }",
+                Some("function(ctx) { return { props: { path: ctx.params.path } }; }"),
+            )],
+        )
         .build();
 
     let resp = app
         .oneshot(
-            Request::post("/_rex/action/test-build-id/test_action_id")
-                .header("Content-Type", "application/json")
-                .body(Body::from(vec![0xFF, 0xFE]))
+            Request::get("/docs/getting-started/install")
+                .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = body_string(resp.into_body()).await;
+    assert!(
+        html.contains("getting-started/install"),
+        "catch-all param not rendered: {html}"
+    );
+}
+
+#[tokio::test]
+async fn test_dev_mode_gssp_error_shows_overlay() {
+    let app = TestAppBuilder::new()
+        .routes(
+            vec![make_route("/broken", "broken.tsx", vec![])],
+            vec![(
+                "broken",
+                "function Broken() { return React.createElement('div'); }",
+                Some("function(ctx) { throw new Error('gssp boom'); }"),
+            )],
+        )
+        .dev_mode()
+        .build();
+
+    let resp = app
+        .oneshot(Request::get("/broken").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    let html = body_string(resp.into_body()).await;
+    assert!(
+        html.contains("gssp boom"),
+        "dev overlay should show error message: {html}"
+    );
 }

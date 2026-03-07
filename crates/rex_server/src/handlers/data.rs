@@ -87,3 +87,155 @@ pub async fn data_handler(
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use crate::handlers::test_support::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use rex_core::DynamicSegment;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn test_data_handler_returns_json() {
+        let app = TestAppBuilder::new()
+            .routes(
+                vec![make_route("/about", "about.tsx", vec![])],
+                vec![(
+                    "about",
+                    "function About() { return React.createElement('div'); }",
+                    Some("function(ctx) { return { props: { title: 'data test' } }; }"),
+                )],
+            )
+            .build();
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/data/test-build-id/about.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+        let json = body_string(resp.into_body()).await;
+        let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(val["props"]["title"], "data test");
+    }
+
+    #[tokio::test]
+    async fn test_data_handler_stale_build_id() {
+        let app = TestAppBuilder::new()
+            .routes(
+                vec![make_route("/", "index.tsx", vec![])],
+                vec![(
+                    "index",
+                    "function Index() { return React.createElement('div'); }",
+                    None,
+                )],
+            )
+            .build();
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/data/wrong-build-id/index.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_data_handler_no_route() {
+        let app = TestAppBuilder::new()
+            .routes(
+                vec![make_route("/", "index.tsx", vec![])],
+                vec![(
+                    "index",
+                    "function Index() { return React.createElement('div'); }",
+                    None,
+                )],
+            )
+            .build();
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/data/test-build-id/nonexistent.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_data_handler_no_gssp_returns_empty_props() {
+        let app = TestAppBuilder::new()
+            .routes(
+                vec![make_route("/static-page", "static.tsx", vec![])],
+                vec![(
+                    "static",
+                    "function Static() { return React.createElement('div', null, 'Static'); }",
+                    None,
+                )],
+            )
+            .build();
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/data/test-build-id/static-page.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_string(resp.into_body()).await;
+        let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(val["props"], serde_json::json!({}));
+    }
+
+    #[tokio::test]
+    async fn test_data_handler_dynamic_route() {
+        let app = TestAppBuilder::new()
+            .routes(
+                vec![make_route(
+                    "/posts/:id",
+                    "posts/[id].tsx",
+                    vec![DynamicSegment::Single("id".into())],
+                )],
+                vec![(
+                    "posts/[id]",
+                    "function Post(props) { return React.createElement('div'); }",
+                    Some("function(ctx) { return { props: { id: ctx.params.id } }; }"),
+                )],
+            )
+            .build();
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/data/test-build-id/posts/42.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_string(resp.into_body()).await;
+        let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(val["props"]["id"], "42");
+    }
+}

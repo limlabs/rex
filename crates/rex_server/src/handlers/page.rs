@@ -491,3 +491,7 @@ pub(super) async fn page_handler_inner(
         .body(body)
         .expect("response build")
 }
+
+#[cfg(test)]
+#[path = "page_tests.rs"]
+mod tests;

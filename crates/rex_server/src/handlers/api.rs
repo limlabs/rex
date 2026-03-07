@@ -146,3 +146,108 @@ pub async fn api_handler(
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::api_handler;
+    use crate::handlers::test_support::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use axum::routing::any;
+    use axum::Router;
+    use rex_core::{PageType, Route};
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn test_api_handler_get_returns_json() {
+        let api_route = Route {
+            pattern: "/api/hello".to_string(),
+            file_path: "api/hello.ts".into(),
+            abs_path: "/fake/pages/api/hello.ts".into(),
+            dynamic_segments: vec![],
+            page_type: PageType::Api,
+            specificity: 100,
+        };
+
+        let app = TestAppBuilder::new()
+            .api_routes(vec![api_route])
+            .extra_bundle(TEST_API_RUNTIME)
+            .custom_router(|state| {
+                Router::new()
+                    .route("/api/{*path}", any(api_handler))
+                    .with_state(state)
+            })
+            .build();
+
+        let resp = app
+            .oneshot(Request::get("/api/hello").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_string(resp.into_body()).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["message"], "hello from api");
+    }
+
+    #[tokio::test]
+    async fn test_api_handler_post_with_body() {
+        let api_route = Route {
+            pattern: "/api/hello".to_string(),
+            file_path: "api/hello.ts".into(),
+            abs_path: "/fake/pages/api/hello.ts".into(),
+            dynamic_segments: vec![],
+            page_type: PageType::Api,
+            specificity: 100,
+        };
+
+        let app = TestAppBuilder::new()
+            .api_routes(vec![api_route])
+            .extra_bundle(TEST_API_RUNTIME)
+            .custom_router(|state| {
+                Router::new()
+                    .route("/api/{*path}", any(api_handler))
+                    .with_state(state)
+            })
+            .build();
+
+        let resp = app
+            .oneshot(
+                Request::post("/api/hello")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"name":"rex"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_string(resp.into_body()).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["echo"]["name"], "rex");
+    }
+
+    #[tokio::test]
+    async fn test_api_handler_no_route_404() {
+        let app = TestAppBuilder::new()
+            .extra_bundle(TEST_API_RUNTIME)
+            .custom_router(|state| {
+                Router::new()
+                    .route("/api/{*path}", any(api_handler))
+                    .with_state(state)
+            })
+            .build();
+
+        let resp = app
+            .oneshot(
+                Request::get("/api/nonexistent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+}
