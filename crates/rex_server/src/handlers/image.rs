@@ -72,16 +72,19 @@ pub async fn image_handler(
     let url_path = query.url.trim_start_matches('/');
     let file_path = state.project_root.join("public").join(url_path);
 
-    // Prevent path traversal
+    // Prevent path traversal — both canonicalizations must succeed
+    // and the resolved path must be inside public/
+    let public_dir = state.project_root.join("public");
+    let public_canonical = match public_dir.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return (StatusCode::NOT_FOUND, "image not found").into_response(),
+    };
     let canonical = match file_path.canonicalize() {
         Ok(p) => p,
         Err(_) => return (StatusCode::NOT_FOUND, "image not found").into_response(),
     };
-    let public_dir = state.project_root.join("public");
-    if let Ok(public_canonical) = public_dir.canonicalize() {
-        if !canonical.starts_with(&public_canonical) {
-            return (StatusCode::BAD_REQUEST, "invalid path").into_response();
-        }
+    if !canonical.starts_with(&public_canonical) {
+        return (StatusCode::BAD_REQUEST, "invalid path").into_response();
     }
 
     let src_bytes = match std::fs::read(&canonical) {

@@ -566,15 +566,19 @@ pub async fn handle_image(state: &Arc<AppState>, req: &RexRequest) -> RexRespons
     let url_path = url.trim_start_matches('/');
     let file_path = state.project_root.join("public").join(url_path);
 
+    // Prevent path traversal — both canonicalizations must succeed
+    // and the resolved path must be inside public/
+    let public_dir = state.project_root.join("public");
+    let public_canonical = match public_dir.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return RexResponse::text(404, "image not found".to_string()),
+    };
     let canonical = match file_path.canonicalize() {
         Ok(p) => p,
         Err(_) => return RexResponse::text(404, "image not found".to_string()),
     };
-    let public_dir = state.project_root.join("public");
-    if let Ok(public_canonical) = public_dir.canonicalize() {
-        if !canonical.starts_with(&public_canonical) {
-            return RexResponse::text(400, "invalid path".to_string());
-        }
+    if !canonical.starts_with(&public_canonical) {
+        return RexResponse::text(400, "invalid path".to_string());
     }
 
     let src_bytes = match std::fs::read(&canonical) {
