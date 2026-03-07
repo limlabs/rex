@@ -294,6 +294,71 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+  smoke-test:
+    name: Smoke Test (${{ matrix.fixture }})
+    needs: [check-release-pr, npm-publish]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        fixture: [basic, tailwind, mcp, app-router, custom-server]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Rewrite @limlabs/rex to published beta version
+        run: |
+          BETA_VERSION="${{ needs.check-release-pr.outputs.beta_version }}"
+          cd "fixtures/${{ matrix.fixture }}"
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            for (const section of ['dependencies', 'devDependencies']) {
+              if (pkg[section] && pkg[section]['@limlabs/rex']) {
+                pkg[section]['@limlabs/rex'] = '${BETA_VERSION}';
+              }
+            }
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Install dependencies
+        run: cd "fixtures/${{ matrix.fixture }}" && npm install
+
+      - name: rex build
+        run: npx rex build
+        working-directory: fixtures/${{ matrix.fixture }}
+
+      - name: rex start (verify HTTP 200)
+        run: |
+          npx rex start --port 3000 &
+          REX_PID=$!
+
+          # Wait for server to be ready
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/ > /dev/null 2>&1; then
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::Server failed to start within 30s"
+              kill $REX_PID 2>/dev/null || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/)
+          echo "GET / → HTTP $STATUS"
+          kill $REX_PID 2>/dev/null || true
+
+          if [ "$STATUS" -ne 200 ]; then
+            echo "::error::Expected HTTP 200, got $STATUS"
+            exit 1
+          fi
+        working-directory: fixtures/${{ matrix.fixture }}
+
   create-beta-release:
     name: GitHub Pre-Release
     needs: [check-release-pr, build-linux, build-linux-arm64, build-macos-arm64, build-macos-x86_64]
