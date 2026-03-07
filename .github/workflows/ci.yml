@@ -89,10 +89,10 @@ jobs:
         run: cargo test -p rex_python
 
       - name: Build and install rex-py
-        run: cd crates/rex_python && maturin develop
+        run: cd crates/rex_python && uv run maturin develop
 
       - name: Run Python tests
-        run: pytest crates/rex_python/tests/ -v
+        run: cd crates/rex_python && uv run pytest tests/ -v
 
   e2e:
     name: E2E Tests
