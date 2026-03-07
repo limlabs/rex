@@ -13,7 +13,7 @@ use tracing::{debug, info, info_span, Instrument};
 
 // Re-exports for crate::rsc_bundler compatibility
 pub(crate) use crate::build_utils::runtime_client_dir;
-pub(crate) use crate::server_bundle::V8_POLYFILLS;
+pub use crate::server_bundle::V8_POLYFILLS;
 
 // Re-exports for public API (via lib.rs)
 pub use crate::tailwind::{

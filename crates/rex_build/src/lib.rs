@@ -24,7 +24,7 @@ pub(crate) mod rsc_server_bundle;
 pub(crate) mod rsc_ssr_bundle;
 pub(crate) mod rsc_stubs;
 
-pub use bundler::build_bundles;
+pub use bundler::{build_bundles, V8_POLYFILLS};
 pub use manifest::AssetManifest;
 pub use tailwind::{
     collect_all_css_import_paths, find_tailwind_bin, needs_tailwind, process_tailwind_css,
