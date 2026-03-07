@@ -4431,6 +4431,7 @@ dependencies = [
  "crossbeam-channel",
  "futures",
  "reqwest",
+ "rex_build",
  "rex_core",
  "serde",
  "serde_json",
