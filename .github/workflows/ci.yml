@@ -19,11 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup
         with:
-          shared-key: ci
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: cargo fmt
         run: cargo fmt --check
@@ -33,10 +31,6 @@ jobs:
 
       - name: cargo check
         run: cargo check --all-targets
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
 
       - name: Install runtime dependencies
         run: cd runtime && npm ci
@@ -55,21 +49,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup
         with:
-          shared-key: ci
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install fixture dependencies
-        run: cd fixtures/basic && npm install
 
       - name: Run tests with coverage
         run: |
@@ -88,25 +73,9 @@ jobs:
     needs: [check]
     steps:
       - uses: actions/checkout@v4
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup
         with:
-          shared-key: ci
-          save-if: false
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install fixture dependencies
-        run: cd fixtures/basic && npm install
-
-      - name: Install maturin and pytest
-        run: pip install maturin pytest
+          python: "true"
 
       - name: Run Rust unit tests
         run: cargo test -p rex_python
@@ -123,18 +92,7 @@ jobs:
     needs: [check]
     steps:
       - uses: actions/checkout@v4
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci
-          save-if: false
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install fixture dependencies
-        run: cd fixtures/basic && npm install
+      - uses: ./.github/actions/setup
 
       - name: Build rex binary
         run: cargo build -p rex_cli
