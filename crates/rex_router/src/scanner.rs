@@ -1,3 +1,4 @@
+use rex_core::app_route::AppScanResult;
 use rex_core::{DynamicSegment, McpToolRoute, PageType, Route};
 use std::path::Path;
 use tracing::debug;
@@ -13,6 +14,8 @@ pub struct ScanResult {
     pub not_found: Option<Route>,
     /// Path to middleware file at project root (middleware.ts/js/tsx/jsx)
     pub middleware: Option<std::path::PathBuf>,
+    /// App router scan result (if app/ directory exists)
+    pub app_scan: Option<AppScanResult>,
     /// MCP tool files found in the mcp/ directory
     pub mcp_tools: Vec<McpToolRoute>,
 }
@@ -52,6 +55,7 @@ pub fn scan_pages(pages_dir: &Path) -> anyhow::Result<ScanResult> {
         error,
         not_found,
         middleware: None,
+        app_scan: None,
         mcp_tools: Vec::new(),
     })
 }
@@ -108,9 +112,34 @@ pub fn scan_mcp_tools(project_root: &Path) -> Vec<McpToolRoute> {
 }
 
 /// Scan pages and detect middleware. Convenience wrapper for callers that have the project root.
+///
+/// Also scans app/ directory if present for RSC/App Router support.
 pub fn scan_project(project_root: &Path, pages_dir: &Path) -> anyhow::Result<ScanResult> {
-    let mut scan = scan_pages(pages_dir)?;
+    let mut scan = if pages_dir.exists() {
+        scan_pages(pages_dir)?
+    } else {
+        // No pages/ dir — return empty scan result (app-only project)
+        ScanResult {
+            routes: Vec::new(),
+            api_routes: Vec::new(),
+            app: None,
+            document: None,
+            error: None,
+            not_found: None,
+            middleware: None,
+            app_scan: None,
+            mcp_tools: Vec::new(),
+        }
+    };
     scan.middleware = find_middleware(project_root);
+
+    // Scan app/ directory for RSC routes
+    let app_dir = project_root.join("app");
+    if let Some(app_scan) = crate::app_scanner::scan_app(&app_dir)? {
+        debug!(routes = app_scan.routes.len(), "App router routes scanned");
+        scan.app_scan = Some(app_scan);
+    }
+
     scan.mcp_tools = scan_mcp_tools(project_root);
     Ok(scan)
 }
@@ -382,6 +411,114 @@ mod tests {
 
         let tools = scan_mcp_tools(&tmp);
         assert!(tools.is_empty());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_scan_pages_basic() {
+        let tmp = std::env::temp_dir().join("rex_test_scan_pages");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let pages = tmp.join("pages");
+        std::fs::create_dir_all(pages.join("blog")).unwrap();
+        std::fs::write(pages.join("index.tsx"), "export default function(){}").unwrap();
+        std::fs::write(pages.join("about.tsx"), "export default function(){}").unwrap();
+        std::fs::write(pages.join("blog/[slug].tsx"), "export default function(){}").unwrap();
+        std::fs::write(pages.join("_app.tsx"), "export default function(){}").unwrap();
+        std::fs::write(pages.join("404.tsx"), "export default function(){}").unwrap();
+
+        let scan = scan_pages(&pages).unwrap();
+        assert_eq!(scan.routes.len(), 3); // index, about, blog/[slug]
+        assert!(scan.app.is_some());
+        assert!(scan.not_found.is_some());
+        assert!(scan.document.is_none());
+        assert!(scan.error.is_none());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_scan_pages_api_routes() {
+        let tmp = std::env::temp_dir().join("rex_test_scan_api");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let pages = tmp.join("pages");
+        std::fs::create_dir_all(pages.join("api")).unwrap();
+        std::fs::write(pages.join("index.tsx"), "export default function(){}").unwrap();
+        std::fs::write(pages.join("api/hello.ts"), "export default function(){}").unwrap();
+
+        let scan = scan_pages(&pages).unwrap();
+        assert_eq!(scan.routes.len(), 1);
+        assert_eq!(scan.api_routes.len(), 1);
+        assert_eq!(scan.api_routes[0].pattern, "/api/hello");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_scan_project_with_middleware_and_mcp() {
+        let tmp = std::env::temp_dir().join("rex_test_scan_project");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let pages = tmp.join("pages");
+        std::fs::create_dir_all(&pages).unwrap();
+        std::fs::write(pages.join("index.tsx"), "export default function(){}").unwrap();
+        std::fs::write(tmp.join("middleware.ts"), "export function middleware(){}").unwrap();
+        let mcp = tmp.join("mcp");
+        std::fs::create_dir_all(&mcp).unwrap();
+        std::fs::write(mcp.join("search.ts"), "export default function(){}").unwrap();
+
+        let scan = scan_project(&tmp, &pages).unwrap();
+        assert_eq!(scan.routes.len(), 1);
+        assert!(scan.middleware.is_some());
+        assert_eq!(scan.mcp_tools.len(), 1);
+        assert_eq!(scan.mcp_tools[0].name, "search");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_scan_project_no_pages_dir() {
+        let tmp = std::env::temp_dir().join("rex_test_scan_no_pages");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let pages = tmp.join("pages"); // doesn't exist
+
+        let scan = scan_project(&tmp, &pages).unwrap();
+        assert!(scan.routes.is_empty());
+        assert!(scan.api_routes.is_empty());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_scan_pages_special_files() {
+        let tmp = std::env::temp_dir().join("rex_test_scan_special");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let pages = tmp.join("pages");
+        std::fs::create_dir_all(&pages).unwrap();
+        std::fs::write(pages.join("index.tsx"), "export default function(){}").unwrap();
+        std::fs::write(pages.join("_document.tsx"), "export default function(){}").unwrap();
+        std::fs::write(pages.join("_error.tsx"), "export default function(){}").unwrap();
+
+        let scan = scan_pages(&pages).unwrap();
+        assert_eq!(scan.routes.len(), 1);
+        assert!(scan.document.is_some());
+        assert!(scan.error.is_some());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_scan_pages_ignores_non_page_files() {
+        let tmp = std::env::temp_dir().join("rex_test_scan_ignore");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let pages = tmp.join("pages");
+        std::fs::create_dir_all(&pages).unwrap();
+        std::fs::write(pages.join("index.tsx"), "export default function(){}").unwrap();
+        std::fs::write(pages.join("styles.css"), "body{}").unwrap();
+        std::fs::write(pages.join("README.md"), "# docs").unwrap();
+
+        let scan = scan_pages(&pages).unwrap();
+        assert_eq!(scan.routes.len(), 1); // only index.tsx
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

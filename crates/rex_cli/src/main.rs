@@ -1,12 +1,14 @@
 mod tui;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use rayon::prelude::*;
 use rex_build::build_bundles;
 use rex_core::{ProjectConfig, RexConfig};
 use rex_router::scan_project;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::{debug, info};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -54,7 +56,7 @@ enum Commands {
         root: PathBuf,
     },
 
-    /// Lint pages with oxlint (React + Next.js rules)
+    /// Lint source files with oxlint (React + Next.js rules)
     Lint {
         /// Project root directory
         #[arg(long, default_value = ".")]
@@ -64,9 +66,13 @@ enum Commands {
         #[arg(long)]
         fix: bool,
 
-        /// Additional arguments passed to oxlint
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<String>,
+        /// Treat warnings as errors
+        #[arg(long)]
+        deny_warnings: bool,
+
+        /// Paths to lint (defaults to pages/ directory)
+        #[arg(trailing_var_arg = true)]
+        paths: Vec<PathBuf>,
     },
 
     /// Type-check pages with tsc
@@ -85,21 +91,35 @@ enum Commands {
         /// Project name (creates a new directory)
         name: String,
     },
+
+    /// Format source files with oxfmt
+    Fmt {
+        /// Project root directory
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+
+        /// Check formatting without writing (exits with error if unformatted)
+        #[arg(long)]
+        check: bool,
+    },
 }
+
+const DEFAULT_LOG_FILTER: &str = "rex=info,v8::console=info";
 
 fn init_plain_tracing() {
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "rex=info".into()),
+                .unwrap_or_else(|_| DEFAULT_LOG_FILTER.into()),
         )
         .init();
 }
 
 fn init_tui_tracing() -> LogBuffer {
     let buffer = LogBuffer::new(1000);
-    let env_filter =
-        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "rex=info".into());
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| DEFAULT_LOG_FILTER.into());
 
     tracing_subscriber::registry()
         .with(env_filter)
@@ -122,7 +142,16 @@ async fn main() -> Result<()> {
 
             if tui_enabled {
                 let log_buffer = init_tui_tracing();
-                cmd_dev(root, port, true, Some(log_buffer)).await
+                let log_buffer_fallback = log_buffer.clone();
+                let result = cmd_dev(root, port, true, Some(log_buffer)).await;
+                if result.is_err() {
+                    // The TUI never started — dump buffered logs to stderr
+                    // so the user can see what happened before the error.
+                    for entry in log_buffer_fallback.snapshot() {
+                        eprintln!("[{}] {}", entry.level, entry.message);
+                    }
+                }
+                result
             } else {
                 init_plain_tracing();
                 cmd_dev(root, port, false, None).await
@@ -136,9 +165,14 @@ async fn main() -> Result<()> {
             init_plain_tracing();
             cmd_start(root, port).await
         }
-        Commands::Lint { root, fix, args } => {
+        Commands::Lint {
+            root,
+            fix,
+            deny_warnings,
+            paths,
+        } => {
             init_plain_tracing();
-            cmd_lint(root, fix, args)
+            cmd_lint(root, fix, deny_warnings, paths)
         }
         Commands::Typecheck { root, args } => {
             init_plain_tracing();
@@ -147,6 +181,10 @@ async fn main() -> Result<()> {
         Commands::Init { name } => {
             init_plain_tracing();
             cmd_init(name)
+        }
+        Commands::Fmt { root, check } => {
+            init_plain_tracing();
+            cmd_fmt(root, check)
         }
     }
 }
@@ -158,6 +196,12 @@ async fn cmd_dev(
     log_buffer: Option<LogBuffer>,
 ) -> Result<()> {
     let start = std::time::Instant::now();
+
+    // Bind the port early — fail fast on conflicts before the expensive build.
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .with_context(|| format!("failed to bind port {port} — is another server running?"))?;
 
     if !tui_enabled {
         print_mascot_header(env!("CARGO_PKG_VERSION"), "");
@@ -242,9 +286,6 @@ async fn cmd_dev(
     }
 
     let elapsed = start.elapsed();
-
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    let listener = tokio::net::TcpListener::bind(addr).await?;
 
     if tui_enabled {
         // Spawn the HTTP server as a background task
@@ -521,62 +562,176 @@ a {
     Ok(())
 }
 
-fn cmd_lint(root: PathBuf, fix: bool, extra_args: Vec<String>) -> Result<()> {
+fn cmd_lint(root: PathBuf, fix: bool, deny_warnings: bool, paths: Vec<PathBuf>) -> Result<()> {
+    use oxc_linter::{
+        ConfigStore, ConfigStoreBuilder, ExternalPluginStore, FixKind, LintOptions, LintRunner,
+        LintServiceOptions, Linter, Oxlintrc,
+    };
+    use std::ffi::OsStr;
+    use std::sync::Arc;
+
     let root = std::fs::canonicalize(&root)?;
 
-    // Find oxlint binary
-    let oxlint = find_oxlint(&root).ok_or_else(|| {
-        anyhow::anyhow!(
-            "oxlint not found. Install it:\n\n  \
-             npm install -D oxlint\n  \
-             # or globally: npm install -g oxlint"
-        )
-    })?;
-
-    // Write default config if none exists
+    // Load config: .oxlintrc.json if present, otherwise use Rex defaults
     let config_path = root.join(".oxlintrc.json");
-    if !config_path.exists() {
-        eprintln!(
-            "  {} {}",
-            dim("Creating"),
-            dim(".oxlintrc.json with Rex defaults")
-        );
-        std::fs::write(&config_path, default_oxlintrc())?;
+    let oxlintrc = if config_path.exists() {
+        Oxlintrc::from_file(&config_path)
+            .map_err(|e| anyhow::anyhow!("failed to parse .oxlintrc.json: {e}"))?
+    } else {
+        Oxlintrc::from_string(default_oxlintrc())
+            .map_err(|e| anyhow::anyhow!("failed to parse default oxlintrc: {e}"))?
+    };
+
+    // Build config store
+    let mut external_plugin_store = ExternalPluginStore::default();
+    let config_builder =
+        ConfigStoreBuilder::from_oxlintrc(false, oxlintrc, None, &mut external_plugin_store, None)
+            .map_err(|e| anyhow::anyhow!("failed to build lint config: {e}"))?;
+
+    let base_config = config_builder
+        .build(&mut external_plugin_store)
+        .map_err(|e| anyhow::anyhow!("failed to build lint config: {e}"))?;
+
+    let config_store = ConfigStore::new(base_config, Default::default(), external_plugin_store);
+
+    // Create linter
+    let fix_kind = if fix { FixKind::SafeFix } else { FixKind::None };
+    let linter = Linter::new(LintOptions::default(), config_store, None).with_fix(fix_kind);
+
+    // Determine lint targets
+    let lint_dirs: Vec<PathBuf> = if paths.is_empty() {
+        let pages_dir = root.join("pages");
+        if pages_dir.is_dir() {
+            vec![pages_dir]
+        } else {
+            vec![root.clone()]
+        }
+    } else {
+        paths
+            .into_iter()
+            .map(|p| if p.is_absolute() { p } else { root.join(p) })
+            .collect()
+    };
+
+    // Discover source files
+    let mut files: Vec<PathBuf> = Vec::new();
+    for dir in &lint_dirs {
+        if dir.is_file() {
+            files.push(dir.clone());
+        } else if dir.is_dir() {
+            walk_lint_dir(dir, &mut files);
+        }
     }
 
-    let pages_dir = root.join("pages");
-    let lint_dir = if pages_dir.is_dir() {
-        pages_dir
-    } else {
-        root.clone()
-    };
+    if files.is_empty() {
+        eprintln!();
+        eprintln!("  {} {}", magenta_bold("◆ rex lint"), dim("(oxlint)"));
+        eprintln!();
+        eprintln!("  {} {}", dim("No source files found to lint"), dim(""));
+        eprintln!();
+        return Ok(());
+    }
 
     eprintln!();
     eprintln!("  {} {}", magenta_bold("◆ rex lint"), dim("(oxlint)"));
     eprintln!();
 
-    let mut cmd = Command::new(&oxlint);
-    cmd.current_dir(&root);
-    cmd.arg(lint_dir);
-    cmd.arg("--config").arg(&config_path);
+    // Build LintRunner and execute
+    let service_options = LintServiceOptions::new(root.clone().into_boxed_path());
 
-    if fix {
-        cmd.arg("--fix");
+    let lint_runner = LintRunner::builder(service_options, linter)
+        .with_fix_kind(fix_kind)
+        .build()
+        .map_err(|e| anyhow::anyhow!("failed to build lint runner: {e}"))?;
+
+    let file_paths: Vec<Arc<OsStr>> = files
+        .iter()
+        .map(|p| Arc::from(p.as_os_str().to_owned()))
+        .collect();
+
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<oxc_diagnostics::Error>>();
+    let lint_runner = lint_runner
+        .lint_files(&file_paths, tx)
+        .map_err(|e| anyhow::anyhow!("lint failed: {e}"))?;
+
+    // Collect and display diagnostics
+    let mut error_count: usize = 0;
+    let mut warning_count: usize = 0;
+
+    let _ = &lint_runner; // keep runner alive for fix writing
+
+    for errors in rx {
+        for error in &errors {
+            let severity = error.severity().unwrap_or(oxc_diagnostics::Severity::Error);
+            match severity {
+                oxc_diagnostics::Severity::Error => error_count += 1,
+                oxc_diagnostics::Severity::Warning => warning_count += 1,
+                _ => {}
+            }
+            // Print diagnostics using miette-style formatting
+            eprintln!("{error:?}");
+        }
     }
 
-    for arg in &extra_args {
-        cmd.arg(arg);
-    }
+    let total = error_count + warning_count;
 
-    let status = cmd.status()?;
-
-    if status.success() {
-        eprintln!();
+    if total == 0 {
         eprintln!("  {} {}", green_bold("✓"), green_bold("No lint errors"));
         eprintln!();
+        return Ok(());
     }
 
-    std::process::exit(status.code().unwrap_or(1));
+    eprintln!();
+    if error_count > 0 {
+        eprintln!(
+            "  {} {}",
+            bold(&format!("{error_count} error(s)")),
+            if warning_count > 0 {
+                format!("and {} warning(s)", warning_count)
+            } else {
+                String::new()
+            }
+        );
+    } else {
+        eprintln!("  {}", bold(&format!("{warning_count} warning(s)")));
+    }
+    eprintln!();
+
+    if error_count > 0 || (deny_warnings && warning_count > 0) {
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+/// Walk a directory recursively, collecting lintable source files.
+fn walk_lint_dir(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name == "node_modules" || name == ".rex" || name.starts_with('.') {
+                continue;
+            }
+            walk_lint_dir(&path, out);
+        } else if path.is_file() {
+            if let Some("js" | "jsx" | "ts" | "tsx" | "mjs" | "mts") =
+                path.extension().and_then(|e| e.to_str())
+            {
+                // Skip .d.ts type definition files
+                if !path
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().ends_with(".d.ts"))
+                {
+                    out.push(path);
+                }
+            }
+        }
+    }
 }
 
 fn cmd_typecheck(root: PathBuf, extra_args: Vec<String>) -> Result<()> {
@@ -613,25 +768,192 @@ fn cmd_typecheck(root: PathBuf, extra_args: Vec<String>) -> Result<()> {
     std::process::exit(status.code().unwrap_or(1));
 }
 
-fn find_oxlint(root: &std::path::Path) -> Option<PathBuf> {
-    // 1. Local node_modules/.bin/oxlint
-    let local = root.join("node_modules/.bin/oxlint");
-    if local.exists() {
-        return Some(local);
+fn cmd_fmt(root: PathBuf, check: bool) -> Result<()> {
+    let root = std::fs::canonicalize(&root)?;
+    let options = load_format_options(&root);
+    let ignore_patterns = load_ignore_patterns(&root);
+    let mut files = discover_source_files(&root);
+
+    if !ignore_patterns.is_empty() {
+        files.retain(|f| !is_ignored(f, &root, &ignore_patterns));
     }
 
-    // 2. oxlint in PATH
-    if Command::new("oxlint")
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
-    {
-        return Some(PathBuf::from("oxlint"));
+    if files.is_empty() {
+        eprintln!();
+        eprintln!("  {} {}", dim("◆ rex fmt"), dim("(oxfmt)"));
+        eprintln!();
+        eprintln!(
+            "  {} {}",
+            dim("No source files found in"),
+            dim(&root.display().to_string())
+        );
+        eprintln!();
+        return Ok(());
     }
 
-    None
+    eprintln!();
+    eprintln!("  {} {}", magenta_bold("◆ rex fmt"), dim("(oxfmt)"));
+    eprintln!();
+
+    let changed_count = AtomicUsize::new(0);
+    let error_count = AtomicUsize::new(0);
+    let unformatted: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+    files.par_iter().for_each(|path| {
+        let source = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("  {} {}: {e}", dim("skip"), path.display());
+                error_count.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+        };
+
+        let formatted = match format_source(&source, path, &options) {
+            Ok(f) => f,
+            Err(_) => {
+                let rel = path.strip_prefix(&root).unwrap_or(path);
+                eprintln!("  {} {} (parse error)", dim("skip"), rel.display());
+                error_count.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+        };
+
+        if formatted != source {
+            if check {
+                if let Ok(mut list) = unformatted.lock() {
+                    list.push(path.clone());
+                }
+            } else {
+                match std::fs::write(path, &formatted) {
+                    Ok(()) => {
+                        changed_count.fetch_add(1, Ordering::Relaxed);
+                        let rel = path.strip_prefix(&root).unwrap_or(path);
+                        eprintln!("  {} {}", dim("fmt"), rel.display());
+                    }
+                    Err(e) => {
+                        eprintln!("  {} {}: {e}", dim("error"), path.display());
+                        error_count.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
+        }
+    });
+
+    let changed = changed_count.load(Ordering::Relaxed);
+    let errors = error_count.load(Ordering::Relaxed);
+
+    if check {
+        let unformatted = unformatted.into_inner().unwrap_or_default();
+        if unformatted.is_empty() {
+            eprintln!(
+                "  {} {}",
+                green_bold("✓"),
+                green_bold("All files formatted")
+            );
+            eprintln!();
+            Ok(())
+        } else {
+            for path in &unformatted {
+                let rel = path.strip_prefix(&root).unwrap_or(path);
+                eprintln!("  {} {}", dim("unformatted"), rel.display());
+            }
+            eprintln!();
+            eprintln!(
+                "  {} {}",
+                bold(&format!("{} file(s) need formatting", unformatted.len())),
+                dim("(run `rex fmt` to fix)")
+            );
+            eprintln!();
+            std::process::exit(1);
+        }
+    } else {
+        if changed == 0 && errors == 0 {
+            eprintln!(
+                "  {} {}",
+                green_bold("✓"),
+                green_bold("All files formatted")
+            );
+        } else if changed > 0 {
+            eprintln!();
+            eprintln!(
+                "  {} {}",
+                green_bold("✓"),
+                green_bold(&format!("Formatted {changed} file(s)"))
+            );
+        }
+        if errors > 0 {
+            eprintln!(
+                "  {} {}",
+                dim("⚠"),
+                dim(&format!("{errors} file(s) skipped"))
+            );
+        }
+        eprintln!();
+        Ok(())
+    }
+}
+
+fn discover_source_files(root: &std::path::Path) -> Vec<PathBuf> {
+    let extensions: &[&str] = &["ts", "tsx", "js", "jsx"];
+    let skip_dirs: &[&str] = &["node_modules", ".rex", ".git", "dist", "target", ".next"];
+
+    let mut files = Vec::new();
+
+    // Scan pages/ and styles/ directories
+    let scan_dirs = ["pages", "styles", "components", "lib", "utils", "src"];
+    for dir_name in &scan_dirs {
+        let dir = root.join(dir_name);
+        if dir.is_dir() {
+            walk_dir(&dir, extensions, skip_dirs, &mut files);
+        }
+    }
+
+    // Also pick up root-level config files (e.g., next.config.js)
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if extensions.contains(&ext) {
+                        files.push(path);
+                    }
+                }
+            }
+        }
+    }
+
+    files.sort();
+    files.dedup();
+    files
+}
+
+fn walk_dir(
+    dir: &std::path::Path,
+    extensions: &[&str],
+    skip_dirs: &[&str],
+    files: &mut Vec<PathBuf>,
+) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !skip_dirs.contains(&name) {
+                walk_dir(&path, extensions, skip_dirs, files);
+            }
+        } else if path.is_file() {
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                if extensions.contains(&ext) {
+                    files.push(path);
+                }
+            }
+        }
+    }
 }
 
 fn default_oxlintrc() -> &'static str {
@@ -648,7 +970,8 @@ fn default_oxlintrc() -> &'static str {
     "nextjs/no-img-element": "warn",
     "nextjs/no-head-import-in-document": "warn",
     "nextjs/no-duplicate-head": "warn",
-    "import/no-cycle": "warn"
+    "import/no-cycle": "warn",
+    "no-var": "error"
   },
   "ignorePatterns": [".rex/", "node_modules/"]
 }
@@ -776,9 +1099,532 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
 }
 
 async fn hmr_client_handler() -> impl axum::response::IntoResponse {
-    let js = include_str!("../../../runtime/dist/hmr_client.js");
+    let js = include_str!(concat!(env!("OUT_DIR"), "/hmr_client.js"));
     (
         [(axum::http::header::CONTENT_TYPE, "application/javascript")],
         js,
     )
+}
+
+fn load_format_options(root: &std::path::Path) -> oxc_formatter::FormatOptions {
+    let config_files = [".prettierrc", ".prettierrc.json"];
+
+    let json_value: Option<serde_json::Value> = config_files
+        .iter()
+        .find_map(|name| {
+            let path = root.join(name);
+            let content = std::fs::read_to_string(&path).ok()?;
+            serde_json::from_str(&content).ok()
+        })
+        .or_else(|| {
+            let pkg_path = root.join("package.json");
+            let content = std::fs::read_to_string(&pkg_path).ok()?;
+            let pkg: serde_json::Value = serde_json::from_str(&content).ok()?;
+            pkg.get("prettier").cloned()
+        });
+
+    let Some(config) = json_value else {
+        return oxc_formatter::FormatOptions {
+            quote_style: oxc_formatter::QuoteStyle::Single,
+            ..Default::default()
+        };
+    };
+
+    let mut options = oxc_formatter::FormatOptions::default();
+
+    if let Some(v) = config.get("singleQuote").and_then(|v| v.as_bool()) {
+        options.quote_style = if v {
+            oxc_formatter::QuoteStyle::Single
+        } else {
+            oxc_formatter::QuoteStyle::Double
+        };
+    }
+
+    if let Some(v) = config.get("jsxSingleQuote").and_then(|v| v.as_bool()) {
+        options.jsx_quote_style = if v {
+            oxc_formatter::QuoteStyle::Single
+        } else {
+            oxc_formatter::QuoteStyle::Double
+        };
+    }
+
+    if let Some(v) = config.get("tabWidth").and_then(|v| v.as_u64()) {
+        if let Ok(w) = oxc_formatter::IndentWidth::try_from(v as u8) {
+            options.indent_width = w;
+        }
+    }
+
+    if let Some(v) = config.get("useTabs").and_then(|v| v.as_bool()) {
+        options.indent_style = if v {
+            oxc_formatter::IndentStyle::Tab
+        } else {
+            oxc_formatter::IndentStyle::Space
+        };
+    }
+
+    if let Some(v) = config.get("printWidth").and_then(|v| v.as_u64()) {
+        if let Ok(w) = oxc_formatter::LineWidth::try_from(v as u16) {
+            options.line_width = w;
+        }
+    }
+
+    if let Some(v) = config.get("semi").and_then(|v| v.as_bool()) {
+        options.semicolons = if v {
+            oxc_formatter::Semicolons::Always
+        } else {
+            oxc_formatter::Semicolons::AsNeeded
+        };
+    }
+
+    if let Some(v) = config.get("trailingComma").and_then(|v| v.as_str()) {
+        options.trailing_commas = match v {
+            "all" => oxc_formatter::TrailingCommas::All,
+            "none" => oxc_formatter::TrailingCommas::None,
+            "es5" => oxc_formatter::TrailingCommas::Es5,
+            _ => options.trailing_commas,
+        };
+    }
+
+    if let Some(v) = config.get("bracketSpacing").and_then(|v| v.as_bool()) {
+        options.bracket_spacing = oxc_formatter::BracketSpacing::from(v);
+    }
+
+    if let Some(v) = config.get("bracketSameLine").and_then(|v| v.as_bool()) {
+        options.bracket_same_line = oxc_formatter::BracketSameLine::from(v);
+    }
+
+    if let Some(v) = config.get("arrowParens").and_then(|v| v.as_str()) {
+        options.arrow_parentheses = match v {
+            "avoid" => oxc_formatter::ArrowParentheses::AsNeeded,
+            "always" => oxc_formatter::ArrowParentheses::Always,
+            _ => options.arrow_parentheses,
+        };
+    }
+
+    if let Some(v) = config.get("endOfLine").and_then(|v| v.as_str()) {
+        options.line_ending = match v {
+            "lf" => oxc_formatter::LineEnding::Lf,
+            "crlf" => oxc_formatter::LineEnding::Crlf,
+            "cr" => oxc_formatter::LineEnding::Cr,
+            _ => options.line_ending,
+        };
+    }
+
+    options
+}
+
+fn load_ignore_patterns(root: &std::path::Path) -> Vec<String> {
+    let ignore_path = root.join(".prettierignore");
+    let content = match std::fs::read_to_string(&ignore_path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    content
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| l.to_string())
+        .collect()
+}
+
+fn is_ignored(path: &std::path::Path, root: &std::path::Path, patterns: &[String]) -> bool {
+    let rel = match path.strip_prefix(root) {
+        Ok(r) => r.to_string_lossy(),
+        Err(_) => return false,
+    };
+    let rel_str = rel.as_ref();
+
+    for pattern in patterns {
+        // Directory pattern (e.g., "dist/", "pages/api/")
+        if let Some(dir) = pattern.strip_suffix('/') {
+            if rel_str.starts_with(dir) || rel_str.starts_with(&format!("{dir}/")) {
+                return true;
+            }
+        }
+        // Glob-like extension pattern (e.g., "*.min.js")
+        else if let Some(suffix) = pattern.strip_prefix('*') {
+            if rel_str.ends_with(suffix) {
+                return true;
+            }
+        }
+        // Exact match or prefix match for bare directory names (e.g. "dist" matches "dist/foo.ts")
+        else if rel_str == pattern || rel_str.starts_with(&format!("{pattern}/")) {
+            return true;
+        }
+    }
+    false
+}
+
+fn format_source(
+    source: &str,
+    path: &std::path::Path,
+    options: &oxc_formatter::FormatOptions,
+) -> Result<String> {
+    let source_type = oxc_span::SourceType::from_path(path)
+        .map_err(|e| anyhow::anyhow!("unsupported file type: {e}"))?;
+    let allocator = oxc_allocator::Allocator::default();
+    let parse_options = oxc_parser::ParseOptions {
+        preserve_parens: false,
+        ..Default::default()
+    };
+    let parsed = oxc_parser::Parser::new(&allocator, source, source_type)
+        .with_options(parse_options)
+        .parse();
+    if !parsed.errors.is_empty() {
+        anyhow::bail!("parse error");
+    }
+    Ok(oxc_formatter::Formatter::new(&allocator, options.clone()).build(&parsed.program))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn default_options() -> oxc_formatter::FormatOptions {
+        oxc_formatter::FormatOptions {
+            quote_style: oxc_formatter::QuoteStyle::Single,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_format_source_single_quotes() {
+        let input = "const x = \"hello\";\n";
+        let opts = default_options();
+        let result = format_source(input, Path::new("test.ts"), &opts).unwrap();
+        assert!(
+            result.contains("'hello'"),
+            "expected single quotes, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_format_source_semicolons() {
+        let input = "const x = 1\n";
+        let opts = default_options();
+        let result = format_source(input, Path::new("test.ts"), &opts).unwrap();
+        assert!(
+            result.contains("const x = 1;"),
+            "expected semicolons, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_format_source_tsx() {
+        let input = "export default function App() { return <div>hi</div>; }\n";
+        let opts = default_options();
+        let result = format_source(input, Path::new("test.tsx"), &opts).unwrap();
+        assert!(result.contains("<div>"), "expected JSX preserved: {result}");
+    }
+
+    #[test]
+    fn test_format_source_idempotent() {
+        let input = "const x = 'hello';\n";
+        let opts = default_options();
+        let first = format_source(input, Path::new("test.ts"), &opts).unwrap();
+        let second = format_source(&first, Path::new("test.ts"), &opts).unwrap();
+        assert_eq!(first, second, "formatting should be idempotent");
+    }
+
+    #[test]
+    fn test_format_source_parse_error() {
+        let input = "const = ;;\n";
+        let opts = default_options();
+        let result = format_source(input, Path::new("test.ts"), &opts);
+        assert!(result.is_err(), "should fail on invalid syntax");
+    }
+
+    #[test]
+    fn test_discover_source_files_finds_pages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pages = tmp.path().join("pages");
+        std::fs::create_dir_all(&pages).unwrap();
+        std::fs::write(pages.join("index.tsx"), "export default function() {}").unwrap();
+        std::fs::write(pages.join("readme.md"), "# hello").unwrap();
+
+        let files = discover_source_files(tmp.path());
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("index.tsx"));
+    }
+
+    #[test]
+    fn test_discover_source_files_skips_node_modules() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nm = tmp.path().join("pages/node_modules/foo");
+        std::fs::create_dir_all(&nm).unwrap();
+        std::fs::write(nm.join("bar.ts"), "const x = 1").unwrap();
+
+        let files = discover_source_files(tmp.path());
+        assert!(files.is_empty(), "should skip node_modules");
+    }
+
+    #[test]
+    fn test_discover_source_files_root_configs() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("next.config.js"), "module.exports = {}").unwrap();
+        std::fs::write(tmp.path().join("package.json"), "{}").unwrap();
+
+        let files = discover_source_files(tmp.path());
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("next.config.js"));
+    }
+
+    #[test]
+    fn test_walk_dir_extensions() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.ts"), "").unwrap();
+        std::fs::write(tmp.path().join("b.tsx"), "").unwrap();
+        std::fs::write(tmp.path().join("c.css"), "").unwrap();
+        std::fs::write(tmp.path().join("d.js"), "").unwrap();
+
+        let extensions: &[&str] = &["ts", "tsx", "js", "jsx"];
+        let skip_dirs: &[&str] = &["node_modules"];
+        let mut files = Vec::new();
+        walk_dir(tmp.path(), extensions, skip_dirs, &mut files);
+
+        assert_eq!(files.len(), 3, "should find .ts, .tsx, .js but not .css");
+    }
+
+    #[test]
+    fn test_walk_dir_recursive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nested = tmp.path().join("a/b/c");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("deep.ts"), "").unwrap();
+
+        let extensions: &[&str] = &["ts"];
+        let skip_dirs: &[&str] = &[];
+        let mut files = Vec::new();
+        walk_dir(tmp.path(), extensions, skip_dirs, &mut files);
+
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("deep.ts"));
+    }
+
+    #[test]
+    fn test_cmd_fmt_write_mode() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pages = tmp.path().join("pages");
+        std::fs::create_dir_all(&pages).unwrap();
+        std::fs::write(pages.join("index.ts"), "const x = \"hello\"\n").unwrap();
+
+        cmd_fmt(tmp.path().to_path_buf(), false).unwrap();
+
+        let content = std::fs::read_to_string(pages.join("index.ts")).unwrap();
+        assert!(
+            content.contains("'hello'"),
+            "should have formatted to single quotes: {content}"
+        );
+        assert!(
+            content.contains(';'),
+            "should have added semicolons: {content}"
+        );
+    }
+
+    #[test]
+    fn test_cmd_fmt_check_mode_passes_when_formatted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pages = tmp.path().join("pages");
+        std::fs::create_dir_all(&pages).unwrap();
+
+        let opts = default_options();
+        let formatted = format_source("const x = \"hello\";\n", Path::new("t.ts"), &opts).unwrap();
+        std::fs::write(pages.join("index.ts"), &formatted).unwrap();
+
+        cmd_fmt(tmp.path().to_path_buf(), true).unwrap();
+    }
+
+    #[test]
+    fn test_cmd_fmt_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        cmd_fmt(tmp.path().to_path_buf(), false).unwrap();
+    }
+
+    #[test]
+    fn test_cmd_fmt_skips_parse_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pages = tmp.path().join("pages");
+        std::fs::create_dir_all(&pages).unwrap();
+        std::fs::write(pages.join("broken.ts"), "const = ;;\n").unwrap();
+        std::fs::write(pages.join("good.ts"), "const x = \"hello\"\n").unwrap();
+
+        cmd_fmt(tmp.path().to_path_buf(), false).unwrap();
+
+        let broken = std::fs::read_to_string(pages.join("broken.ts")).unwrap();
+        assert_eq!(broken, "const = ;;\n");
+
+        let good = std::fs::read_to_string(pages.join("good.ts")).unwrap();
+        assert!(good.contains("'hello'"));
+    }
+
+    #[test]
+    fn test_discover_multiple_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("pages")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("components")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("lib")).unwrap();
+        std::fs::write(tmp.path().join("pages/index.tsx"), "").unwrap();
+        std::fs::write(tmp.path().join("components/btn.tsx"), "").unwrap();
+        std::fs::write(tmp.path().join("lib/utils.ts"), "").unwrap();
+
+        let files = discover_source_files(tmp.path());
+        assert_eq!(
+            files.len(),
+            3,
+            "should find files in pages, components, lib"
+        );
+    }
+
+    // --- Prettier config tests ---
+
+    #[test]
+    fn test_load_format_options_prettierrc() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(".prettierrc"),
+            r#"{ "singleQuote": false }"#,
+        )
+        .unwrap();
+
+        let opts = load_format_options(tmp.path());
+        assert_eq!(opts.quote_style, oxc_formatter::QuoteStyle::Double);
+    }
+
+    #[test]
+    fn test_load_format_options_prettierrc_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(".prettierrc.json"), r#"{ "tabWidth": 4 }"#).unwrap();
+
+        let opts = load_format_options(tmp.path());
+        assert_eq!(opts.indent_width.value(), 4);
+    }
+
+    #[test]
+    fn test_load_format_options_package_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("package.json"),
+            r#"{ "name": "test", "prettier": { "singleQuote": true, "tabWidth": 4 } }"#,
+        )
+        .unwrap();
+
+        let opts = load_format_options(tmp.path());
+        assert_eq!(opts.quote_style, oxc_formatter::QuoteStyle::Single);
+        assert_eq!(opts.indent_width.value(), 4);
+    }
+
+    #[test]
+    fn test_load_format_options_precedence() {
+        let tmp = tempfile::tempdir().unwrap();
+        // .prettierrc should win over package.json
+        std::fs::write(tmp.path().join(".prettierrc"), r#"{ "singleQuote": true }"#).unwrap();
+        std::fs::write(
+            tmp.path().join("package.json"),
+            r#"{ "prettier": { "singleQuote": false } }"#,
+        )
+        .unwrap();
+
+        let opts = load_format_options(tmp.path());
+        assert_eq!(opts.quote_style, oxc_formatter::QuoteStyle::Single);
+    }
+
+    #[test]
+    fn test_load_format_options_defaults() {
+        let tmp = tempfile::tempdir().unwrap();
+        // No config files at all
+        let opts = load_format_options(tmp.path());
+        assert_eq!(
+            opts.quote_style,
+            oxc_formatter::QuoteStyle::Single,
+            "should default to single quotes"
+        );
+        assert_eq!(
+            opts.indent_width.value(),
+            2,
+            "should default to 2-space indent"
+        );
+    }
+
+    #[test]
+    fn test_load_format_options_all_fields() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(".prettierrc"),
+            r#"{
+                "singleQuote": true,
+                "jsxSingleQuote": true,
+                "tabWidth": 4,
+                "useTabs": true,
+                "printWidth": 120,
+                "semi": false,
+                "trailingComma": "none",
+                "bracketSpacing": false,
+                "bracketSameLine": true,
+                "arrowParens": "avoid",
+                "endOfLine": "crlf"
+            }"#,
+        )
+        .unwrap();
+
+        let opts = load_format_options(tmp.path());
+        assert_eq!(opts.quote_style, oxc_formatter::QuoteStyle::Single);
+        assert_eq!(opts.jsx_quote_style, oxc_formatter::QuoteStyle::Single);
+        assert_eq!(opts.indent_width.value(), 4);
+        assert_eq!(opts.indent_style, oxc_formatter::IndentStyle::Tab);
+        assert_eq!(opts.line_width.value(), 120);
+        assert_eq!(opts.semicolons, oxc_formatter::Semicolons::AsNeeded);
+        assert_eq!(opts.trailing_commas, oxc_formatter::TrailingCommas::None);
+        assert!(!opts.bracket_spacing.value());
+        assert!(opts.bracket_same_line.value());
+        assert_eq!(
+            opts.arrow_parentheses,
+            oxc_formatter::ArrowParentheses::AsNeeded
+        );
+        assert_eq!(opts.line_ending, oxc_formatter::LineEnding::Crlf);
+    }
+
+    #[test]
+    fn test_load_ignore_patterns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pages = tmp.path().join("pages");
+        let api = pages.join("api");
+        std::fs::create_dir_all(&api).unwrap();
+        std::fs::write(pages.join("index.ts"), "const x = 1").unwrap();
+        std::fs::write(api.join("hello.ts"), "const y = 2").unwrap();
+
+        std::fs::write(
+            tmp.path().join(".prettierignore"),
+            "# comment\npages/api/\n",
+        )
+        .unwrap();
+
+        let patterns = load_ignore_patterns(tmp.path());
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0], "pages/api/");
+
+        let files = discover_source_files(tmp.path());
+        let filtered: Vec<_> = files
+            .into_iter()
+            .filter(|f| !is_ignored(f, tmp.path(), &patterns))
+            .collect();
+        assert_eq!(filtered.len(), 1, "should filter out api files");
+        assert!(filtered[0].ends_with("index.ts"));
+    }
+
+    #[test]
+    fn test_format_source_with_options() {
+        let input = "const x = 'hello';\n";
+        let opts = oxc_formatter::FormatOptions {
+            quote_style: oxc_formatter::QuoteStyle::Double,
+            ..Default::default()
+        };
+        let result = format_source(input, Path::new("test.ts"), &opts).unwrap();
+        assert!(
+            result.contains("\"hello\""),
+            "expected double quotes with custom options, got: {result}"
+        );
+    }
 }

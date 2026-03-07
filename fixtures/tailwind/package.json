@@ -4,12 +4,16 @@
   "private": true,
   "type": "commonjs",
   "dependencies": {
+    "@limlabs/rex": "file:../../packages/rex",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "@tailwindcss/cli": "^4",
     "tailwindcss": "^4"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "@types/react": "^19",
-    "@types/react-dom": "^19"
+    "@types/react-dom": "^19",
+    "typescript": "^5.8.0"
   }
 }

@@ -19,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -41,28 +43,21 @@ jobs:
       - name: Install runtime dependencies
         run: cd runtime && npm ci
 
-      - name: TypeScript strict check
+      - name: TypeScript strict check (runtime)
         run: cd runtime && npm run typecheck
 
-      - name: Build runtime IIFE files
-        run: cd runtime && npm run build
+      - name: TypeScript strict check (fixtures & benchmarks)
+        run: scripts/typecheck-fixtures.sh
+
+      - name: File length check
+        run: scripts/check-file-length.sh --diff origin/${{ github.base_ref || 'main' }}
 
       - name: oxlint
-        run: npx oxlint --deny-warnings runtime/ packages/rex/src/
-
-      - name: Verify clean working tree
-        run: |
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "::error::Working tree is dirty after build"
-            git status --porcelain
-            exit 1
-          fi
+        run: cargo run -p rex_cli -- lint --deny-warnings runtime/ packages/rex/src/ fixtures/ benchmarks/
 
   test:
     name: Test & Coverage
     runs-on: ubuntu-latest
-    env:
-      COVERAGE_THRESHOLD: 51
     steps:
       - uses: actions/checkout@v4
 
@@ -83,6 +78,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
+          COVERAGE_THRESHOLD=$(cat .coverage-threshold | tr -d '[:space:]')
           cargo llvm-cov --all --json --output-path coverage.json
           COVERAGE=$(jq '.data[0].totals.lines.percent' coverage.json | xargs printf '%.0f')
           echo "Line coverage: ${COVERAGE}% (threshold: ${COVERAGE_THRESHOLD}%)"
@@ -90,3 +86,28 @@ jobs:
             echo "::error::Coverage ${COVERAGE}% is below threshold ${COVERAGE_THRESHOLD}%"
             exit 1
           fi
+
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: [check]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+          save-if: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install fixture dependencies
+        run: cd fixtures/basic && npm install
+
+      - name: Build rex binary
+        run: cargo build -p rex_cli
+
+      - name: Run e2e tests
+        run: cargo test -p rex_e2e --lib -- --ignored

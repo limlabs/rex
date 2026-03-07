@@ -2,6 +2,7 @@
 .rex
 node_modules
 *.node
+crates/rex_napi/index.js
 *.swp
 *.swo
 .DS_Store
@@ -12,6 +13,8 @@ __marimo__/
 benchmarks/results*.json
 .tanstack
 .env
+.env*
 .claude/
 dist/
-!runtime/dist/
+
+*.tsbuildinfo

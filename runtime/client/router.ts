@@ -7,6 +7,7 @@
 
   const buildId = manifest.build_id;
   const pages = manifest.pages;
+  const appRoutes = manifest.app_routes || {};
   const prefetchCache: Record<string, Promise<GsspData>> = {};
   const loadingChunks: Record<string, Promise<void>> = {};
 
@@ -96,9 +97,21 @@
     return params;
   }
 
+  function matchAppRoute(pathname: string): RouteMatch | null {
+    if (appRoutes[pathname]) return { pattern: pathname, params: {} };
+    for (const pattern in appRoutes) {
+      if (pattern.indexOf(":") === -1) continue;
+      const params = matchDynamic(pattern, pathname);
+      if (params) return { pattern, params };
+    }
+    return null;
+  }
+
   // --- Router state ---
 
-  const initialMatch = matchRoute(window.location.pathname);
+  const initialMatch =
+    matchRoute(window.location.pathname) ||
+    matchAppRoute(window.location.pathname);
   const initialQuery = parseQuery(window.location.search);
   if (initialMatch) {
     for (const k in initialMatch.params) initialQuery[k] = initialMatch.params[k];
@@ -169,6 +182,42 @@
     }
   }
 
+  // --- App route (RSC) navigation ---
+
+  function navigateApp(
+    fullUrl: string,
+    pathname: string,
+    match: RouteMatch,
+    opts: NavigateOpts,
+  ): Promise<void> {
+    events.emit("routeChangeStart", fullUrl);
+
+    const rscNavigate = window.__REX_RSC_NAVIGATE;
+    if (!rscNavigate) {
+      window.location.href = fullUrl;
+      return Promise.resolve();
+    }
+
+    return rscNavigate(pathname)
+      .then(function () {
+        if (!opts.popstate) {
+          events.emit("beforeHistoryChange", fullUrl);
+          if (opts.replace) {
+            history.replaceState({ __rex: pathname }, "", fullUrl);
+          } else {
+            history.pushState({ __rex: pathname }, "", fullUrl);
+          }
+        }
+        updateState(match, fullUrl);
+        if (!opts.popstate) window.scrollTo(0, 0);
+        events.emit("routeChangeComplete", fullUrl);
+      })
+      .catch(function (err: Error) {
+        events.emit("routeChangeError", err, fullUrl);
+        window.location.href = fullUrl;
+      });
+  }
+
   // --- Navigation ---
 
   function navigate(url: string, opts?: NavigateOpts): Promise<void> {
@@ -181,6 +230,10 @@
 
     const match = matchRoute(pathname);
     if (!match) {
+      const appMatch = matchAppRoute(pathname);
+      if (appMatch) {
+        return navigateApp(fullUrl, pathname, appMatch, opts || {});
+      }
       window.location.href = url;
       return Promise.resolve();
     }
@@ -287,9 +340,12 @@
       const a = document.createElement("a");
       a.href = url;
       const pathname = a.pathname;
-      if (!prefetchCache[pathname]) {
-        prefetchCache[pathname] = fetchPageData(pathname);
+      if (matchRoute(pathname)) {
+        if (!prefetchCache[pathname]) {
+          prefetchCache[pathname] = fetchPageData(pathname);
+        }
       }
+      // App routes: no-op for now (flight data requires streaming consumer)
     },
     // State (mutable — updated on navigation)
     state: state,

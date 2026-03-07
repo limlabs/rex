@@ -13,7 +13,8 @@ use std::sync::{Arc, RwLock};
 use tracing::{debug, error, info};
 
 use crate::document::{
-    assemble_body_tail, assemble_document, assemble_head_shell, DocumentDescriptor, DocumentParams,
+    assemble_body_tail, assemble_document, assemble_head_shell, assemble_rsc_body_tail,
+    assemble_rsc_head_shell, DocumentDescriptor, DocumentParams,
 };
 use rex_auth::cookies_from_headers;
 
@@ -36,6 +37,8 @@ pub struct HotState {
     pub has_middleware: bool,
     /// Middleware matcher patterns (None = no middleware, Some(empty) = run on all).
     pub middleware_matchers: Option<Vec<String>>,
+    /// App route trie for app/ router (RSC). None if no app/ directory.
+    pub app_route_trie: Option<RouteTrie>,
     /// Whether mcp/ directory has tool files.
     pub has_mcp_tools: bool,
 }
@@ -43,11 +46,14 @@ pub struct HotState {
 impl HotState {
     /// Compute the manifest_json field from current state.
     pub fn compute_manifest_json(build_id: &str, manifest: &rex_build::AssetManifest) -> String {
-        serde_json::to_string(&serde_json::json!({
+        let mut json = serde_json::json!({
             "build_id": build_id,
             "pages": manifest.pages,
-        }))
-        .expect("JSON serialization")
+        });
+        if !manifest.app_routes.is_empty() {
+            json["app_routes"] = serde_json::to_value(&manifest.app_routes).unwrap_or_default();
+        }
+        serde_json::to_string(&json).expect("JSON serialization")
     }
 }
 
@@ -579,6 +585,111 @@ pub async fn page_handler(
     response
 }
 
+/// Render an app/ route using RSC with streaming (head shell + body tail).
+async fn render_app_route(
+    state: &Arc<AppState>,
+    hot: &Arc<HotState>,
+    route_match: &rex_core::RouteMatch,
+    _path: &str,
+    uri: &Uri,
+) -> Response {
+    let route_key = route_match.route.pattern.clone();
+    let params = route_match.params.clone();
+    let search_params: HashMap<String, String> = uri
+        .query()
+        .map(|q| {
+            url::form_urlencoded::parse(q.as_bytes())
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let props_json =
+        serde_json::json!({ "params": params, "searchParams": search_params }).to_string();
+
+    // Look up client chunks for this app route
+    let app_assets = hot.manifest.app_routes.get(&route_key);
+    let client_chunks: Vec<String> = app_assets
+        .map(|a| a.client_chunks.clone())
+        .unwrap_or_default();
+
+    // Serialize client reference manifest
+    let client_manifest_json = hot
+        .manifest
+        .client_reference_manifest
+        .as_ref()
+        .and_then(|m| serde_json::to_string(m).ok())
+        .unwrap_or_else(|| "{}".to_string());
+
+    let is_dev = state.is_dev;
+    let manifest_json = hot.manifest_json.clone();
+
+    // Flush head shell immediately so browser starts fetching resources
+    let shell = assemble_rsc_head_shell(&client_chunks, &client_manifest_json);
+
+    let shell_chunk = stream::once(async { Ok::<_, std::convert::Infallible>(shell) });
+
+    let state_clone = state.clone();
+    let route_key_clone = route_key.clone();
+    let props_clone = props_json.clone();
+    let client_chunks_clone = client_chunks.clone();
+    let client_manifest_json_clone = client_manifest_json.clone();
+
+    let tail_chunk = stream::once(async move {
+        let rsc_result = state_clone
+            .isolate_pool
+            .execute(move |iso| iso.render_rsc_to_html(&route_key_clone, &props_clone))
+            .await;
+
+        let (body_html, head_html, flight_data) = match rsc_result {
+            Ok(Ok(r)) => (r.body, r.head, r.flight),
+            Ok(Err(e)) => {
+                error!("RSC render error: {e}");
+                let msg = e.to_string().replace('<', "&lt;").replace('>', "&gt;");
+                if is_dev {
+                    (
+                        format!("<pre style=\"padding:20px;color:#e63946;font-family:monospace\">RSC Error: {msg}</pre>"),
+                        String::new(),
+                        String::new(),
+                    )
+                } else {
+                    (
+                        "<h1>Internal Server Error</h1>".to_string(),
+                        String::new(),
+                        String::new(),
+                    )
+                }
+            }
+            Err(e) => {
+                error!("RSC pool error: {e}");
+                (
+                    "<h1>Internal Server Error</h1>".to_string(),
+                    String::new(),
+                    String::new(),
+                )
+            }
+        };
+
+        let tail = assemble_rsc_body_tail(
+            &body_html,
+            &head_html,
+            &flight_data,
+            &client_chunks_clone,
+            &client_manifest_json_clone,
+            is_dev,
+            Some(&manifest_json),
+        );
+
+        Ok::<_, std::convert::Infallible>(tail)
+    });
+
+    let body = Body::from_stream(shell_chunk.chain(tail_chunk));
+
+    Response::builder()
+        .header("content-type", "text/html; charset=utf-8")
+        .body(body)
+        .expect("response build")
+}
+
 async fn page_handler_inner(
     state: &Arc<AppState>,
     hot: &Arc<HotState>,
@@ -586,6 +697,13 @@ async fn page_handler_inner(
     uri: &Uri,
     headers: &HeaderMap,
 ) -> Response {
+    // Check app/ routes first (RSC)
+    if let Some(ref app_trie) = hot.app_route_trie {
+        if let Some(app_match) = app_trie.match_path(path) {
+            return render_app_route(state, hot, &app_match, path, uri).await;
+        }
+    }
+
     // Try to match the route
     let route_match = match hot.route_trie.match_path(path) {
         Some(m) => m,
@@ -931,6 +1049,122 @@ pub async fn data_handler(
     }
 }
 
+/// RSC flight data endpoint: GET /_rex/rsc/{buildId}/{path}
+/// Returns flight data as text/x-component for client-side RSC navigation.
+pub async fn rsc_handler(
+    State(state): State<Arc<AppState>>,
+    Path((build_id, page_path)): Path<(String, String)>,
+    uri: Uri,
+) -> Response {
+    let hot = snapshot(&state);
+
+    // Build ID mismatch = stale client
+    if build_id != hot.build_id {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let app_route_trie = match &hot.app_route_trie {
+        Some(trie) => trie,
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    let path = format!("/{page_path}");
+    let route_match = match app_route_trie.match_path(&path) {
+        Some(m) => m,
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    let route_key = &route_match.route.pattern;
+    let params = route_match.params.clone();
+
+    // Pass both route params and query string to the RSC render
+    let search_params: HashMap<String, String> = uri
+        .query()
+        .map(|q| {
+            url::form_urlencoded::parse(q.as_bytes())
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let props_json =
+        serde_json::json!({ "params": params, "searchParams": search_params }).to_string();
+    let route_key_owned = route_key.to_string();
+
+    let result = state
+        .isolate_pool
+        .execute(move |iso| iso.render_rsc_flight(&route_key_owned, &props_json))
+        .await;
+
+    match result {
+        Ok(Ok(flight_data)) => Response::builder()
+            .header("Content-Type", "text/x-component")
+            .header("Cache-Control", "no-cache")
+            .body(Body::from(flight_data))
+            .expect("response build"),
+        Ok(Err(e)) => {
+            error!("RSC flight render error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+        Err(e) => {
+            error!("RSC pool error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+/// Server action handler: POST /_rex/action/{build_id}/{action_id}
+///
+/// Dispatches a server function call from the client. The request body
+/// is a JSON array of arguments. Returns `{ result: ... }` or `{ error: ... }`.
+pub async fn server_action_handler(
+    State(state): State<Arc<AppState>>,
+    Path((build_id, action_id)): Path<(String, String)>,
+    body: axum::body::Bytes,
+) -> Response {
+    let hot = snapshot(&state);
+
+    // Build ID mismatch = stale client
+    if build_id != hot.build_id {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let args_json = match std::str::from_utf8(&body) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            return (StatusCode::BAD_REQUEST, "Invalid UTF-8 body").into_response();
+        }
+    };
+
+    let action_id_owned = action_id.clone();
+
+    let result = state
+        .isolate_pool
+        .execute(move |iso| iso.call_server_action(&action_id_owned, &args_json))
+        .await;
+
+    match result {
+        Ok(Ok(json_result)) => Response::builder()
+            .header("Content-Type", "application/json")
+            .body(Body::from(json_result))
+            .expect("response build"),
+        Ok(Err(e)) => {
+            error!("Server action error: {e}");
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "error": e.to_string() }).to_string(),
+                ))
+                .expect("response build")
+        }
+        Err(e) => {
+            error!("Server action pool error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
 /// Query parameters for the image optimization endpoint.
 #[derive(serde::Deserialize)]
 pub struct ImageQuery {
@@ -1044,7 +1278,7 @@ pub async fn image_handler(
 mod tests {
     use super::*;
     use axum::http::Request;
-    use axum::routing::get;
+    use axum::routing::{get, post};
     use axum::Router;
     use http_body_util::BodyExt;
     use rex_core::{DynamicSegment, PageType, Route};
@@ -1251,6 +1485,7 @@ globalThis.__rex_resolve_gsp = function() {
                 document_descriptor: None,
                 has_middleware: false,
                 middleware_matchers: None,
+                app_route_trie: None,
                 has_mcp_tools: false,
             })),
         });
@@ -1523,6 +1758,7 @@ globalThis.__rex_resolve_gsp = function() {
                 document_descriptor: None,
                 has_middleware: false,
                 middleware_matchers: None,
+                app_route_trie: None,
                 has_mcp_tools: false,
             })),
         });
@@ -1738,6 +1974,7 @@ globalThis.__rex_resolve_gsp = function() {
                 document_descriptor: None,
                 has_middleware: true,
                 middleware_matchers: Some(matchers),
+                app_route_trie: None,
                 has_mcp_tools: false,
             })),
         });
@@ -1841,5 +2078,134 @@ globalThis.__rex_resolve_gsp = function() {
             .unwrap();
         let html = String::from_utf8_lossy(&body);
         assert!(html.contains("Home"), "should render the page: {html}");
+    }
+
+    fn build_action_test_app() -> Router {
+        rex_v8::init_v8();
+        let action_runtime = r#"
+            globalThis.__rex_server_actions = {
+                "test_action_id": function(x) { return x + 1; }
+            };
+            globalThis.__rex_call_server_action = function(actionId, argsJson) {
+                var actions = globalThis.__rex_server_actions || {};
+                var fn = actions[actionId];
+                if (!fn) return JSON.stringify({ error: "Server action not found: " + actionId });
+                var args = JSON.parse(argsJson);
+                try {
+                    var result = fn.apply(null, args);
+                    return JSON.stringify({ result: result });
+                } catch (e) {
+                    return JSON.stringify({ error: String(e) });
+                }
+            };
+        "#;
+        let bundle = format!(
+            "{}\n{}\n{}",
+            MOCK_REACT_RUNTIME,
+            make_server_bundle(&[]),
+            action_runtime
+        );
+        let pool =
+            rex_v8::IsolatePool::new(1, Arc::new(bundle), None).expect("failed to create pool");
+
+        let build_id = "test-build-id".to_string();
+        let manifest = rex_build::AssetManifest::new(build_id.clone());
+        let manifest_json = HotState::compute_manifest_json(&build_id, &manifest);
+
+        let state = Arc::new(AppState {
+            isolate_pool: pool,
+            is_dev: false,
+            project_root: PathBuf::from("/tmp/rex-test"),
+            image_cache: rex_image::ImageCache::new(PathBuf::from("/tmp/rex-test-cache")),
+            hot: RwLock::new(Arc::new(HotState {
+                route_trie: RouteTrie::from_routes(&[]),
+                api_route_trie: RouteTrie::from_routes(&[]),
+                manifest,
+                build_id,
+                has_custom_404: false,
+                has_custom_error: false,
+                has_custom_document: false,
+                project_config: rex_core::ProjectConfig::default(),
+                manifest_json,
+                document_descriptor: None,
+                has_middleware: false,
+                middleware_matchers: None,
+                app_route_trie: None,
+                has_mcp_tools: false,
+            })),
+        });
+
+        Router::new()
+            .route(
+                "/_rex/action/{build_id}/{action_id}",
+                post(server_action_handler),
+            )
+            .with_state(state)
+    }
+
+    #[tokio::test]
+    async fn test_server_action_stale_build_id() {
+        let app = build_action_test_app();
+        let resp = app
+            .oneshot(
+                Request::post("/_rex/action/wrong-build-id/test_action_id")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from("[42]"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_server_action_success() {
+        let app = build_action_test_app();
+        let resp = app
+            .oneshot(
+                Request::post("/_rex/action/test-build-id/test_action_id")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from("[42]"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_string(resp.into_body()).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["result"], 43);
+    }
+
+    #[tokio::test]
+    async fn test_server_action_not_found() {
+        let app = build_action_test_app();
+        let resp = app
+            .oneshot(
+                Request::post("/_rex/action/test-build-id/nonexistent")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from("[]"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_string(resp.into_body()).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(parsed["error"].as_str().unwrap().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_server_action_invalid_utf8() {
+        let app = build_action_test_app();
+        let resp = app
+            .oneshot(
+                Request::post("/_rex/action/test-build-id/test_action_id")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(vec![0xFF, 0xFE]))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 }

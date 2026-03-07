@@ -24,6 +24,7 @@ jobs:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
+          token: ${{ secrets.RELEASE_PAT }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
@@ -36,6 +37,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.release-please.outputs.pr_branch }}
+          token: ${{ secrets.RELEASE_PAT }}
 
       - name: Update Cargo.lock
         run: cargo generate-lockfile
@@ -221,7 +223,7 @@ jobs:
 
   npm-publish:
     name: npm Publish
-    needs: release-please
+    needs: [release-please, build-linux, build-linux-arm64, build-macos-arm64, build-macos-x86_64]
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
     runs-on: ubuntu-latest
     steps:
@@ -232,19 +234,86 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-      - name: Install dependencies
-        run: cd packages/rex && npm install
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rex-*
+          path: artifacts
 
-      - name: Sync version from release tag
+      - name: Inject binaries into platform packages
         run: |
           VERSION="${TAG#v}"
+
+          # darwin-arm64
+          mkdir -p packages/rex-darwin-arm64/bin
+          tar xzf artifacts/rex-macos-arm64/rex-macos-arm64.tar.gz -C packages/rex-darwin-arm64/bin
+          chmod +x packages/rex-darwin-arm64/bin/rex
+
+          # darwin-x64
+          mkdir -p packages/rex-darwin-x64/bin
+          tar xzf artifacts/rex-macos-x86_64/rex-macos-x86_64.tar.gz -C packages/rex-darwin-x64/bin
+          chmod +x packages/rex-darwin-x64/bin/rex
+
+          # linux-x64
+          mkdir -p packages/rex-linux-x64/bin
+          tar xzf artifacts/rex-linux-x86_64/rex-linux-x86_64.tar.gz -C packages/rex-linux-x64/bin
+          chmod +x packages/rex-linux-x64/bin/rex
+
+          # linux-arm64
+          mkdir -p packages/rex-linux-arm64/bin
+          tar xzf artifacts/rex-linux-arm64/rex-linux-arm64.tar.gz -C packages/rex-linux-arm64/bin
+          chmod +x packages/rex-linux-arm64/bin/rex
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Sync versions from release tag
+        run: |
+          VERSION="${TAG#v}"
+          for pkg in packages/rex-darwin-arm64 packages/rex-darwin-x64 packages/rex-linux-x64 packages/rex-linux-arm64; do
+            cd "$pkg"
+            npm version "$VERSION" --no-git-tag-version --allow-same-version
+            cd "$GITHUB_WORKSPACE"
+          done
           cd packages/rex
           npm version "$VERSION" --no-git-tag-version --allow-same-version
         env:
           TAG: ${{ needs.release-please.outputs.tag_name }}
 
-      - name: Publish
-        run: cd packages/rex && npm publish --access public
+      - name: Publish platform packages
+        run: |
+          for pkg in packages/rex-darwin-arm64 packages/rex-darwin-x64 packages/rex-linux-x64 packages/rex-linux-arm64; do
+            echo "Publishing $pkg..."
+            cd "$pkg"
+            npm publish --access public
+            cd "$GITHUB_WORKSPACE"
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Wait for platform packages on registry
+        run: |
+          VERSION="${TAG#v}"
+          for pkg in @limlabs/rex-darwin-arm64 @limlabs/rex-darwin-x64 @limlabs/rex-linux-x64 @limlabs/rex-linux-arm64; do
+            echo "Waiting for $pkg@$VERSION..."
+            for i in $(seq 1 30); do
+              if npm view "$pkg@$VERSION" version 2>/dev/null; then
+                echo "$pkg@$VERSION is available"
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "Timed out waiting for $pkg@$VERSION"
+                exit 1
+              fi
+              sleep 10
+            done
+          done
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Install dependencies & publish main package
+        run: |
+          cd packages/rex
+          npm install
+          npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -272,6 +341,33 @@ jobs:
             artifacts/rex-macos-arm64/rex-macos-arm64.tar.gz.sha256
             artifacts/rex-macos-x86_64/rex-macos-x86_64.tar.gz
             artifacts/rex-macos-x86_64/rex-macos-x86_64.tar.gz.sha256
+
+  cargo-publish:
+    name: Cargo Publish
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish crates
+        run: |
+          # No-dep crates first (parallel-safe but sequential for simplicity)
+          cargo publish -p rex_image --no-verify
+          cargo publish -p rex_core --no-verify
+          sleep 30  # wait for crates.io index
+          # Crates that depend on rex_core
+          cargo publish -p rex_router --no-verify
+          cargo publish -p rex_v8 --no-verify
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  smoke-test:
+    name: Smoke Test
+    needs: [release-please, npm-publish]
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    uses: ./.github/workflows/smoke-test.yml
+    with:
+      version: ${{ needs.release-please.outputs.tag_name }}
 
   cleanup-beta-releases:
     name: Clean up beta releases

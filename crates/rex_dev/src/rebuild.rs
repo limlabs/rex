@@ -41,8 +41,20 @@ pub async fn handle_file_event(
             let build_result = build_bundles(config, &scan, &project_config).await?;
             let t_bundle = t0.elapsed();
 
-            // Read the new server bundle
-            let bundle_js = std::fs::read_to_string(&build_result.server_bundle_path)?;
+            // Read the new server bundle, appending RSC bundle if present
+            let mut bundle_js = std::fs::read_to_string(&build_result.server_bundle_path)?;
+            if let Some(rsc_path) = &build_result.manifest.rsc_server_bundle {
+                if let Ok(rsc_bundle) = std::fs::read_to_string(rsc_path) {
+                    bundle_js.push_str("\n;\n");
+                    bundle_js.push_str(&rsc_bundle);
+                }
+            }
+            if let Some(ssr_path) = &build_result.manifest.rsc_ssr_bundle {
+                if let Ok(ssr_bundle) = std::fs::read_to_string(ssr_path) {
+                    bundle_js.push_str("\n;\n");
+                    bundle_js.push_str(&ssr_bundle);
+                }
+            }
             let bundle_arc = Arc::new(bundle_js);
 
             // Reload all V8 isolates
@@ -71,6 +83,13 @@ pub async fn handle_file_event(
                     .map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
                 Arc::clone(&guard)
             };
+
+            // Build app route trie if app scan is present
+            let app_route_trie = scan
+                .app_scan
+                .as_ref()
+                .map(|app| RouteTrie::from_routes(&app.to_routes()))
+                .or_else(|| old_hot.app_route_trie.clone());
 
             // Recompute document descriptor after reload
             let document_descriptor = if old_hot.has_custom_document {
@@ -101,6 +120,7 @@ pub async fn handle_file_event(
                 has_custom_error: old_hot.has_custom_error,
                 has_custom_document: old_hot.has_custom_document,
                 project_config: old_hot.project_config.clone(),
+                app_route_trie,
             });
 
             // Notify HMR clients with the new manifest
@@ -127,7 +147,19 @@ pub async fn handle_file_event(
 
             let build_result = build_bundles(config, &scan, &project_config).await?;
 
-            let bundle_js = std::fs::read_to_string(&build_result.server_bundle_path)?;
+            let mut bundle_js = std::fs::read_to_string(&build_result.server_bundle_path)?;
+            if let Some(rsc_path) = &build_result.manifest.rsc_server_bundle {
+                if let Ok(rsc_bundle) = std::fs::read_to_string(rsc_path) {
+                    bundle_js.push_str("\n;\n");
+                    bundle_js.push_str(&rsc_bundle);
+                }
+            }
+            if let Some(ssr_path) = &build_result.manifest.rsc_ssr_bundle {
+                if let Ok(ssr_bundle) = std::fs::read_to_string(ssr_path) {
+                    bundle_js.push_str("\n;\n");
+                    bundle_js.push_str(&ssr_bundle);
+                }
+            }
             let bundle_arc = Arc::new(bundle_js);
 
             state.isolate_pool.reload_all(bundle_arc).await?;
@@ -140,6 +172,12 @@ pub async fn handle_file_event(
                     .map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
                 Arc::clone(&guard)
             };
+
+            // Build app route trie if app scan is present
+            let app_route_trie = scan
+                .app_scan
+                .as_ref()
+                .map(|app| RouteTrie::from_routes(&app.to_routes()));
 
             let has_custom_document = scan.document.is_some();
             let document_descriptor = if has_custom_document {
@@ -169,6 +207,7 @@ pub async fn handle_file_event(
                 project_config: old_hot.project_config.clone(),
                 manifest_json,
                 document_descriptor,
+                app_route_trie,
                 has_mcp_tools: !scan.mcp_tools.is_empty(),
             });
 
