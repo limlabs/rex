@@ -294,6 +294,13 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+  smoke-test:
+    name: Smoke Test
+    needs: [check-release-pr, npm-publish]
+    uses: ./.github/workflows/smoke-test.yml
+    with:
+      version: ${{ needs.check-release-pr.outputs.beta_version }}
+
   create-beta-release:
     name: GitHub Pre-Release
     needs: [check-release-pr, build-linux, build-linux-arm64, build-macos-arm64, build-macos-x86_64]
