@@ -177,7 +177,9 @@ pub(super) struct TestAppBuilder {
     routes: Vec<Route>,
     pages: Vec<(&'static str, &'static str, Option<&'static str>)>,
     api_routes: Vec<Route>,
+    app_routes: Vec<Route>,
     project_config: rex_core::ProjectConfig,
+    project_root: Option<PathBuf>,
     middleware_js: Option<String>,
     middleware_matchers: Option<Vec<String>>,
     extra_bundle: Option<String>,
@@ -193,7 +195,9 @@ impl TestAppBuilder {
             routes: Vec::new(),
             pages: Vec::new(),
             api_routes: Vec::new(),
+            app_routes: Vec::new(),
             project_config: rex_core::ProjectConfig::default(),
+            project_root: None,
             middleware_js: None,
             middleware_matchers: None,
             extra_bundle: None,
@@ -221,6 +225,16 @@ impl TestAppBuilder {
 
     pub fn api_routes(mut self, routes: Vec<Route>) -> Self {
         self.api_routes = routes;
+        self
+    }
+
+    pub fn app_routes(mut self, routes: Vec<Route>) -> Self {
+        self.app_routes = routes;
+        self
+    }
+
+    pub fn project_root(mut self, path: PathBuf) -> Self {
+        self.project_root = Some(path);
         self
     }
 
@@ -297,12 +311,21 @@ impl TestAppBuilder {
         };
 
         let api_trie = RouteTrie::from_routes(&self.api_routes);
+        let app_route_trie = if self.app_routes.is_empty() {
+            None
+        } else {
+            Some(RouteTrie::from_routes(&self.app_routes))
+        };
+
+        let project_root = self
+            .project_root
+            .unwrap_or_else(|| PathBuf::from("/tmp/rex-test"));
 
         let state = Arc::new(AppState {
             isolate_pool: pool,
             is_dev: self.is_dev,
-            project_root: PathBuf::from("/tmp/rex-test"),
-            image_cache: rex_image::ImageCache::new(PathBuf::from("/tmp/rex-test-cache")),
+            image_cache: rex_image::ImageCache::new(project_root.join(".rex-cache")),
+            project_root,
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
                 api_route_trie: api_trie,
@@ -316,7 +339,7 @@ impl TestAppBuilder {
                 document_descriptor: None,
                 has_middleware,
                 middleware_matchers,
-                app_route_trie: None,
+                app_route_trie,
                 has_mcp_tools: false,
             })),
         });
@@ -399,6 +422,18 @@ pub(super) const TEST_MIDDLEWARE_REWRITE: &str = r#"
             status: 307,
             request_headers: {},
             response_headers: {}
+        });
+    };
+"#;
+
+/// RSC flight runtime for tests.
+pub(super) const TEST_RSC_FLIGHT_RUNTIME: &str = r#"
+    globalThis.__rex_render_flight = function(routeKey, propsJson) {
+        var props = JSON.parse(propsJson);
+        return JSON.stringify({
+            route: routeKey,
+            params: props.params || {},
+            searchParams: props.searchParams || {}
         });
     };
 "#;

@@ -72,3 +72,139 @@ pub async fn rsc_handler(
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::rsc_handler;
+    use crate::handlers::test_support::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use axum::routing::get;
+    use axum::Router;
+    use rex_core::{DynamicSegment, PageType, Route};
+    use tower::ServiceExt;
+
+    fn make_app_route(pattern: &str, file_path: &str, segments: Vec<DynamicSegment>) -> Route {
+        let specificity = if segments.is_empty() { 100 } else { 50 };
+        Route {
+            pattern: pattern.to_string(),
+            file_path: file_path.into(),
+            abs_path: format!("/fake/app/{file_path}").into(),
+            dynamic_segments: segments,
+            page_type: PageType::Regular,
+            specificity,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rsc_handler_stale_build_id() {
+        let app = TestAppBuilder::new()
+            .app_routes(vec![make_app_route("/", "page.tsx", vec![])])
+            .extra_bundle(TEST_RSC_FLIGHT_RUNTIME)
+            .custom_router(|state| {
+                Router::new()
+                    .route("/_rex/rsc/{build_id}/{*path}", get(rsc_handler))
+                    .with_state(state)
+            })
+            .build();
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/rsc/wrong-build-id/")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_rsc_handler_no_app_trie_404() {
+        // No app_routes → app_route_trie is None → 404
+        let app = TestAppBuilder::new()
+            .extra_bundle(TEST_RSC_FLIGHT_RUNTIME)
+            .custom_router(|state| {
+                Router::new()
+                    .route("/_rex/rsc/{build_id}/{*path}", get(rsc_handler))
+                    .with_state(state)
+            })
+            .build();
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/rsc/test-build-id/")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_rsc_handler_no_route_match_404() {
+        let app = TestAppBuilder::new()
+            .app_routes(vec![make_app_route(
+                "/dashboard",
+                "dashboard/page.tsx",
+                vec![],
+            )])
+            .extra_bundle(TEST_RSC_FLIGHT_RUNTIME)
+            .custom_router(|state| {
+                Router::new()
+                    .route("/_rex/rsc/{build_id}/{*path}", get(rsc_handler))
+                    .with_state(state)
+            })
+            .build();
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/rsc/test-build-id/nonexistent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_rsc_handler_returns_flight_data() {
+        let app = TestAppBuilder::new()
+            .app_routes(vec![make_app_route(
+                "/dashboard",
+                "dashboard/page.tsx",
+                vec![],
+            )])
+            .extra_bundle(TEST_RSC_FLIGHT_RUNTIME)
+            .custom_router(|state| {
+                Router::new()
+                    .route("/_rex/rsc/{build_id}/{*path}", get(rsc_handler))
+                    .with_state(state)
+            })
+            .build();
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/rsc/test-build-id/dashboard")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "text/x-component"
+        );
+        let body = body_string(resp.into_body()).await;
+        let val: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(val["route"], "/dashboard");
+    }
+}
