@@ -7,6 +7,7 @@
     "@limlabs/rex": "file:../../packages/rex",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "@tailwindcss/cli": "^4",
     "tailwindcss": "^4"
   },
   "devDependencies": {
