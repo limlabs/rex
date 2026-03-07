@@ -66,6 +66,10 @@ pub(crate) fn process_mdx_pages(
         let source = fs::read_to_string(source_path)?;
         let compiled = compile_mdx_with_options(&source, &options)?;
 
+        // Absolutize relative imports so they resolve from the temp directory
+        let source_dir = source_path.parent().unwrap_or(Path::new("."));
+        let compiled = crate::css_modules::absolutize_relative_imports(&compiled, source_dir);
+
         // Write compiled JSX to temp dir with a unique name
         let hash = path_hash(source_path);
         let stem = source_path
@@ -127,6 +131,10 @@ pub(crate) fn process_mdx_app_pages(
     for source_path in &mdx_paths {
         let source = fs::read_to_string(source_path)?;
         let compiled = compile_mdx_with_options(&source, &options)?;
+
+        // Absolutize relative imports so they resolve from the temp directory
+        let source_dir = source_path.parent().unwrap_or(Path::new("."));
+        let compiled = crate::css_modules::absolutize_relative_imports(&compiled, source_dir);
 
         let hash = path_hash(source_path);
         let stem = source_path
