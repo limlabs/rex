@@ -1309,11 +1309,7 @@ mod tests {
         let action_counter_chunk = fs::read_dir(&client_dir)
             .unwrap()
             .filter_map(|e| e.ok())
-            .find(|e| {
-                e.file_name()
-                    .to_string_lossy()
-                    .contains("ActionCounter")
-            })
+            .find(|e| e.file_name().to_string_lossy().contains("ActionCounter"))
             .expect("ActionCounter client chunk should exist");
 
         let client_content = fs::read_to_string(action_counter_chunk.path()).unwrap();
