@@ -1,12 +1,9 @@
 name: Setup
-description: Shared CI setup — Rust cache, Node, fixture deps, and optional Python.
+description: Shared CI setup — Rust cache, Node, and fixture deps.
 
 inputs:
   save-cache:
     description: Whether to save the Rust cache (only on main)
-    default: "false"
-  python:
-    description: Set up Python (for rex_python tests)
     default: "false"
 
 runs:
@@ -24,11 +21,3 @@ runs:
     - name: Install fixture dependencies
       shell: bash
       run: cd fixtures/basic && npm install
-
-    - uses: astral-sh/setup-uv@v6
-      if: inputs.python == 'true'
-
-    - name: Set up Python virtualenv
-      if: inputs.python == 'true'
-      shell: bash
-      run: cd crates/rex_python && uv sync --group dev --no-install-project

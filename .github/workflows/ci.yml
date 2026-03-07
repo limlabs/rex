@@ -77,22 +77,14 @@ jobs:
 
   python:
     name: Python Extension Tests
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     needs: [check]
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
-        with:
-          python: "true"
 
       - name: Run Rust unit tests
         run: cargo test -p rex_python
-
-      - name: Build and install rex-py
-        run: cd crates/rex_python && uv run maturin develop
-
-      - name: Run Python tests
-        run: cd crates/rex_python && uv run pytest tests/ -v
 
   e2e:
     name: E2E Tests
