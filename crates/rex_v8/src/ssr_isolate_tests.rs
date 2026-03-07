@@ -640,3 +640,6 @@ fn test_reload_bad_bundle_restores_previous() {
 
 #[path = "ssr_isolate_tests_ext.rs"]
 mod ext;
+
+#[path = "ssr_isolate_tests_crypto.rs"]
+mod crypto;
