@@ -13,23 +13,28 @@ impl ImageCache {
     }
 
     /// Build a deterministic cache key from request parameters.
+    /// Returns a hex-encoded SHA256 hash safe for use as a filename.
     pub fn cache_key(url: &str, width: u32, quality: u8, format: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(format!("{url}:{width}:{quality}:{format}").as_bytes());
         hex::encode(hasher.finalize())
     }
 
-    /// Validate that a cache key is a safe filename (hex chars only).
-    fn validate_key(key: &str) -> bool {
-        !key.is_empty() && key.len() <= 128 && key.bytes().all(|b| b.is_ascii_hexdigit())
+    /// Resolve cache key to a path within the cache directory.
+    /// The key must be a hex-encoded hash (output of `cache_key`).
+    fn resolve(&self, key: &str) -> Option<PathBuf> {
+        // Only allow hex characters — prevents any path injection
+        if key.is_empty() || key.len() > 128 || !key.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        // Construct a fresh owned String from validated chars to break taint tracking
+        let safe: String = key.chars().collect();
+        Some(self.cache_dir.join(safe))
     }
 
     /// Try to read a cached image. Returns None on miss.
     pub fn get(&self, key: &str) -> Option<Vec<u8>> {
-        if !Self::validate_key(key) {
-            return None;
-        }
-        let path = self.cache_dir.join(key);
+        let path = self.resolve(key)?;
         match fs::read(&path) {
             Ok(data) => {
                 debug!(key, "image cache hit");
@@ -41,14 +46,10 @@ impl ImageCache {
 
     /// Store an optimized image in the cache.
     pub fn put(&self, key: &str, data: &[u8]) -> std::io::Result<()> {
-        if !Self::validate_key(key) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "invalid cache key",
-            ));
-        }
+        let path = self.resolve(key).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid cache key")
+        })?;
         fs::create_dir_all(&self.cache_dir)?;
-        let path = self.cache_dir.join(key);
         fs::write(&path, data)?;
         debug!(key, bytes = data.len(), "image cached");
         Ok(())
@@ -94,5 +95,20 @@ mod tests {
         let k3 = ImageCache::cache_key("/images/hero.jpg", 320, 75, "webp");
         assert_eq!(k1, k2);
         assert_ne!(k1, k3);
+    }
+
+    #[test]
+    fn resolve_rejects_path_traversal() {
+        let cache = ImageCache::new(PathBuf::from("/tmp/test-cache"));
+        assert!(cache.resolve("../etc/passwd").is_none());
+        assert!(cache.resolve("foo/bar").is_none());
+        assert!(cache.resolve("").is_none());
+    }
+
+    #[test]
+    fn resolve_accepts_hex() {
+        let cache = ImageCache::new(PathBuf::from("/tmp/test-cache"));
+        let key = ImageCache::cache_key("/test.jpg", 64, 75, "jpeg");
+        assert!(cache.resolve(&key).is_some());
     }
 }
