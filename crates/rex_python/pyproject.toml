@@ -1,0 +1,23 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "rex-py"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Framework :: FastAPI",
+    "Framework :: Django",
+    "Framework :: Flask",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Software Development :: Code Generators",
+]
+dynamic = ["version"]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
