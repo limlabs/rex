@@ -544,9 +544,8 @@ pub async fn handle_image(state: &Arc<AppState>, req: &RexRequest) -> RexRespons
         }
     });
 
-    let cache_key = rex_image::ImageCache::cache_key(&url, w, q, format.extension());
-
-    if let Some(data) = state.image_cache.get(&cache_key) {
+    let fmt_ext = format.extension();
+    if let Some(data) = state.image_cache.get(&url, w, q, fmt_ext) {
         return RexResponse {
             status: 200,
             headers: vec![
@@ -600,7 +599,7 @@ pub async fn handle_image(state: &Arc<AppState>, req: &RexRequest) -> RexRespons
 
     match rex_image::optimize(&src_bytes, &params) {
         Ok(optimized) => {
-            if let Err(e) = state.image_cache.put(&cache_key, &optimized) {
+            if let Err(e) = state.image_cache.put(&url, w, q, fmt_ext, &optimized) {
                 debug!("image cache write failed: {e}");
             }
             RexResponse {

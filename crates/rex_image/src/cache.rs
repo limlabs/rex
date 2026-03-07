@@ -12,32 +12,21 @@ impl ImageCache {
         Self { cache_dir }
     }
 
-    /// Build a deterministic cache key from request parameters.
-    /// Returns a hex-encoded SHA256 hash safe for use as a filename.
-    pub fn cache_key(url: &str, width: u32, quality: u8, format: &str) -> String {
+    /// Build a deterministic cache path from request parameters.
+    /// The filename is a hex-encoded SHA256 hash — no user input reaches the path.
+    fn cache_path(&self, url: &str, width: u32, quality: u8, format: &str) -> PathBuf {
         let mut hasher = Sha256::new();
         hasher.update(format!("{url}:{width}:{quality}:{format}").as_bytes());
-        hex::encode(hasher.finalize())
-    }
-
-    /// Resolve cache key to a path within the cache directory.
-    /// The key must be a hex-encoded hash (output of `cache_key`).
-    fn resolve(&self, key: &str) -> Option<PathBuf> {
-        // Only allow hex characters — prevents any path injection
-        if key.is_empty() || key.len() > 128 || !key.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return None;
-        }
-        // Construct a fresh owned String from validated chars to break taint tracking
-        let safe: String = key.chars().collect();
-        Some(self.cache_dir.join(safe))
+        let hex_hash = hex::encode(hasher.finalize());
+        self.cache_dir.join(hex_hash)
     }
 
     /// Try to read a cached image. Returns None on miss.
-    pub fn get(&self, key: &str) -> Option<Vec<u8>> {
-        let path = self.resolve(key)?;
+    pub fn get(&self, url: &str, width: u32, quality: u8, format: &str) -> Option<Vec<u8>> {
+        let path = self.cache_path(url, width, quality, format);
         match fs::read(&path) {
             Ok(data) => {
-                debug!(key, "image cache hit");
+                debug!(%url, width, quality, format, "image cache hit");
                 Some(data)
             }
             Err(_) => None,
@@ -45,13 +34,18 @@ impl ImageCache {
     }
 
     /// Store an optimized image in the cache.
-    pub fn put(&self, key: &str, data: &[u8]) -> std::io::Result<()> {
-        let path = self.resolve(key).ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid cache key")
-        })?;
+    pub fn put(
+        &self,
+        url: &str,
+        width: u32,
+        quality: u8,
+        format: &str,
+        data: &[u8],
+    ) -> std::io::Result<()> {
+        let path = self.cache_path(url, width, quality, format);
         fs::create_dir_all(&self.cache_dir)?;
         fs::write(&path, data)?;
-        debug!(key, bytes = data.len(), "image cached");
+        debug!(%url, width, quality, format, bytes = data.len(), "image cached");
         Ok(())
     }
 
@@ -65,6 +59,7 @@ impl ImageCache {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
@@ -73,11 +68,14 @@ mod tests {
     fn cache_roundtrip() {
         let dir = TempDir::new().expect("tempdir");
         let cache = ImageCache::new(dir.path().to_path_buf());
-        let key = ImageCache::cache_key("/images/hero.jpg", 640, 75, "webp");
         let data = b"fake image data";
 
-        cache.put(&key, data).expect("put");
-        let got = cache.get(&key).expect("cache hit");
+        cache
+            .put("/images/hero.jpg", 640, 75, "webp", data)
+            .expect("put");
+        let got = cache
+            .get("/images/hero.jpg", 640, 75, "webp")
+            .expect("cache hit");
         assert_eq!(got, data);
     }
 
@@ -85,30 +83,26 @@ mod tests {
     fn cache_miss() {
         let dir = TempDir::new().expect("tempdir");
         let cache = ImageCache::new(dir.path().to_path_buf());
-        assert!(cache.get("nonexistent").is_none());
+        assert!(cache.get("/nonexistent.jpg", 64, 75, "jpeg").is_none());
     }
 
     #[test]
     fn cache_key_determinism() {
-        let k1 = ImageCache::cache_key("/images/hero.jpg", 640, 75, "webp");
-        let k2 = ImageCache::cache_key("/images/hero.jpg", 640, 75, "webp");
-        let k3 = ImageCache::cache_key("/images/hero.jpg", 320, 75, "webp");
-        assert_eq!(k1, k2);
-        assert_ne!(k1, k3);
+        let cache = ImageCache::new(PathBuf::from("/tmp/test-cache"));
+        let p1 = cache.cache_path("/images/hero.jpg", 640, 75, "webp");
+        let p2 = cache.cache_path("/images/hero.jpg", 640, 75, "webp");
+        let p3 = cache.cache_path("/images/hero.jpg", 320, 75, "webp");
+        assert_eq!(p1, p2);
+        assert_ne!(p1, p3);
     }
 
     #[test]
-    fn resolve_rejects_path_traversal() {
+    fn cache_path_is_hex_only() {
         let cache = ImageCache::new(PathBuf::from("/tmp/test-cache"));
-        assert!(cache.resolve("../etc/passwd").is_none());
-        assert!(cache.resolve("foo/bar").is_none());
-        assert!(cache.resolve("").is_none());
-    }
-
-    #[test]
-    fn resolve_accepts_hex() {
-        let cache = ImageCache::new(PathBuf::from("/tmp/test-cache"));
-        let key = ImageCache::cache_key("/test.jpg", 64, 75, "jpeg");
-        assert!(cache.resolve(&key).is_some());
+        let path = cache.cache_path("/../../../etc/passwd", 64, 75, "jpeg");
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        // SHA256 hex output: only hex chars, no path separators
+        assert!(filename.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert_eq!(filename.len(), 64); // SHA256 = 32 bytes = 64 hex chars
     }
 }

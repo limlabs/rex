@@ -57,10 +57,8 @@ pub async fn image_handler(
     });
 
     // Check cache
-    let cache_key =
-        rex_image::ImageCache::cache_key(&query.url, query.w, query.q, format.extension());
-
-    if let Some(data) = state.image_cache.get(&cache_key) {
+    let fmt_ext = format.extension();
+    if let Some(data) = state.image_cache.get(&query.url, query.w, query.q, fmt_ext) {
         return Response::builder()
             .header("Content-Type", format.content_type())
             .header("Cache-Control", "public, max-age=31536000, immutable")
@@ -107,7 +105,10 @@ pub async fn image_handler(
     match rex_image::optimize(&src_bytes, &params) {
         Ok(optimized) => {
             // Cache the result (ignore cache write errors)
-            if let Err(e) = state.image_cache.put(&cache_key, &optimized) {
+            if let Err(e) = state
+                .image_cache
+                .put(&query.url, query.w, query.q, fmt_ext, &optimized)
+            {
                 debug!("image cache write failed: {e}");
             }
 
