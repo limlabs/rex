@@ -10,7 +10,9 @@ use tracing::debug;
 /// V8 polyfills for bare V8 environment (React 19 needs these).
 /// Injected as a rolldown banner so they run before any bundled code.
 /// Compiled from TypeScript at build time by build.rs.
-pub(crate) const V8_POLYFILLS: &str = include_str!(concat!(env!("OUT_DIR"), "/v8-polyfills.js"));
+/// Compiled V8 polyfills JS, concatenated from `runtime/server/polyfills/*.ts`.
+/// Public so `rex_v8` tests can use the real polyfills instead of duplicating them.
+pub const V8_POLYFILLS: &str = include_str!(concat!(env!("OUT_DIR"), "/v8-polyfills.js"));
 
 /// SSR runtime functions appended to the virtual entry.
 /// These are bundled into the IIFE by rolldown alongside React and page code.
@@ -291,6 +293,19 @@ pub(crate) async fn build_server_bundle(
                 runtime_dir.join("buffer.ts").to_string_lossy().to_string(),
             )],
         ),
+        // Node.js crypto module polyfill (re-exports globalThis.crypto from banner)
+        (
+            "crypto".to_string(),
+            vec![Some(
+                runtime_dir.join("crypto.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "node:crypto".to_string(),
+            vec![Some(
+                runtime_dir.join("crypto.ts").to_string_lossy().to_string(),
+            )],
+        ),
     ];
     // Append user-defined aliases from rex.config build.alias
     aliases.extend(project_config.build.resolved_aliases(&config.project_root));
@@ -317,7 +332,7 @@ pub(crate) async fn build_server_bundle(
         // server-safe stubs with the client-only package source, causing
         // "window is not defined" at SSR time.
         tsconfig: Some(rolldown_common::TsConfig::Auto(false)),
-        treeshake: crate::rsc_bundler::react_treeshake_options(),
+        treeshake: crate::rsc_build_config::react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(aliases),
             extensions: Some(vec![

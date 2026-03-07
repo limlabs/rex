@@ -29,15 +29,58 @@ pub(crate) fn detect_data_strategy(source_path: &Path) -> Result<DataStrategy> {
 }
 
 /// Detect data strategy from source content (no filesystem access).
+///
+/// Uses the OXC parser to find exported `getServerSideProps` / `getStaticProps`
+/// via proper AST analysis instead of line-by-line string matching.
 pub(crate) fn detect_data_strategy_from_source(source: &str) -> Result<DataStrategy> {
-    let has_gssp = source.lines().any(|l| {
-        let t = l.trim();
-        t.contains("getServerSideProps") && (t.starts_with("export ") || t.starts_with("export{"))
-    });
-    let has_gsp = source.lines().any(|l| {
-        let t = l.trim();
-        t.contains("getStaticProps") && (t.starts_with("export ") || t.starts_with("export{"))
-    });
+    use oxc_ast::ast::{ExportDefaultDeclarationKind, Statement};
+
+    let allocator = oxc_allocator::Allocator::default();
+    let source_type = oxc_span::SourceType::tsx();
+    let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
+
+    if !parsed.errors.is_empty() {
+        return Ok(DataStrategy::None);
+    }
+
+    let mut has_gssp = false;
+    let mut has_gsp = false;
+
+    for stmt in &parsed.program.body {
+        match stmt {
+            Statement::ExportNamedDeclaration(export) => {
+                // Re-exports: export { getServerSideProps } from '...'
+                for spec in &export.specifiers {
+                    match spec.exported.name().as_ref() {
+                        "getServerSideProps" => has_gssp = true,
+                        "getStaticProps" => has_gsp = true,
+                        _ => {}
+                    }
+                }
+                // Inline declarations: export function/const getServerSideProps ...
+                if let Some(decl) = &export.declaration {
+                    for name in exported_decl_names(decl) {
+                        match name {
+                            "getServerSideProps" => has_gssp = true,
+                            "getStaticProps" => has_gsp = true,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Statement::ExportDefaultDeclaration(export) => {
+                if let ExportDefaultDeclarationKind::Identifier(id) = &export.declaration {
+                    match id.name.as_str() {
+                        "getServerSideProps" => has_gssp = true,
+                        "getStaticProps" => has_gsp = true,
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     if has_gssp && has_gsp {
         anyhow::bail!("Page exports both getStaticProps and getServerSideProps");
     }
@@ -48,6 +91,32 @@ pub(crate) fn detect_data_strategy_from_source(source: &str) -> Result<DataStrat
         return Ok(DataStrategy::GetServerSideProps);
     }
     Ok(DataStrategy::None)
+}
+
+/// Extract binding names from an export declaration.
+fn exported_decl_names<'a>(decl: &'a oxc_ast::ast::Declaration<'a>) -> Vec<&'a str> {
+    use oxc_ast::ast::Declaration;
+    match decl {
+        Declaration::FunctionDeclaration(f) => {
+            f.id.as_ref()
+                .map(|id| vec![id.name.as_str()])
+                .unwrap_or_default()
+        }
+        Declaration::VariableDeclaration(v) => v
+            .declarations
+            .iter()
+            .filter_map(|d| match &d.id {
+                oxc_ast::ast::BindingPattern::BindingIdentifier(id) => Some(id.name.as_str()),
+                _ => None,
+            })
+            .collect(),
+        Declaration::ClassDeclaration(c) => {
+            c.id.as_ref()
+                .map(|id| vec![id.name.as_str()])
+                .unwrap_or_default()
+        }
+        _ => vec![],
+    }
 }
 
 /// Extract middleware matcher patterns from middleware source code.
@@ -314,6 +383,126 @@ export const config = {
             detect_data_strategy(&none_page).unwrap(),
             DataStrategy::None
         );
+    }
+
+    #[test]
+    fn test_detect_strategy_gssp() {
+        let source = r#"
+            import React from 'react';
+            export default function Page() { return <div/>; }
+            export function getServerSideProps(ctx) { return { props: {} }; }
+        "#;
+        assert_eq!(
+            detect_data_strategy_from_source(source).unwrap(),
+            DataStrategy::GetServerSideProps,
+        );
+    }
+
+    #[test]
+    fn test_detect_strategy_gssp_async() {
+        let source = r#"
+            export default function Page() { return <div/>; }
+            export async function getServerSideProps(ctx) { return { props: {} }; }
+        "#;
+        assert_eq!(
+            detect_data_strategy_from_source(source).unwrap(),
+            DataStrategy::GetServerSideProps,
+        );
+    }
+
+    #[test]
+    fn test_detect_strategy_gsp() {
+        let source = r#"
+            export default function Page() { return <div/>; }
+            export function getStaticProps() { return { props: {} }; }
+        "#;
+        assert_eq!(
+            detect_data_strategy_from_source(source).unwrap(),
+            DataStrategy::GetStaticProps,
+        );
+    }
+
+    #[test]
+    fn test_detect_strategy_none() {
+        let source = r#"
+            import React from 'react';
+            export default function Page() { return <div>Static</div>; }
+        "#;
+        assert_eq!(
+            detect_data_strategy_from_source(source).unwrap(),
+            DataStrategy::None,
+        );
+    }
+
+    #[test]
+    fn test_detect_strategy_both_errors() {
+        let source = r#"
+            export default function Page() { return <div/>; }
+            export function getServerSideProps() { return { props: {} }; }
+            export function getStaticProps() { return { props: {} }; }
+        "#;
+        let err = detect_data_strategy_from_source(source).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("both getStaticProps and getServerSideProps"),
+            "expected dual-export error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_detect_strategy_reexport_syntax() {
+        let source = r#"
+            export default function Page() { return <div/>; }
+            export{ getServerSideProps } from './data';
+        "#;
+        assert_eq!(
+            detect_data_strategy_from_source(source).unwrap(),
+            DataStrategy::GetServerSideProps,
+        );
+    }
+
+    #[test]
+    fn test_extract_middleware_matchers_array() {
+        let source = r#"
+export function middleware(request) {}
+
+export const config = {
+    matcher: ['/dashboard/:path*', '/api/admin/:path*']
+}
+"#;
+        let matchers = extract_middleware_matchers(source);
+        assert_eq!(matchers, vec!["/dashboard/:path*", "/api/admin/:path*"]);
+    }
+
+    #[test]
+    fn test_extract_middleware_matchers_single_line() {
+        let source = r#"
+export function middleware(req) { return NextResponse.next(); }
+export const config = { matcher: ['/protected'] }
+"#;
+        let matchers = extract_middleware_matchers(source);
+        assert_eq!(matchers, vec!["/protected"]);
+    }
+
+    #[test]
+    fn test_extract_middleware_matchers_no_config() {
+        let source = r#"
+export function middleware(request) {
+    return NextResponse.next();
+}
+"#;
+        let matchers = extract_middleware_matchers(source);
+        assert!(matchers.is_empty());
+    }
+
+    #[test]
+    fn test_extract_middleware_matchers_no_matcher() {
+        let source = r#"
+export function middleware(request) {}
+export const config = { runtime: 'edge' }
+"#;
+        let matchers = extract_middleware_matchers(source);
+        assert!(matchers.is_empty());
     }
 
     #[test]

@@ -81,7 +81,7 @@ pub fn process_tailwind_css(
         let bin = tw_bin.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
                 "CSS file {} uses Tailwind directives but tailwindcss is not installed.\n\
-                 Install it: npm install tailwindcss",
+                 Install it: npm install @tailwindcss/cli",
                 css_path.display()
             )
         })?;
@@ -289,6 +289,86 @@ mod tests {
     }
 
     #[test]
+    fn test_needs_tailwind_v4() {
+        assert!(needs_tailwind("@import \"tailwindcss\";\n"));
+        assert!(needs_tailwind("  @import \"tailwindcss\";\n"));
+        assert!(needs_tailwind("@import 'tailwindcss';\n"));
+    }
+
+    #[test]
+    fn test_needs_tailwind_v3() {
+        assert!(needs_tailwind(
+            "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n"
+        ));
+        assert!(needs_tailwind("  @tailwind utilities;\n"));
+    }
+
+    #[test]
+    fn test_needs_tailwind_negative() {
+        assert!(!needs_tailwind("body { margin: 0; }\n"));
+        assert!(!needs_tailwind(".container { max-width: 1200px; }\n"));
+        assert!(!needs_tailwind("/* @import \"tailwindcss\" */\nbody {}\n"));
+        assert!(!needs_tailwind(""));
+    }
+
+    #[test]
+    #[ignore] // Requires tailwindcss CLI installed
+    fn test_tailwind_processing() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        // Create styles dir
+        let styles_dir = root.join("styles");
+        fs::create_dir_all(&styles_dir).unwrap();
+
+        // Write a Tailwind CSS file
+        fs::write(styles_dir.join("globals.css"), "@import \"tailwindcss\";\n").unwrap();
+
+        // Create pages with CSS import
+        let pages_dir = root.join("pages");
+        fs::create_dir_all(&pages_dir).unwrap();
+        fs::write(
+            pages_dir.join("_app.tsx"),
+            "import '../styles/globals.css';\nexport default function App({ Component, pageProps }) { return <Component {...pageProps} />; }\n",
+        )
+        .unwrap();
+        fs::write(
+            pages_dir.join("index.tsx"),
+            "export default function Home() { return <div className=\"p-4\">Hello</div>; }\n",
+        )
+        .unwrap();
+
+        // Must have tailwindcss installed
+        let bin = find_tailwind_bin(&root);
+        if bin.is_none() {
+            eprintln!("tailwindcss not found, skipping integration test");
+            return;
+        }
+
+        let config = rex_core::RexConfig::new(root).with_dev(false);
+        let scan = rex_router::scan_pages(&config.pages_dir).unwrap();
+        let output_dir = tmp.path().join("output");
+        fs::create_dir_all(&output_dir).unwrap();
+
+        let mappings = process_tailwind_css(&config, &scan, &output_dir).unwrap();
+        assert!(
+            !mappings.is_empty(),
+            "should have processed at least one Tailwind file"
+        );
+
+        // The output file should exist and contain actual CSS (not just the directive)
+        for output in mappings.values() {
+            assert!(output.exists(), "Tailwind output file should exist");
+            let content = fs::read_to_string(output).unwrap();
+            assert!(
+                !content.contains("@import \"tailwindcss\""),
+                "should be compiled"
+            );
+            assert!(!content.is_empty(), "compiled CSS should not be empty");
+        }
+    }
+
+    #[test]
     fn test_process_tailwind_css_no_bin_errors() {
         let tmp = TempDir::new().unwrap();
         let pages_dir = tmp.path().join("pages");
@@ -345,7 +425,7 @@ mod tests {
         );
         let err = result.unwrap_err().to_string();
         assert!(
-            err.contains("tailwindcss is not installed"),
+            err.contains("tailwindcss is not installed") || err.contains("@tailwindcss/cli"),
             "error should mention missing binary"
         );
     }

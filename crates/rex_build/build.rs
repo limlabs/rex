@@ -12,11 +12,21 @@ const PACKAGES: &[(&str, &str)] = &[
 ];
 
 /// Server runtime TypeScript files to compile to JavaScript at build time.
-const SERVER_RUNTIME_TS: &[&str] = &[
-    "v8-polyfills",
-    "ssr-runtime",
-    "mcp-runtime",
-    "middleware-runtime",
+const SERVER_RUNTIME_TS: &[&str] = &["ssr-runtime", "mcp-runtime", "middleware-runtime"];
+
+/// Individual polyfill modules, concatenated in order to produce v8-polyfills.js.
+/// Order matters: text-encoding before buffer, buffer before crypto.
+const V8_POLYFILL_MODULES: &[&str] = &[
+    "process",
+    "timers",
+    "message-channel",
+    "text-encoding",
+    "performance",
+    "url",
+    "streams",
+    "abort",
+    "buffer",
+    "crypto",
 ];
 
 fn strip_typescript(source: &str) -> String {
@@ -49,6 +59,21 @@ fn compile_server_runtime(manifest_dir: &Path, out_dir: &Path) {
 
         println!("cargo:rerun-if-changed=../../runtime/server/{name}.ts");
     }
+
+    // Concatenate polyfill modules into v8-polyfills.js
+    let polyfills_dir = runtime_dir.join("polyfills");
+    let mut combined = String::new();
+    for name in V8_POLYFILL_MODULES {
+        let ts_path = polyfills_dir.join(format!("{name}.ts"));
+        let ts_source = fs::read_to_string(&ts_path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", ts_path.display()));
+        let js = strip_typescript(&ts_source);
+        combined.push_str(&js);
+        combined.push('\n');
+        println!("cargo:rerun-if-changed=../../runtime/server/polyfills/{name}.ts");
+    }
+    fs::write(out_dir.join("v8-polyfills.js"), combined)
+        .unwrap_or_else(|e| panic!("failed to write v8-polyfills.js: {e}"));
 }
 
 fn main() {

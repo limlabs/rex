@@ -39,6 +39,10 @@ When using `gh` CLI (PRs, issues), pass `GH_TOKEN`:
 GH_TOKEN="$GH_TOKEN" gh pr create ...
 ```
 
+## GitHub Operations
+
+**Prefer MCP tools (`mcp__github__*`) over `gh` CLI** for PRs, issues, and reviews. Use `gh` CLI only for operations not covered by MCP (e.g., pushing code, release creation).
+
 ## Conventional Commits
 
 All commits must use [Conventional Commits](https://www.conventionalcommits.org/) — enforced by a `commit-msg` hook and required by release-please for changelog/version bumps:
@@ -46,6 +50,19 @@ All commits must use [Conventional Commits](https://www.conventionalcommits.org/
 - `fix(router): handle trailing slashes` — bug fix (patch bump)
 - `feat!: redesign config format` — breaking change (major bump)
 - Types: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`
+
+## Test Organization
+
+Follow the standard Rust convention for test placement:
+
+- **Integration tests** go in `crates/<crate>/tests/*.rs` — these test the crate's public API from the outside. Files under `tests/` are automatically excluded from code coverage reports via `--ignore-filename-regex`.
+- **Unit tests** use `#[cfg(test)] mod tests` inline in the source file — only for testing private internals that aren't reachable through the public API.
+
+Prefer integration tests in `tests/` over inline `#[cfg(test)]` modules. This keeps production source files focused, improves coverage accuracy, and follows Rust idioms.
+
+## 700-Line Rule
+
+Source files must not exceed **700 lines**. This is enforced by CI. When a file crosses this threshold, it needs to be broken down into smaller, focused modules for better maintainability and testability.
 
 ## Quick Reference
 
