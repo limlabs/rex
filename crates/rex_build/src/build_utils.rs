@@ -29,15 +29,58 @@ pub(crate) fn detect_data_strategy(source_path: &Path) -> Result<DataStrategy> {
 }
 
 /// Detect data strategy from source content (no filesystem access).
+///
+/// Uses the OXC parser to find exported `getServerSideProps` / `getStaticProps`
+/// via proper AST analysis instead of line-by-line string matching.
 pub(crate) fn detect_data_strategy_from_source(source: &str) -> Result<DataStrategy> {
-    let has_gssp = source.lines().any(|l| {
-        let t = l.trim();
-        t.contains("getServerSideProps") && (t.starts_with("export ") || t.starts_with("export{"))
-    });
-    let has_gsp = source.lines().any(|l| {
-        let t = l.trim();
-        t.contains("getStaticProps") && (t.starts_with("export ") || t.starts_with("export{"))
-    });
+    use oxc_ast::ast::{ExportDefaultDeclarationKind, Statement};
+
+    let allocator = oxc_allocator::Allocator::default();
+    let source_type = oxc_span::SourceType::tsx();
+    let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
+
+    if !parsed.errors.is_empty() {
+        return Ok(DataStrategy::None);
+    }
+
+    let mut has_gssp = false;
+    let mut has_gsp = false;
+
+    for stmt in &parsed.program.body {
+        match stmt {
+            Statement::ExportNamedDeclaration(export) => {
+                // Re-exports: export { getServerSideProps } from '...'
+                for spec in &export.specifiers {
+                    match spec.exported.name().as_ref() {
+                        "getServerSideProps" => has_gssp = true,
+                        "getStaticProps" => has_gsp = true,
+                        _ => {}
+                    }
+                }
+                // Inline declarations: export function/const getServerSideProps ...
+                if let Some(decl) = &export.declaration {
+                    for name in exported_decl_names(decl) {
+                        match name {
+                            "getServerSideProps" => has_gssp = true,
+                            "getStaticProps" => has_gsp = true,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Statement::ExportDefaultDeclaration(export) => {
+                if let ExportDefaultDeclarationKind::Identifier(id) = &export.declaration {
+                    match id.name.as_str() {
+                        "getServerSideProps" => has_gssp = true,
+                        "getStaticProps" => has_gsp = true,
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     if has_gssp && has_gsp {
         anyhow::bail!("Page exports both getStaticProps and getServerSideProps");
     }
@@ -48,6 +91,32 @@ pub(crate) fn detect_data_strategy_from_source(source: &str) -> Result<DataStrat
         return Ok(DataStrategy::GetServerSideProps);
     }
     Ok(DataStrategy::None)
+}
+
+/// Extract binding names from an export declaration.
+fn exported_decl_names<'a>(decl: &'a oxc_ast::ast::Declaration<'a>) -> Vec<&'a str> {
+    use oxc_ast::ast::Declaration;
+    match decl {
+        Declaration::FunctionDeclaration(f) => {
+            f.id.as_ref()
+                .map(|id| vec![id.name.as_str()])
+                .unwrap_or_default()
+        }
+        Declaration::VariableDeclaration(v) => v
+            .declarations
+            .iter()
+            .filter_map(|d| match &d.id {
+                oxc_ast::ast::BindingPattern::BindingIdentifier(id) => Some(id.name.as_str()),
+                _ => None,
+            })
+            .collect(),
+        Declaration::ClassDeclaration(c) => {
+            c.id.as_ref()
+                .map(|id| vec![id.name.as_str()])
+                .unwrap_or_default()
+        }
+        _ => vec![],
+    }
 }
 
 /// Extract middleware matcher patterns from middleware source code.
