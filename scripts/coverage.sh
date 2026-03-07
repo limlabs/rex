@@ -14,4 +14,4 @@ if ! command -v cargo-llvm-cov &>/dev/null; then
 fi
 
 echo "Running tests with coverage..."
-cargo llvm-cov --workspace --fail-under-lines "$THRESHOLD" "$@"
+cargo llvm-cov --workspace --ignore-filename-regex 'tests/' --fail-under-lines "$THRESHOLD" "$@"
