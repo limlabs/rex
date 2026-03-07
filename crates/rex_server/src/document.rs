@@ -312,7 +312,10 @@ pub struct RscDocumentParams<'a> {
 /// Delegates to the streaming functions for consistency.
 pub fn assemble_rsc_document(params: &RscDocumentParams<'_>) -> String {
     let mut html = String::new();
-    html.push_str("<!DOCTYPE html>\n");
+    html.push_str(&assemble_rsc_head_shell(
+        params.client_chunks,
+        params.client_manifest_json,
+    ));
     html.push_str(&assemble_rsc_body_tail(
         params.ssr_html,
         params.head_html,
@@ -327,55 +330,31 @@ pub fn assemble_rsc_document(params: &RscDocumentParams<'_>) -> String {
 
 /// Assemble the RSC head shell — flushed to the browser immediately while V8 renders.
 ///
-/// For RSC routes, the root layout renders `<html>` and `<body>`, so the SSR
-/// output IS the document. We just emit the doctype here; the body tail injects
-/// scripts/meta into the SSR HTML's `</head>` and `</body>`.
-pub fn assemble_rsc_head_shell(_client_chunks: &[String], _client_manifest_json: &str) -> String {
-    "<!DOCTYPE html>\n".to_string()
-}
+/// Emits the full `<head>` (meta, modulepreloads) and opens `<body>` with the
+/// module map and webpack shims. This lets the browser start fetching client
+/// chunks while V8 is still rendering the body HTML.
+pub fn assemble_rsc_head_shell(client_chunks: &[String], client_manifest_json: &str) -> String {
+    let mut html = String::with_capacity(2048);
+    html.push_str("<!DOCTYPE html>\n<html><head>");
+    html.push_str("<meta charset=\"utf-8\" />");
+    html.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />");
 
-/// Assemble the RSC body tail — sent after V8 render completes.
-///
-/// For RSC routes, the SSR HTML from `renderToString` already contains
-/// `<html><head></head><body>...</body></html>` from the root layout.
-/// We inject Rex's meta/preloads into `</head>` and scripts into `</body>`
-/// rather than wrapping the HTML in another shell (which would create
-/// invalid nested `<html>` elements and break hydration).
-pub fn assemble_rsc_body_tail(
-    ssr_html: &str,
-    head_html: &str,
-    flight_data: &str,
-    client_chunks: &[String],
-    client_manifest_json: &str,
-    is_dev: bool,
-    manifest_json: Option<&str>,
-) -> String {
-    // Build head injections (meta, preloads, dynamic head elements)
-    let mut head_inject = String::new();
-    head_inject.push_str("<meta charset=\"utf-8\" />");
-    head_inject
-        .push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />");
-    if !head_html.is_empty() {
-        head_inject.push_str(head_html);
-    }
     for chunk in client_chunks {
-        head_inject.push_str(&format!(
+        html.push_str(&format!(
             "<link rel=\"modulepreload\" href=\"/_rex/static/{chunk}\" />"
         ));
     }
 
-    // Build body injections (scripts)
-    let mut body_inject = String::new();
+    html.push_str("</head><body>");
 
-    // Client reference manifest
+    // Module map — must be available before client chunks load
     let escaped_manifest = escape_script_content(client_manifest_json);
-    body_inject.push_str(&format!(
+    html.push_str(&format!(
         "<script>window.__REX_RSC_MODULE_MAP__={escaped_manifest}</script>"
     ));
 
-    // Webpack shims — must be set before <script type="module"> loads because
-    // react-server-dom-webpack/client accesses __webpack_require__ during init
-    body_inject.push_str(
+    // Webpack shims — react-server-dom-webpack/client accesses __webpack_require__ during init
+    html.push_str(
         "<script>\
          var __rexModuleCache={};\
          globalThis.__webpack_require__=function(id){return __rexModuleCache[id]||{}};\
@@ -388,53 +367,85 @@ pub fn assemble_rsc_body_tail(
          </script>",
     );
 
+    html
+}
+
+/// Assemble the RSC body tail — sent after V8 render completes.
+///
+/// The head shell (from `assemble_rsc_head_shell`) already emitted
+/// `<!DOCTYPE html><html><head>...</head><body>` plus the module map and
+/// webpack shims. This function outputs:
+///   `<div id="__rex">` + SSR body content + `</div>` + scripts + `</body></html>`
+///
+/// The SSR HTML from V8 may contain `<html>...<body>...</body></html>` from
+/// the root layout; we strip those outer tags and extract only the body content.
+pub fn assemble_rsc_body_tail(
+    ssr_html: &str,
+    _head_html: &str,
+    flight_data: &str,
+    client_chunks: &[String],
+    _client_manifest_json: &str,
+    is_dev: bool,
+    manifest_json: Option<&str>,
+) -> String {
+    // Extract the inner body content from the SSR HTML.
+    // The root layout typically renders <html><head></head><body>...</body></html>.
+    let body_content = extract_body_content(ssr_html);
+
+    let mut html = String::with_capacity(body_content.len() + 2048);
+
+    // Wrap SSR content in __rex root div for hydration
+    html.push_str("<div id=\"__rex\">");
+    html.push_str(body_content);
+    html.push_str("</div>");
+
     // Inline flight data for hydration
     let escaped_flight = escape_script_content(flight_data);
-    body_inject.push_str(&format!(
+    html.push_str(&format!(
         "<script id=\"__REX_RSC_DATA__\" type=\"text/rsc\">{escaped_flight}</script>"
     ));
 
     // Route manifest
     if let Some(manifest) = manifest_json {
         let escaped = escape_script_content(manifest);
-        body_inject.push_str(&format!(
+        html.push_str(&format!(
             "<script>window.__REX_MANIFEST__={escaped}</script>"
         ));
     }
 
     // Client component chunks (includes the RSC hydration entry)
     for chunk in client_chunks {
-        body_inject.push_str(&format!(
+        html.push_str(&format!(
             "<script type=\"module\" src=\"/_rex/static/{chunk}\"></script>"
         ));
     }
 
     // Client-side router
     if manifest_json.is_some() {
-        body_inject.push_str("<script defer src=\"/_rex/router.js\"></script>");
+        html.push_str("<script defer src=\"/_rex/router.js\"></script>");
     }
 
     // HMR in dev
     if is_dev {
-        body_inject.push_str("<script defer src=\"/_rex/hmr-client.js\"></script>");
+        html.push_str("<script defer src=\"/_rex/hmr-client.js\"></script>");
     }
 
-    // Inject into SSR HTML if it contains <html> (RSC root layout convention)
-    if ssr_html.contains("</head>") && ssr_html.contains("</body>") {
-        ssr_html
-            .replacen("</head>", &format!("{head_inject}</head>"), 1)
-            .replacen("</body>", &format!("{body_inject}</body>"), 1)
-    } else {
-        // Fallback for layouts without <html>/<body>: wrap in a shell
-        let mut html = String::with_capacity(ssr_html.len() + 2048);
-        html.push_str("<html><head>");
-        html.push_str(&head_inject);
-        html.push_str("</head><body>");
-        html.push_str(ssr_html);
-        html.push_str(&body_inject);
-        html.push_str("</body></html>");
-        html
+    html.push_str("</body></html>");
+    html
+}
+
+/// Extract the content between `<body>` and `</body>` from SSR HTML.
+/// Falls back to the entire string if no body tags are found.
+fn extract_body_content(ssr_html: &str) -> &str {
+    if let Some(body_start) = ssr_html.find("<body") {
+        if let Some(tag_end) = ssr_html[body_start..].find('>') {
+            let content_start = body_start + tag_end + 1;
+            if let Some(body_end) = ssr_html.rfind("</body>") {
+                return &ssr_html[content_start..body_end];
+            }
+        }
     }
+    ssr_html
 }
 
 #[cfg(test)]
@@ -476,18 +487,26 @@ mod tests {
     }
 
     #[test]
-    fn rsc_head_shell_emits_doctype() {
+    fn rsc_head_shell_emits_doctype_and_head() {
         let chunks = vec!["rsc/chunk-react-abc123.js".to_string()];
         let manifest = r#"{"refs":{}}"#;
         let html = assemble_rsc_head_shell(&chunks, manifest);
 
         assert!(html.contains("<!DOCTYPE html>"));
-        // Head shell is minimal — preloads are injected into SSR HTML by body tail
-        assert!(!html.contains("<head>"));
+        assert!(html.contains("<html><head>"));
+        assert!(html.contains("<meta charset=\"utf-8\" />"));
+        assert!(html.contains("</head><body>"));
+        // Module map and webpack shims in the head shell
+        assert!(html.contains("__REX_RSC_MODULE_MAP__"));
+        assert!(html.contains("__rexModuleCache"));
+        // Modulepreload links in the head
+        assert!(html.contains(
+            r#"<link rel="modulepreload" href="/_rex/static/rsc/chunk-react-abc123.js" />"#
+        ));
     }
 
     #[test]
-    fn rsc_body_tail_injects_into_ssr_html() {
+    fn rsc_body_tail_extracts_body_content() {
         let ssr = "<html><head></head><body><div>Hello</div></body></html>";
         let html = assemble_rsc_body_tail(
             ssr,
@@ -499,18 +518,12 @@ mod tests {
             None,
         );
 
-        // SSR HTML structure preserved (no nested <html>, no wrapper div)
-        assert!(!html.contains("<div id=\"__rex\">"));
-        // Meta tags injected into <head>
-        assert!(html.contains("<meta charset=\"utf-8\" />"));
-        // Head injection goes before </head>
-        let meta_pos = html.find("<meta charset").unwrap();
-        let head_close_pos = html.find("</head>").unwrap();
-        assert!(meta_pos < head_close_pos);
-        // Flight data injected before </body>
+        // Body content extracted and wrapped in __rex div
+        assert!(html.contains("<div id=\"__rex\"><div>Hello</div></div>"));
+        // Flight data present
         assert!(html.contains("__REX_RSC_DATA__"));
         assert!(html.contains("0:\"hello\""));
-        // Script tags injected before </body>
+        // Script tags present
         assert!(html.contains(
             r#"<script type="module" src="/_rex/static/rsc/component-abc.js"></script>"#
         ));
@@ -519,13 +532,12 @@ mod tests {
 
     #[test]
     fn rsc_body_tail_fallback_without_html_wrapper() {
-        // SSR HTML without <html>/<body> (e.g., layout without root element)
+        // SSR HTML without <body> tags: entire string used as body content
         let ssr = "<div>Hello</div>";
         let html = assemble_rsc_body_tail(ssr, "", "0:\"hi\"", &[], "{}", false, None);
 
-        // Falls back to wrapping in a shell
-        assert!(html.contains("<html><head>"));
-        assert!(html.contains("<div>Hello</div>"));
+        // Falls back to using the entire SSR HTML as body content
+        assert!(html.contains("<div id=\"__rex\"><div>Hello</div></div>"));
         assert!(html.contains("</body></html>"));
     }
 
@@ -542,28 +554,25 @@ mod tests {
             Some(r#"{"routes":{}}"#),
         );
 
-        // All body scripts injected before </body> in correct order:
-        // module map → flight data → route manifest → component scripts → router → HMR
-        let map_pos = html.find("__REX_RSC_MODULE_MAP__").unwrap();
+        // Body tail: __rex div → flight data → route manifest → component scripts → router → HMR
+        let rex_div_pos = html.find("__rex").unwrap();
         let flight_pos = html.find("__REX_RSC_DATA__").unwrap();
-        // Find the script tag occurrence of comp.js (not the modulepreload in head)
         let comp_script_pos = html
             .find(r#"<script type="module" src="/_rex/static/rsc/comp.js">"#)
             .unwrap();
         let router_pos = html.find("router.js").unwrap();
         let hmr_pos = html.find("hmr-client.js").unwrap();
 
-        assert!(map_pos < flight_pos);
+        assert!(rex_div_pos < flight_pos);
         assert!(flight_pos < comp_script_pos);
         assert!(comp_script_pos < router_pos);
         assert!(router_pos < hmr_pos);
     }
 
     #[test]
-    fn rsc_body_tail_includes_module_map() {
-        let ssr = "<html><head></head><body><p>Hi</p></body></html>";
+    fn rsc_head_shell_includes_module_map() {
         let manifest = r#"{"entries":{"abc":{"chunk_url":"/c.js","export_name":"default"}}}"#;
-        let html = assemble_rsc_body_tail(ssr, "", "0:\"x\"", &[], manifest, false, None);
+        let html = assemble_rsc_head_shell(&[], manifest);
 
         assert!(html.contains("__REX_RSC_MODULE_MAP__"));
         assert!(html.contains("abc"));
