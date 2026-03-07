@@ -281,7 +281,7 @@ globalThis.__rex_resolve_api = function() {
             V8_POLYFILLS.to_string(),
         ))),
         tsconfig: Some(rolldown_common::TsConfig::Auto(false)),
-        treeshake: crate::rsc_bundler::react_treeshake_options(),
+        treeshake: crate::rsc_build_config::react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
             extensions: Some(vec![
                 ".tsx".to_string(),

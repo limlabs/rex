@@ -317,7 +317,7 @@ pub(crate) async fn build_server_bundle(
         // server-safe stubs with the client-only package source, causing
         // "window is not defined" at SSR time.
         tsconfig: Some(rolldown_common::TsConfig::Auto(false)),
-        treeshake: crate::rsc_bundler::react_treeshake_options(),
+        treeshake: crate::rsc_build_config::react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(aliases),
             extensions: Some(vec![
