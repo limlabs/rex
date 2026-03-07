@@ -233,7 +233,7 @@ Run coverage:
 ```sh
 ./scripts/coverage.sh           # default 50% threshold
 COVERAGE_THRESHOLD=60 ./scripts/coverage.sh   # custom threshold
-cargo llvm-cov --workspace --html   # HTML report in target/llvm-cov/html/
+cargo llvm-cov --workspace --exclude rex_python --html   # HTML report in target/llvm-cov/html/
 ```
 
 ### Benchmarks
