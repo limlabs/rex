@@ -74,13 +74,48 @@ jobs:
       - name: Run tests with coverage
         run: |
           COVERAGE_THRESHOLD=$(cat .coverage-threshold | tr -d '[:space:]')
-          cargo llvm-cov --all --json --output-path coverage.json
+          cargo llvm-cov --workspace --exclude rex_python --json --output-path coverage.json
           COVERAGE=$(jq '.data[0].totals.lines.percent' coverage.json | xargs printf '%.0f')
           echo "Line coverage: ${COVERAGE}% (threshold: ${COVERAGE_THRESHOLD}%)"
           if [ "$COVERAGE" -lt "$COVERAGE_THRESHOLD" ]; then
             echo "::error::Coverage ${COVERAGE}% is below threshold ${COVERAGE_THRESHOLD}%"
             exit 1
           fi
+
+  python:
+    name: Python Extension Tests
+    runs-on: ubuntu-latest
+    needs: [check]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+          save-if: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install fixture dependencies
+        run: cd fixtures/basic && npm install
+
+      - name: Install maturin and pytest
+        run: pip install maturin pytest
+
+      - name: Run Rust unit tests
+        run: cargo test -p rex_python
+
+      - name: Build and install rex-py
+        run: cd crates/rex_python && maturin develop
+
+      - name: Run Python tests
+        run: pytest crates/rex_python/tests/ -v
 
   e2e:
     name: E2E Tests
