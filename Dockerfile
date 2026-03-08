@@ -46,4 +46,4 @@ COPY --from=builder /usr/src/rex/target/release/rex /usr/local/bin/rex
 EXPOSE 3000
 
 ENTRYPOINT ["rex"]
-CMD ["start", "--port", "3000"]
+CMD ["start"]
