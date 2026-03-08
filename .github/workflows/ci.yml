@@ -1,8 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   merge_group:
@@ -27,7 +25,7 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/setup
         with:
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.event_name == 'merge_group' }}
 
       - name: cargo fmt
         run: cargo fmt --check
@@ -60,7 +58,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
         with:
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.event_name == 'merge_group' }}
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
