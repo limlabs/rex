@@ -24,6 +24,11 @@ impl ImageCache {
     /// Try to read a cached image. Returns None on miss.
     pub fn get(&self, url: &str, width: u32, quality: u8, format: &str) -> Option<Vec<u8>> {
         let path = self.cache_path(url, width, quality, format);
+        // Safety: cache_path produces a SHA256 hex filename under cache_dir,
+        // but verify containment to satisfy static analysis (path-injection).
+        if !path.starts_with(&self.cache_dir) {
+            return None;
+        }
         match fs::read(&path) {
             Ok(data) => {
                 debug!(%url, width, quality, format, "image cache hit");
@@ -43,6 +48,14 @@ impl ImageCache {
         data: &[u8],
     ) -> std::io::Result<()> {
         let path = self.cache_path(url, width, quality, format);
+        // Safety: cache_path produces a SHA256 hex filename under cache_dir,
+        // but verify containment to satisfy static analysis (path-injection).
+        if !path.starts_with(&self.cache_dir) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "cache path escapes cache directory",
+            ));
+        }
         fs::create_dir_all(&self.cache_dir)?;
         fs::write(&path, data)?;
         debug!(%url, width, quality, format, bytes = data.len(), "image cached");
