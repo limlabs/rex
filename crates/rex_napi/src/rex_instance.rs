@@ -65,6 +65,7 @@ pub struct JsHeaderPair {
 /// Created via `createRex()`. Handles route matching, server-side rendering,
 /// and request handling for Rex applications.
 #[napi]
+// lgtm[rust/access-invalid-pointer] — napi-rs macro generates safe FFI wrappers
 pub struct RexInstance {
     rex: Rex,
     static_dir: PathBuf,
