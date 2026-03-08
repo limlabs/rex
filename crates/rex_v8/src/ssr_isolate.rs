@@ -504,8 +504,3 @@ fn console_error(
 ) {
     tracing::error!(target: "v8::console", "{}", format_args(scope, &args));
 }
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-#[path = "ssr_isolate_tests.rs"]
-mod tests;

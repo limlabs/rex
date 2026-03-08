@@ -24,4 +24,5 @@ futures = "0.3"
 [dev-dependencies]
 rex_build = { path = "../rex_build", version = "0.10.0" } # x-release-please-version
 tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt"] }
 tracing-subscriber = { workspace = true }

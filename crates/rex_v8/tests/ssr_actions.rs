@@ -1,7 +1,12 @@
-use super::*;
+#![allow(clippy::unwrap_used)]
+
+mod common;
+
+use common::{make_isolate, make_server_bundle, MOCK_REACT_RUNTIME};
+use rex_v8::SsrIsolate;
 
 fn make_isolate_with_actions(actions_js: &str) -> SsrIsolate {
-    crate::init_v8();
+    rex_v8::init_v8();
     let bundle = format!(
         "{}\n{}\n{}",
         MOCK_REACT_RUNTIME,
@@ -96,14 +101,16 @@ fn test_call_server_action_async() {
 
 #[test]
 fn test_load_rsc_bundles() {
-    crate::init_v8();
+    rex_v8::init_v8();
     let bundle = format!("{}\n{}", MOCK_REACT_RUNTIME, make_server_bundle(&[]));
     let mut iso = SsrIsolate::new(&bundle, None).expect("failed to create isolate");
 
-    // Before loading RSC bundles, flight functions should be None
-    assert!(iso.rsc_flight_fn.is_none());
+    // Before loading RSC bundles, server actions should fail
+    assert!(
+        iso.call_server_action("test", "[]").is_err(),
+        "call_server_action should fail before RSC bundles are loaded"
+    );
 
-    // Minimal flight bundle that sets __rex_render_flight
     let flight_js = r#"
         globalThis.__rex_render_flight = function(routeKey, propsJson) {
             return "flight:" + routeKey;
@@ -123,11 +130,6 @@ fn test_load_rsc_bundles() {
 
     iso.load_rsc_bundles(flight_js, ssr_js).unwrap();
 
-    // After loading, flight function should be set
-    assert!(iso.rsc_flight_fn.is_some());
-    assert!(iso.rsc_to_html_fn.is_some());
-    assert!(iso.server_action_fn.is_some());
-
     // Server action should work through the loaded function
     let result = iso.call_server_action("test_id", "[]").unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
@@ -146,7 +148,6 @@ fn test_reload_preserves_server_action_fn() {
     let r1 = iso.call_server_action("x", "[]").unwrap();
     assert!(r1.contains("v1"));
 
-    // Reload with new bundle that has updated action
     let new_bundle = format!(
         "{}\n{}\n{}",
         MOCK_REACT_RUNTIME,

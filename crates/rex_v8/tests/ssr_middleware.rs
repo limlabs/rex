@@ -1,4 +1,9 @@
-use super::*;
+#![allow(clippy::unwrap_used)]
+
+mod common;
+
+use common::{make_isolate, make_server_bundle, MOCK_REACT_RUNTIME};
+use rex_v8::SsrIsolate;
 
 #[test]
 fn test_run_middleware_no_middleware() {
@@ -13,7 +18,7 @@ fn test_run_middleware_no_middleware() {
 
 #[test]
 fn test_run_middleware_next() {
-    crate::init_v8();
+    rex_v8::init_v8();
     let mut bundle = format!(
         "{}\n{}",
         MOCK_REACT_RUNTIME,
@@ -23,7 +28,8 @@ fn test_run_middleware_next() {
             None,
         )])
     );
-    bundle.push_str(r#"
+    bundle.push_str(
+        r#"
         globalThis.__rex_middleware = {
             middleware: function(req) {
                 return { _action: 'next', _url: null, _status: 307, _requestHeaders: {}, _responseHeaders: {} };
@@ -40,7 +46,8 @@ fn test_run_middleware_next() {
                 response_headers: result._responseHeaders || {}
             });
         };
-    "#);
+    "#,
+    );
     let mut iso = SsrIsolate::new(&bundle, None).unwrap();
     let result = iso.run_middleware(r#"{"method":"GET","url":"/"}"#).unwrap();
     assert!(result.is_some());
@@ -50,7 +57,7 @@ fn test_run_middleware_next() {
 
 #[test]
 fn test_run_middleware_redirect() {
-    crate::init_v8();
+    rex_v8::init_v8();
     let mut bundle = format!(
         "{}\n{}",
         MOCK_REACT_RUNTIME,
@@ -60,7 +67,8 @@ fn test_run_middleware_redirect() {
             None,
         )])
     );
-    bundle.push_str(r#"
+    bundle.push_str(
+        r#"
         globalThis.__rex_middleware = {
             middleware: function(req) {
                 return { _action: 'redirect', _url: '/login', _status: 302, _requestHeaders: {}, _responseHeaders: {} };
@@ -77,7 +85,8 @@ fn test_run_middleware_redirect() {
                 response_headers: result._responseHeaders || {}
             });
         };
-    "#);
+    "#,
+    );
     let mut iso = SsrIsolate::new(&bundle, None).unwrap();
     let result = iso
         .run_middleware(r#"{"method":"GET","url":"/dashboard"}"#)
@@ -92,14 +101,13 @@ fn test_run_middleware_redirect() {
 #[test]
 fn test_list_mcp_tools_none() {
     let mut iso = make_isolate(&[("index", "function() { return 'hi'; }", None)]);
-    // No MCP tools registered, should return None
     let result = iso.list_mcp_tools().unwrap();
     assert!(result.is_none());
 }
 
 #[test]
 fn test_list_mcp_tools() {
-    crate::init_v8();
+    rex_v8::init_v8();
     let mut bundle = format!(
         "{}\n{}",
         MOCK_REACT_RUNTIME,
@@ -138,7 +146,7 @@ fn test_list_mcp_tools() {
 
 #[test]
 fn test_call_mcp_tool_sync() {
-    crate::init_v8();
+    rex_v8::init_v8();
     let mut bundle = format!(
         "{}\n{}",
         MOCK_REACT_RUNTIME,
@@ -171,7 +179,7 @@ fn test_call_mcp_tool_sync() {
 
 #[test]
 fn test_call_mcp_tool_async() {
-    crate::init_v8();
+    rex_v8::init_v8();
     let mut bundle = format!(
         "{}\n{}",
         MOCK_REACT_RUNTIME,

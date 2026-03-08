@@ -1,8 +1,12 @@
-use super::*;
+#![allow(clippy::unwrap_used)]
 
-/// Create an isolate with fs callbacks enabled and a GSSP that exercises them.
+mod common;
+
+use common::{make_server_bundle, MOCK_REACT_RUNTIME};
+use rex_v8::SsrIsolate;
+
 fn make_fs_isolate(project_root: &std::path::Path, gssp_code: &str) -> SsrIsolate {
-    crate::init_v8();
+    rex_v8::init_v8();
     let pages = &[(
         "index",
         "function Index(props) { return React.createElement('div', null, JSON.stringify(props)); }",
@@ -145,7 +149,7 @@ fn test_fs_stat_sync() {
     let result = iso.get_server_side_props("index", "{}").unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
     assert_eq!(parsed["props"]["fileIsFile"], true);
-    assert_eq!(parsed["props"]["fileSize"], 11); // "hello world"
+    assert_eq!(parsed["props"]["fileSize"], 11);
     assert_eq!(parsed["props"]["dirIsDir"], true);
 }
 
@@ -187,128 +191,4 @@ fn test_fs_rm_sync() {
     let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
     assert_eq!(parsed["props"]["fileGone"], true);
     assert_eq!(parsed["props"]["dirGone"], true);
-}
-
-#[test]
-fn test_process_env_from_rust() {
-    // Set a known env var so we can verify it appears in V8
-    std::env::set_var("REX_TEST_POLYFILL", "hello_from_rust");
-
-    let mut iso = make_isolate(&[(
-        "envtest",
-        "function EnvTest() { return React.createElement('p', null, process.env.REX_TEST_POLYFILL || 'MISSING'); }",
-        Some("function(ctx) { return { props: { val: process.env.REX_TEST_POLYFILL } }; }"),
-    )]);
-
-    // Verify GSSP can read process.env
-    let gssp_result = iso.get_server_side_props("envtest", "{}").unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&gssp_result).unwrap();
-    assert_eq!(parsed["props"]["val"], "hello_from_rust");
-
-    // Verify SSR render can read process.env
-    let render = iso.render_page("envtest", "{}").unwrap();
-    assert!(
-        render.body.contains("hello_from_rust"),
-        "SSR body should contain env var value, got: {}",
-        render.body
-    );
-
-    // Clean up
-    std::env::remove_var("REX_TEST_POLYFILL");
-}
-
-#[test]
-fn test_process_env_is_writable() {
-    // Node.js allows assigning to process.env; verify we match that behavior
-    let mut iso = make_isolate(&[(
-        "writetest",
-        "function WriteTest() { process.env.DYNAMIC = 'set_at_runtime'; return React.createElement('p', null, process.env.DYNAMIC); }",
-        None,
-    )]);
-    let render = iso.render_page("writetest", "{}").unwrap();
-    assert!(
-        render.body.contains("set_at_runtime"),
-        "process.env should be writable, got: {}",
-        render.body
-    );
-}
-
-#[test]
-fn test_console_log_emits_tracing_event() {
-    use std::sync::{Arc, Mutex};
-    use tracing_subscriber::layer::SubscriberExt;
-
-    /// Minimal tracing layer that captures log messages.
-    struct CaptureLayer {
-        messages: Arc<Mutex<Vec<(tracing::Level, String)>>>,
-    }
-
-    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CaptureLayer {
-        fn on_event(
-            &self,
-            event: &tracing::Event<'_>,
-            _ctx: tracing_subscriber::layer::Context<'_, S>,
-        ) {
-            struct Visitor(String);
-            impl tracing::field::Visit for Visitor {
-                fn record_debug(
-                    &mut self,
-                    field: &tracing::field::Field,
-                    value: &dyn std::fmt::Debug,
-                ) {
-                    if field.name() == "message" {
-                        self.0 = format!("{value:?}");
-                    }
-                }
-            }
-            let mut visitor = Visitor(String::new());
-            event.record(&mut visitor);
-            self.messages
-                .lock()
-                .unwrap()
-                .push((*event.metadata().level(), visitor.0));
-        }
-    }
-
-    let messages = Arc::new(Mutex::new(Vec::new()));
-    let subscriber = tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::new("v8::console=info"))
-        .with(CaptureLayer {
-            messages: messages.clone(),
-        });
-
-    let _guard = tracing::subscriber::set_default(subscriber);
-
-    let mut iso = make_isolate(&[(
-        "logpage",
-        r#"function LogPage() {
-            console.log("hello from ssr");
-            console.warn("warning from ssr");
-            console.error("error from ssr");
-            return React.createElement('p', null, 'logged');
-        }"#,
-        None,
-    )]);
-    let render = iso.render_page("logpage", "{}").unwrap();
-    assert!(render.body.contains("logged"), "page should render");
-
-    let captured = messages.lock().unwrap();
-    assert!(
-        captured
-            .iter()
-            .any(|(_, msg)| msg.contains("hello from ssr")),
-        "console.log should emit tracing event, captured: {captured:?}"
-    );
-    assert!(
-        captured
-            .iter()
-            .any(|(level, msg)| *level == tracing::Level::WARN && msg.contains("warning from ssr")),
-        "console.warn should emit WARN-level event, captured: {captured:?}"
-    );
-    assert!(
-        captured
-            .iter()
-            .any(|(level, msg)| *level == tracing::Level::ERROR && msg.contains("error from ssr")),
-        "console.error should emit ERROR-level event, captured: {captured:?}"
-    );
 }

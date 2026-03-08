@@ -1,7 +1,12 @@
-use super::*;
+#![allow(clippy::unwrap_used)]
+
+mod common;
+
+use common::{make_server_bundle, MOCK_REACT_RUNTIME};
+use rex_v8::SsrIsolate;
 
 fn make_crypto_isolate(gssp_code: &str) -> SsrIsolate {
-    crate::init_v8();
+    rex_v8::init_v8();
     let bundle = format!(
         "{}\n{MOCK_REACT_RUNTIME}\n{}",
         rex_build::V8_POLYFILLS,
@@ -26,7 +31,6 @@ fn test_crypto_random_uuid_format() {
         .unwrap();
     let val: serde_json::Value = serde_json::from_str(&json).unwrap();
     let id = val["props"]["id"].as_str().unwrap();
-    // UUID v4 format: 8-4-4-4-12 hex chars, version=4, variant=8/9/a/b
     assert_eq!(id.len(), 36, "UUID wrong length: {id}");
     let parts: Vec<&str> = id.split('-').collect();
     assert_eq!(parts.len(), 5, "UUID wrong number of parts: {id}");
