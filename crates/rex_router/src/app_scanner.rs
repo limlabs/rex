@@ -9,7 +9,7 @@ use rex_core::DynamicSegment;
 use std::path::{Path, PathBuf};
 use tracing::debug;
 
-const PAGE_EXTENSIONS: &[&str] = &["tsx", "ts", "jsx", "js"];
+const PAGE_EXTENSIONS: &[&str] = &["tsx", "ts", "jsx", "js", "mdx"];
 
 /// Scan the `app/` directory and produce an `AppScanResult`.
 ///

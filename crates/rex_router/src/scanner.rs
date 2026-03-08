@@ -178,7 +178,7 @@ fn walk_dir(base: &Path, dir: &Path, callback: &mut dyn FnMut(&Path, &Path)) -> 
 fn is_page_file(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()),
-        Some("tsx" | "ts" | "jsx" | "js")
+        Some("tsx" | "ts" | "jsx" | "js" | "mdx")
     )
 }
 

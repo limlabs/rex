@@ -16,12 +16,14 @@ pub(crate) fn collect_css_files(
     build_id: &str,
     manifest: &mut AssetManifest,
     tailwind_outputs: &HashMap<PathBuf, PathBuf>,
+    page_overrides: &HashMap<PathBuf, PathBuf>,
 ) -> Result<()> {
     let hash = &build_id[..8];
 
     // Collect CSS from _app (global styles)
     if let Some(app) = &scan.app {
-        let css_paths = extract_css_imports(&app.abs_path)?;
+        let effective = page_overrides.get(&app.abs_path).unwrap_or(&app.abs_path);
+        let css_paths = extract_css_imports(effective)?;
         for css_path in css_paths {
             if css_path.exists() {
                 let stem = css_path.file_stem().unwrap_or_default().to_string_lossy();
@@ -44,7 +46,10 @@ pub(crate) fn collect_css_files(
 
     // Collect CSS from individual pages
     for route in &scan.routes {
-        let css_paths = extract_css_imports(&route.abs_path)?;
+        let effective = page_overrides
+            .get(&route.abs_path)
+            .unwrap_or(&route.abs_path);
+        let css_paths = extract_css_imports(effective)?;
         if css_paths.is_empty() {
             continue;
         }
@@ -224,6 +229,7 @@ mod tests {
             "abc12345def67890",
             &mut manifest,
             &HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
 
@@ -280,6 +286,7 @@ mod tests {
             &output_dir,
             "abc12345def67890",
             &mut manifest,
+            &HashMap::new(),
             &HashMap::new(),
         )
         .unwrap();
@@ -343,6 +350,7 @@ mod tests {
             "abc12345def67890",
             &mut manifest,
             &tw_map,
+            &HashMap::new(),
         )
         .unwrap();
 

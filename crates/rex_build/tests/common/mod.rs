@@ -209,6 +209,34 @@ pub async fn build_and_load(
     (result, pool)
 }
 
+/// Extend mock node_modules with react-server-dom-webpack stubs for RSC tests.
+pub fn setup_rsc_mock_node_modules(root: &std::path::Path) {
+    // Start with standard mocks
+    setup_mock_node_modules(root);
+
+    let nm = root.join("node_modules");
+
+    // react-server-dom-webpack
+    let rsdw_dir = nm.join("react-server-dom-webpack");
+    fs::create_dir_all(&rsdw_dir).unwrap();
+    fs::write(
+        rsdw_dir.join("package.json"),
+        r#"{"name":"react-server-dom-webpack","version":"19.0.0","main":"index.js","exports":{".":{"default":"./index.js"},"./client":{"default":"./client.js"},"./server":{"default":"./server.js"}}}"#,
+    )
+    .unwrap();
+    fs::write(rsdw_dir.join("index.js"), "export default {};\n").unwrap();
+    fs::write(
+        rsdw_dir.join("client.js"),
+        "export function createFromReadableStream(s) { return {}; }\nexport function createServerReference(id, callServer) { return function(...args) { return callServer(id, args); }; }\n",
+    )
+    .unwrap();
+    fs::write(
+        rsdw_dir.join("server.js"),
+        "export function renderToReadableStream(el, config) { return new ReadableStream(); }\nexport function registerServerReference(fn, id, name) { return fn; }\n",
+    )
+    .unwrap();
+}
+
 /// Build and load with fs polyfill enabled (project_root passed to isolate pool).
 pub async fn build_and_load_with_root(
     config: &RexConfig,

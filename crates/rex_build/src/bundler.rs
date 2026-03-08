@@ -70,8 +70,8 @@ pub async fn build_bundles(
     fs::create_dir_all(&server_dir)?;
     fs::create_dir_all(&client_dir)?;
 
-    // Pre-process CSS modules (generates scoped CSS + JS proxy files)
-    let css_modules = process_css_modules(scan, &client_dir, &build_id)?;
+    // Pre-process MDX pages and CSS modules (generates compiled JSX, scoped CSS + JS proxy files)
+    let css_modules = process_css_modules(scan, &client_dir, &build_id, &config.project_root)?;
 
     // Pre-process Tailwind CSS files (compile with tailwindcss CLI)
     let tailwind_outputs = process_tailwind_css(config, scan, &client_dir)?;
@@ -137,6 +137,12 @@ pub async fn build_bundles(
 
     // Build RSC bundles if app/ scan is present
     if let Some(app_scan) = &scan.app_scan {
+        // Pre-process any .mdx pages/layouts in the app router
+        let app_scan = &crate::mdx::process_mdx_app_pages(
+            app_scan,
+            &config.server_build_dir(),
+            &config.project_root,
+        )?;
         let rsc_result =
             crate::rsc_bundler::build_rsc_bundles(config, app_scan, &build_id, &define).await?;
 
@@ -173,9 +179,13 @@ pub async fn build_bundles(
     // Save manifest
     manifest.save(&config.manifest_path())?;
 
-    // Clean up CSS module temp dir
+    // Clean up temp dirs from pre-processing
     let css_modules_dir = client_dir.join("_css_modules");
     let _ = fs::remove_dir_all(&css_modules_dir);
+    let mdx_dir = client_dir.join("_mdx");
+    let _ = fs::remove_dir_all(&mdx_dir);
+    let server_mdx_dir = server_dir.join("_mdx");
+    let _ = fs::remove_dir_all(&server_mdx_dir);
 
     Ok(BuildResult {
         build_id,
