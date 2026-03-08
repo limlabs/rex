@@ -24,11 +24,18 @@ fn extract_esm_none() {
 }
 
 #[test]
-fn extract_esm_stops_at_non_esm() {
+fn extract_esm_collects_past_non_esm() {
     let source = "import Foo from './Foo'\nconst x = 1\nexport const y = 2\n";
-    let (esm, _default, _offset) = extract_esm(source);
-    assert_eq!(esm.len(), 1, "Should stop at first non-ESM: {esm:?}");
+    let (esm, _default, offset) = extract_esm(source);
+    assert_eq!(esm.len(), 2, "Should collect ESM past non-ESM gap: {esm:?}");
     assert!(esm[0].contains("Foo"));
+    assert!(esm[1].contains("y = 2"));
+    // content_start should be after the initial contiguous ESM (just the import)
+    assert!(
+        source[offset..].starts_with("const"),
+        "content_start should be at first non-ESM: '{}'",
+        &source[offset..]
+    );
 }
 
 #[test]

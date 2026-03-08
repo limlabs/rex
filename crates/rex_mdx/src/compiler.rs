@@ -84,14 +84,17 @@ pub fn compile_mdx_with_options(source: &str, options: &MdxOptions) -> Result<St
     // Phase 4: Assemble the output module.
     let mut output = String::new();
 
-    // Emit extracted ESM imports/exports (from top-of-file and from markdown body)
+    // Emit extracted ESM imports/exports (from top-of-file and from markdown body).
+    // Deduplicate body ESM against what extract_esm already collected.
     for line in &esm_lines {
         output.push_str(line);
         output.push('\n');
     }
     for line in &body_esm_lines {
-        output.push_str(line);
-        output.push('\n');
+        if !esm_lines.iter().any(|e| e == line) {
+            output.push_str(line);
+            output.push('\n');
+        }
     }
 
     // Emit frontmatter export if present

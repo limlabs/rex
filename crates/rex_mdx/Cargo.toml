@@ -9,13 +9,7 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-markdown = "1.0.0-alpha.23"
-oxc_allocator = "0.115"
-oxc_parser = "0.115"
-oxc_ast = "0.115"
-oxc_span = "0.115"
-
-[dev-dependencies]
+markdown = "1"
 oxc_allocator = "0.115"
 oxc_parser = "0.115"
 oxc_ast = "0.115"

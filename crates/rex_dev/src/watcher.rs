@@ -109,9 +109,18 @@ fn is_page_file(path: &Path) -> bool {
     )
 }
 
+/// Check for executable script extensions only (no .mdx).
+/// Middleware and MCP tools must be JS/TS modules, not content files.
+fn is_script_file(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some("tsx" | "ts" | "jsx" | "js")
+    )
+}
+
 fn is_middleware_file(path: &Path, project_root: &Path) -> bool {
     if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-        if name == "middleware" && is_page_file(path) {
+        if name == "middleware" && is_script_file(path) {
             // Must be at project root (not nested in pages/ or subdirs)
             if let Some(parent) = path.parent() {
                 return parent == project_root;
@@ -122,7 +131,7 @@ fn is_middleware_file(path: &Path, project_root: &Path) -> bool {
 }
 
 fn is_mcp_file(path: &Path, project_root: &Path) -> bool {
-    if is_page_file(path) {
+    if is_script_file(path) {
         if let Some(parent) = path.parent() {
             return parent == project_root.join("mcp");
         }

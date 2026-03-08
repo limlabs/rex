@@ -16,7 +16,11 @@ pub fn extract_esm(source: &str) -> (Vec<String>, Option<String>, usize) {
 
     let mut esm_lines = Vec::new();
     let mut user_default: Option<String> = None;
+    // Track end of the contiguous ESM block at the top of the file.
+    // ESM appearing after non-ESM statements is still collected, but
+    // content_start only advances for the initial contiguous block.
     let mut max_end: usize = 0;
+    let mut hit_non_esm = false;
 
     for stmt in &ret.program.body {
         match stmt {
@@ -24,16 +28,16 @@ pub fn extract_esm(source: &str) -> (Vec<String>, Option<String>, usize) {
                 let span = import.span();
                 let text = &source[span.start as usize..span.end as usize];
                 esm_lines.push(text.to_string());
-                if (span.end as usize) > max_end {
-                    max_end = span.end as usize;
+                if !hit_non_esm {
+                    max_end = max_end.max(span.end as usize);
                 }
             }
             Statement::ExportNamedDeclaration(export) => {
                 let span = export.span();
                 let text = &source[span.start as usize..span.end as usize];
                 esm_lines.push(text.to_string());
-                if (span.end as usize) > max_end {
-                    max_end = span.end as usize;
+                if !hit_non_esm {
+                    max_end = max_end.max(span.end as usize);
                 }
             }
             Statement::ExportDefaultDeclaration(export) => {
@@ -49,19 +53,21 @@ pub fn extract_esm(source: &str) -> (Vec<String>, Option<String>, usize) {
                 if !expr.is_empty() {
                     user_default = Some(expr.to_string());
                 }
-                if (span.end as usize) > max_end {
-                    max_end = span.end as usize;
+                if !hit_non_esm {
+                    max_end = max_end.max(span.end as usize);
                 }
             }
             Statement::ExportAllDeclaration(export) => {
                 let span = export.span();
                 let text = &source[span.start as usize..span.end as usize];
                 esm_lines.push(text.to_string());
-                if (span.end as usize) > max_end {
-                    max_end = span.end as usize;
+                if !hit_non_esm {
+                    max_end = max_end.max(span.end as usize);
                 }
             }
-            _ => break,
+            _ => {
+                hit_non_esm = true;
+            }
         }
     }
 
