@@ -20,4 +20,6 @@ runs:
 
     - name: Install fixture dependencies
       shell: bash
-      run: cd fixtures/basic && npm install
+      run: |
+        cd fixtures/basic && npm install
+        cd ../app-router && npm install

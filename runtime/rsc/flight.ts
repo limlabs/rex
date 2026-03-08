@@ -11,6 +11,9 @@
 //   - __rex_app_pages: page component registry
 //   - __rex_app_layout_chains: layout chains per route
 //   - __rex_webpack_bundler_config: server-side bundler config for client refs
+//   - __rex_decodeReply: from react-server-dom-webpack/server (when server actions exist)
+//   - __rex_decodeAction: from react-server-dom-webpack/server (when server actions exist)
+//   - __rex_server_action_manifest: dispatch table for decodeReply/decodeAction
 
 // --- State ---
 let _chunks: (string | Uint8Array)[] = [];

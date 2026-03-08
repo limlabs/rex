@@ -78,8 +78,10 @@ pub(crate) fn generate_server_entry(
     if !server_action_manifest.actions.is_empty() {
         entry.push_str("\n// --- Server Actions Registration ---\n");
         entry.push_str(
-            "import { registerServerReference } from 'react-server-dom-webpack/server';\n",
+            "import { registerServerReference, decodeReply, decodeAction } from 'react-server-dom-webpack/server';\n",
         );
+        entry.push_str("globalThis.__rex_decodeReply = decodeReply;\n");
+        entry.push_str("globalThis.__rex_decodeAction = decodeAction;\n");
 
         // Group actions by module_path to deduplicate imports
         let mut modules_by_path: std::collections::HashMap<&str, Vec<(&str, &str)>> =
@@ -111,6 +113,11 @@ pub(crate) fn generate_server_entry(
                 ));
             }
         }
+
+        // Expose dispatch table as the server action manifest for decodeReply/decodeAction
+        entry.push_str(
+            "globalThis.__rex_server_action_manifest = globalThis.__rex_server_actions;\n",
+        );
     }
 
     // RSC runtime: flight protocol using React's renderToReadableStream
@@ -298,6 +305,10 @@ mod tests {
         assert!(entry.contains("registerServerReference"));
         assert!(entry.contains("globalThis.__rex_server_actions"));
         assert!(entry.contains("action_123"));
+        assert!(entry.contains("globalThis.__rex_decodeReply = decodeReply"));
+        assert!(entry.contains("globalThis.__rex_decodeAction = decodeAction"));
+        assert!(entry
+            .contains("globalThis.__rex_server_action_manifest = globalThis.__rex_server_actions"));
     }
 
     #[test]

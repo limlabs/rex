@@ -143,11 +143,57 @@ pub(super) async fn page_handler_inner(
             if *method == Method::POST {
                 if let Some(fields) = parse_form_action_fields(headers, body) {
                     if fields.iter().any(|(k, _)| k.starts_with("$ACTION_ID_")) {
+                        // CSRF protection: validate Origin header against Host
+                        if let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok()) {
+                            if let Some(host) = headers.get("host").and_then(|v| v.to_str().ok()) {
+                                let origin_host = origin
+                                    .trim_start_matches("https://")
+                                    .trim_start_matches("http://");
+                                if origin_host != host {
+                                    return Response::builder()
+                                        .status(StatusCode::FORBIDDEN)
+                                        .body(Body::from("CSRF validation failed"))
+                                        .expect("response build");
+                                }
+                            }
+                        }
+
+                        // Build request context for V8
+                        let header_map: HashMap<String, String> = headers
+                            .iter()
+                            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+                            .collect();
+                        let headers_json =
+                            serde_json::to_string(&header_map).unwrap_or_else(|_| "{}".to_string());
+                        let cookies: HashMap<String, String> = headers
+                            .get("cookie")
+                            .and_then(|v| v.to_str().ok())
+                            .map(|cookie_str| {
+                                cookie_str
+                                    .split(';')
+                                    .filter_map(|pair| {
+                                        let mut parts = pair.splitn(2, '=');
+                                        Some((
+                                            parts.next()?.trim().to_string(),
+                                            parts.next()?.trim().to_string(),
+                                        ))
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let cookies_json =
+                            serde_json::to_string(&cookies).unwrap_or_else(|_| "{}".to_string());
+
                         let fields_json =
                             serde_json::to_string(&fields).unwrap_or_else(|_| "[]".to_string());
                         match state
                             .isolate_pool
-                            .execute(move |iso| iso.call_form_action("", &fields_json))
+                            .execute(move |iso| {
+                                let _ = iso.set_request_context(&headers_json, &cookies_json);
+                                let r = iso.call_form_action("", &fields_json);
+                                let _ = iso.clear_request_context();
+                                r
+                            })
                             .await
                         {
                             Ok(Ok(json_result)) => {
@@ -181,11 +227,21 @@ pub(super) async fn page_handler_inner(
                                             .body(Body::from("404 - Not Found"))
                                             .expect("response build");
                                     }
+                                    if parsed.get("error").is_some() {
+                                        error!("Form action error: {json_result}");
+                                        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                                    }
                                 }
                                 // Success — fall through to render the page with updated state
                             }
-                            Ok(Err(e)) => error!("Form action error: {e}"),
-                            Err(e) => error!("Form action pool error: {e}"),
+                            Ok(Err(e)) => {
+                                error!("Form action error: {e}");
+                                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                            }
+                            Err(e) => {
+                                error!("Form action pool error: {e}");
+                                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                            }
                         }
                     }
                 }

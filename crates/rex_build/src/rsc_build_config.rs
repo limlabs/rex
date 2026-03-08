@@ -75,7 +75,8 @@ impl<'a> RscBuildContext<'a> {
 /// Build rolldown resolve aliases for `rex/*` built-in imports.
 ///
 /// Maps `rex/link`, `rex/head`, `rex/router`, `rex/image` to their
-/// corresponding runtime files in `runtime/client/`.
+/// corresponding runtime files in `runtime/client/`, and `rex/actions`
+/// to `runtime/server/actions`.
 pub(crate) fn build_rex_aliases() -> Result<Vec<(String, Vec<Option<String>>)>> {
     let client_dir = runtime_client_dir()?;
     let mut aliases = Vec::new();
