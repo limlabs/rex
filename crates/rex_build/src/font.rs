@@ -51,7 +51,7 @@ struct FontCallInfo {
 /// downloads font files from Google Fonts at build time, generates
 /// `@font-face` CSS, and rewrites source to replace font function calls
 /// with static objects containing `className`, `style`, and `variable`.
-pub(crate) fn process_fonts(
+pub(crate) async fn process_fonts(
     scan: &ScanResult,
     output_dir: &Path,
     build_id: &str,
@@ -115,7 +115,8 @@ pub(crate) fn process_fonts(
                     build_id,
                     &cache_dir,
                     &mut processed_fonts,
-                )?;
+                )
+                .await?;
 
                 let replacement = font_google::build_font_object(
                     &call.config.family,

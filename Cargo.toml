@@ -53,7 +53,7 @@ notify-debouncer-mini = "0.5"
 crossbeam-channel = "0.5"
 
 # HTTP client
-reqwest = { version = "0.12", features = ["blocking", "json"] }
+reqwest = { version = "0.12", features = ["json"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

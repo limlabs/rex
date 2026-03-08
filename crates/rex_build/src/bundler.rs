@@ -81,7 +81,8 @@ pub async fn build_bundles(
         &build_id,
         &config.project_root,
         &css_modules.page_overrides,
-    )?;
+    )
+    .await?;
 
     // Merge font page overrides into CSS module overrides
     let mut merged_page_overrides = css_modules.page_overrides.clone();

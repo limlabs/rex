@@ -22,7 +22,7 @@ pub(crate) struct ProcessedFont {
 
 /// Process a single font: download from Google Fonts, generate CSS.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn process_single_font(
+pub(crate) async fn process_single_font(
     family: &str,
     weights: &[String],
     display: &str,
@@ -51,7 +51,9 @@ pub(crate) fn process_single_font(
         build_id,
         cache_dir,
         &scoped_family,
-    ) {
+    )
+    .await
+    {
         Ok(result) => result,
         Err(e) => {
             warn!(
@@ -102,7 +104,7 @@ pub(crate) fn build_font_object(
     let fallback_stack = if fallback.is_empty() {
         default_fallback(family)
     } else {
-        fallback.join("', '")
+        fallback.join(", ")
     };
 
     let mut obj = format!(
@@ -130,7 +132,7 @@ pub(crate) fn default_fallback(family: &str) -> String {
 }
 
 /// Fetch Google Font CSS, download woff2 files, and generate local @font-face rules.
-fn fetch_and_process_google_font(
+async fn fetch_and_process_google_font(
     family: &str,
     weights: &[String],
     display: &str,
@@ -154,21 +156,22 @@ fn fetch_and_process_google_font(
         debug!("Using cached Google Font CSS");
         fs::read_to_string(&cached_css_path)?
     } else {
-        let client = reqwest::blocking::Client::new();
+        let client = reqwest::Client::new();
         let resp = client
             .get(&url)
             .header("User-Agent", WOFF2_USER_AGENT)
-            .send()?;
+            .send()
+            .await?;
 
         if !resp.status().is_success() {
             anyhow::bail!(
                 "Google Fonts API returned {}: {}",
                 resp.status(),
-                resp.text().unwrap_or_default()
+                resp.text().await.unwrap_or_default()
             );
         }
 
-        let text = resp.text()?;
+        let text = resp.text().await?;
         fs::write(&cached_css_path, &text)?;
         text
     };
@@ -191,7 +194,8 @@ fn fetch_and_process_google_font(
                 hash,
                 output_dir,
                 cache_dir,
-            )?;
+            )
+            .await?;
             downloaded_urls.insert(face.src_url.clone(), font_filename.clone());
             font_filename
         };
@@ -312,7 +316,7 @@ fn extract_css_property(block: &str, property: &str) -> Option<String> {
 }
 
 /// Download a font file and save to output directory.
-fn download_font_file(
+async fn download_font_file(
     url: &str,
     family: &str,
     weight: &str,
@@ -338,14 +342,14 @@ fn download_font_file(
     }
 
     debug!(url = %url, file = %filename, "Downloading font file");
-    let client = reqwest::blocking::Client::new();
-    let resp = client.get(url).send()?;
+    let client = reqwest::Client::new();
+    let resp = client.get(url).send().await?;
 
     if !resp.status().is_success() {
         anyhow::bail!("Failed to download font file: {}", resp.status());
     }
 
-    let bytes = resp.bytes()?;
+    let bytes = resp.bytes().await?;
     fs::write(&cache_path, &bytes)?;
     fs::write(&output_path, &bytes)?;
 
@@ -590,8 +594,8 @@ mod tests {
         assert_eq!(extract_css_property(block, "font-style"), None);
     }
 
-    #[test]
-    fn test_process_single_font_caches_result() {
+    #[tokio::test]
+    async fn test_process_single_font_caches_result() {
         let tmp = tempfile::TempDir::new().unwrap();
         let cache_dir = tmp.path().join("cache");
         let output_dir = tmp.path().join("out");
@@ -619,14 +623,15 @@ mod tests {
             &cache_dir,
             &mut processed,
         )
+        .await
         .unwrap();
 
         assert_eq!(result.scoped_family, "__font_Inter_cached");
         assert_eq!(result.css, ".cached {}");
     }
 
-    #[test]
-    fn test_process_single_font_utility_class_css() {
+    #[tokio::test]
+    async fn test_process_single_font_utility_class_css() {
         let tmp = tempfile::TempDir::new().unwrap();
         let cache_dir = tmp.path().join("cache");
         let output_dir = tmp.path().join("out");
@@ -648,6 +653,7 @@ mod tests {
             &cache_dir,
             &mut processed,
         )
+        .await
         .unwrap();
 
         // Should have generated utility class CSS
