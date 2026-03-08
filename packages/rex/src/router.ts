@@ -47,6 +47,14 @@ function getRouter(): InternalRouter | null {
  * Navigate to a new path via client-side routing.
  */
 export function navigateTo(path: string): void {
+  // RSC app router navigation (fetches flight data, re-renders in place)
+  const rscNavigate = (window as any).__REX_RSC_NAVIGATE;
+  if (rscNavigate) {
+    history.pushState(null, '', path);
+    rscNavigate(path);
+    return;
+  }
+  // Pages router fallback
   const r = getRouter();
   if (r) {
     r.push(path);

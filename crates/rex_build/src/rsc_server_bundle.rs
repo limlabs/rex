@@ -43,8 +43,17 @@ pub(crate) async fn build_rsc_server_bundle(
     let entry_path = entries_dir.join("rsc-server-entry.ts");
     fs::write(&entry_path, &entry_source)?;
 
-    // Build aliases: rex/* built-ins + "use client" module stubs
+    // Build aliases: rex/* built-ins + "use client" module stubs.
+    // Client reference stubs must take priority over rex server aliases.
+    // e.g. rex/link has "use client" — its stub (a reference object) must win
+    // over the server alias (plain <a>) so the flight data contains a client
+    // reference and the client can hydrate with the interactive Link component.
     let mut aliases = build_rex_server_aliases()?;
+    let stub_keys: std::collections::HashSet<String> = stub_aliases
+        .iter()
+        .map(|(p, _)| p.to_string_lossy().to_string())
+        .collect();
+    aliases.retain(|(k, _)| !stub_keys.contains(k));
     for (original, stub) in stub_aliases {
         aliases.push((
             original.to_string_lossy().to_string(),

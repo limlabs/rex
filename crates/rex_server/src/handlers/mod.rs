@@ -10,7 +10,7 @@ pub use api::api_handler;
 pub use data::data_handler;
 pub use image::{image_handler, ImageQuery};
 pub use page::page_handler;
-pub use rsc::rsc_handler;
+pub use rsc::{rsc_handler, rsc_handler_root};
 
 pub use crate::state::{AppState, HotState};
 

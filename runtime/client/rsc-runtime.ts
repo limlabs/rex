@@ -272,7 +272,8 @@
     if (!manifest) return Promise.reject(new Error('No manifest'));
 
     var buildId = manifest.build_id;
-    var url = '/_rex/rsc/' + buildId + pathname;
+    var suffix = pathname === '/' ? '' : pathname;
+    var url = '/_rex/rsc/' + buildId + suffix;
 
     return fetch(url).then(function (res) {
       if (!res.ok) throw new Error('RSC fetch failed: ' + res.status);

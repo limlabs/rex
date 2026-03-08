@@ -204,7 +204,9 @@ function navigateRsc(pathname: string): Promise<void> {
   if (!manifest) return Promise.reject(new Error('No manifest'));
 
   const buildId = manifest.build_id;
-  const url = '/_rex/rsc/' + buildId + pathname;
+  // Root path "/" becomes empty to hit /_rex/rsc/{buildId} (no trailing slash)
+  const suffix = pathname === '/' ? '' : pathname;
+  const url = '/_rex/rsc/' + buildId + suffix;
   const ssrManifest = buildSSRManifest();
 
   const treePromise = Promise.resolve(

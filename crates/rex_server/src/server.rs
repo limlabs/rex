@@ -131,6 +131,7 @@ impl RexServer {
             .route("/_rex/image", get(handlers::image_handler))
             // RSC flight data endpoint (app/ router client navigation)
             .route("/_rex/rsc/{build_id}/{*path}", get(handlers::rsc_handler))
+            .route("/_rex/rsc/{build_id}", get(handlers::rsc_handler_root))
             // Server action endpoint (app/ router server functions)
             .route(
                 "/_rex/action/{build_id}/{action_id}",
