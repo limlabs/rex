@@ -7,6 +7,10 @@ on:
     paths-ignore:
       - 'Cargo.lock'
 
+concurrency:
+  group: beta-release-${{ github.head_ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   packages: write
