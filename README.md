@@ -11,6 +11,22 @@ A next-generation React framework built on the Next.js API. Write standard React
 - **Single binary** — ships as one native executable per platform via npm. No Node.js required at runtime.
 - **Zero-config** — works without a `package.json`. Add one when you need a lockfile or extra dependencies.
 
+### Performance
+
+Benchmarked on the same pages (SSR index, about, dynamic route, API, static) with Apache Bench (10k requests, 100 concurrent). Median of 3 iterations on Apple M3 Max (36 GB).
+
+| Metric | Rex | Next.js 15 | Improvement |
+|--------|-----|-----------|-------------|
+| **SSR throughput** | 32,141 req/s | 4,126 req/s | **~8x** |
+| **SSR latency** | 3.1 ms | 24.2 ms | **~8x** |
+| **Production build** | 64 ms | 5,691 ms | **~89x** |
+| **Dev server startup** | 136 ms | 3,714 ms | **~27x** |
+| **Install size** | 118 MB | 342 MB | **~3x smaller** |
+| **Install time** | 299 ms | 5,242 ms | **~18x** |
+| **Lint** | 10 ms | 1,320 ms | **~132x** |
+
+Reproduce: `cd benchmarks && uv run python bench.py --suite dx,server --iterations 3`
+
 ## Quick Start
 
 ```sh
