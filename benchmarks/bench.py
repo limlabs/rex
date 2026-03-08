@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Rex Benchmark Suite — Rex vs Next.js 15 (Pages & App Router) vs TanStack Start
+Rex Benchmark Suite — Rex vs Next.js 15 (Pages & App Router) vs TanStack Start vs Vinext
 
-Compares three frameworks on identical page fixtures across three suites:
+Compares frameworks on identical page fixtures across three suites:
   dx      Developer experience: install time, deps, startup, rebuild
   server  Production: build time, throughput (RPS), latency, memory
   client  Client-side: JS bundle size, Lighthouse Web Vitals
@@ -43,6 +43,7 @@ REX_APP_FIXTURE = PROJECT_ROOT / "fixtures/app-router"
 NEXT_DIR = SCRIPT_DIR / "next-basic"
 NEXT_APP_DIR = SCRIPT_DIR / "next-app-basic"
 TANSTACK_DIR = SCRIPT_DIR / "tanstack-basic"
+VINEXT_DIR = SCRIPT_DIR / "vinext-basic"
 NEXT_TW_DIR = SCRIPT_DIR / "next-tailwind"
 TANSTACK_TW_DIR = SCRIPT_DIR / "tanstack-tailwind"
 REX_TW_FIXTURE = PROJECT_ROOT / "fixtures/tailwind"
@@ -90,12 +91,17 @@ def yellow(s: str) -> str:
     return f"\033[33m{s}\033[0m"
 
 
+def red(s: str) -> str:
+    return f"\033[31m{s}\033[0m"
+
+
 FW_COLOR = {
     "rex": magenta,
     "rex_app": magenta,
     "nextjs": cyan,
     "nextjs_app": cyan,
     "tanstack": yellow,
+    "vinext": red,
     "rex_tw": magenta,
     "nextjs_tw": cyan,
     "tanstack_tw": yellow,
@@ -106,6 +112,7 @@ FW_LABEL = {
     "nextjs": "Next.js (Pages)",
     "nextjs_app": "Next.js (App)",
     "tanstack": "TanStack Start",
+    "vinext": "Vinext",
     "rex_tw": "Rex + TW",
     "nextjs_tw": "Next.js + TW",
     "tanstack_tw": "TanStack + TW",
@@ -319,6 +326,24 @@ def start_tanstack(mode: str, port: int) -> Optional[ServerProcess]:
     if not wait_for_port(port, timeout=timeout):
         proc.kill()
         print(f"  {yellow('SKIP')}: TanStack Start failed to start on port {port}")
+        return None
+    return ServerProcess(proc, port)
+
+
+def start_vinext(mode: str, port: int) -> Optional[ServerProcess]:
+    if not (VINEXT_DIR / "node_modules").exists():
+        print(
+            f"  {yellow('SKIP')}: Vinext not installed. Run: cd benchmarks/vinext-basic && npm install"
+        )
+        return None
+    cmd = ["npx", "vinext", mode, "--port", str(port)]
+    proc = subprocess.Popen(
+        cmd, cwd=VINEXT_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    timeout = 60 if mode == "dev" else 30
+    if not wait_for_port(port, timeout=timeout):
+        proc.kill()
+        print(f"  {yellow('SKIP')}: Vinext failed to start on port {port}")
         return None
     return ServerProcess(proc, port)
 
@@ -709,6 +734,14 @@ def run_dx(frameworks: list[str], iterations: int = 1):
             TANSTACK_DIR / "src/routes/about.tsx",
             iterations,
         )
+    if "vinext" in frameworks:
+        dx_framework(
+            "vinext",
+            VINEXT_DIR,
+            start_vinext,
+            VINEXT_DIR / "app/about/page.tsx",
+            iterations,
+        )
     if "rex_tw" in frameworks:
         dx_framework(
             "rex_tw",
@@ -983,6 +1016,31 @@ def run_server(
             iterations,
         )
 
+    if "vinext" in frameworks:
+
+        def build_vinext():
+            if not (VINEXT_DIR / "node_modules").exists():
+                print(f"  {yellow('SKIP')}: Vinext not installed")
+                return False
+            subprocess.run(
+                ["npx", "vinext", "build"],
+                cwd=VINEXT_DIR,
+                capture_output=True,
+                timeout=120,
+            )
+            return True
+
+        server_framework(
+            "vinext",
+            build_vinext,
+            start_vinext,
+            VINEXT_DIR / ".vinext",
+            requests,
+            concurrency,
+            warmup,
+            iterations,
+        )
+
     if "rex_tw" in frameworks:
 
         def build_rex_tw():
@@ -1104,6 +1162,7 @@ LIGHTHOUSE_PAGES = {
         ("/gallery", "gallery"),
     ],
     "nextjs_app": [("/", "index"), ("/about", "about"), ("/blog/hello-world", "blog")],
+    "vinext": [("/", "index"), ("/about", "about"), ("/blog/hello-world", "blog")],
     "tanstack": [
         ("/", "index"),
         ("/about", "about"),
@@ -1217,6 +1276,11 @@ def run_client(frameworks: list[str]):
             subprocess.run(["npx", "vite", "build"], cwd=TANSTACK_DIR, capture_output=True)
         client_bundle_sizes("tanstack", TANSTACK_DIR / "dist/client")
 
+    if "vinext" in frameworks:
+        if not (VINEXT_DIR / ".vinext").exists():
+            subprocess.run(["npx", "vinext", "build"], cwd=VINEXT_DIR, capture_output=True)
+        client_bundle_sizes("vinext", VINEXT_DIR / ".vinext/static")
+
     if "rex_tw" in frameworks:
         if not (REX_TW_FIXTURE / ".rex/build").exists() and REX_BIN.exists():
             subprocess.run(
@@ -1273,6 +1337,13 @@ def run_client(frameworks: list[str]):
                 with server:
                     lighthouse_audit("tanstack", port)
 
+        if "vinext" in frameworks and (VINEXT_DIR / "node_modules").exists():
+            port = find_free_port()
+            server = start_vinext("start", port)
+            if server:
+                with server:
+                    lighthouse_audit("vinext", port)
+
         if "rex_tw" in frameworks and REX_BIN.exists():
             port = find_free_port()
             server = start_rex_tw("start", port)
@@ -1307,8 +1378,8 @@ def main():
     )
     parser.add_argument(
         "--framework",
-        default="rex,rex_app,nextjs,nextjs_app,tanstack,rex_tw,nextjs_tw,tanstack_tw",
-        help="Comma-separated: rex, rex_app, nextjs, nextjs_app, tanstack, rex_tw, nextjs_tw, tanstack_tw (default: all)",
+        default="rex,rex_app,nextjs,nextjs_app,tanstack,vinext,rex_tw,nextjs_tw,tanstack_tw",
+        help="Comma-separated: rex, rex_app, nextjs, nextjs_app, tanstack, vinext, rex_tw, nextjs_tw, tanstack_tw (default: all)",
     )
     parser.add_argument("--json", dest="json_file", help="Write results to JSON file")
     parser.add_argument(
