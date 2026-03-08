@@ -369,6 +369,45 @@ jobs:
     with:
       version: ${{ needs.release-please.outputs.tag_name }}
 
+  deploy-railway:
+    name: Deploy to Railway
+    needs: [release-please, smoke-test]
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Rewrite Rex version for deployment
+        run: |
+          VERSION="${TAG#v}"
+          cd fixtures/railway
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            for (const section of ['dependencies', 'devDependencies']) {
+              if (pkg[section] && pkg[section]['@limlabs/rex']) {
+                pkg[section]['@limlabs/rex'] = '${VERSION}';
+              }
+            }
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        run: railway up --service "${{ secrets.RAILWAY_SERVICE_ID }}"
+        working-directory: fixtures/railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
   cleanup-beta-releases:
     name: Clean up beta releases
     needs: release-please
