@@ -13,19 +13,19 @@ A next-generation React framework built on the Next.js API. Write standard React
 
 ### Performance
 
-Benchmarked on the same pages (SSR index, about, dynamic route, API, static) with Apache Bench (10k requests, 100 concurrent). Median of 3 iterations on Apple M3 Max (36 GB).
+Benchmarked against Next.js 15 on the same pages with Apache Bench (10k requests, 100 concurrent, 200 warmup). Clean builds with no cache. Apple M3 Max, 36 GB.
 
 | Metric | Rex | Next.js 15 | Improvement |
 |--------|-----|-----------|-------------|
-| **SSR throughput** | 32,141 req/s | 4,126 req/s | **~8x** |
-| **SSR latency** | 3.1 ms | 24.2 ms | **~8x** |
-| **Production build** | 64 ms | 5,691 ms | **~89x** |
-| **Dev server startup** | 136 ms | 3,714 ms | **~27x** |
+| **SSR throughput** | 28,715 req/s | 3,523 req/s | **~8x** |
+| **SSR latency** | 3.5 ms | 28.4 ms | **~8x** |
+| **Production build** | 126 ms | 7,979 ms | **~63x** |
+| **Dev server startup** | 122 ms | 5,665 ms | **~46x** |
 | **Install size** | 118 MB | 342 MB | **~3x smaller** |
-| **Install time** | 299 ms | 5,242 ms | **~18x** |
-| **Lint** | 10 ms | 1,320 ms | **~132x** |
+| **Install time** | 302 ms | 5,001 ms | **~17x** |
+| **Lint** | 23 ms | 1,023 ms | **~44x** |
 
-Reproduce: `cd benchmarks && uv run python bench.py --suite dx,server --iterations 3`
+Reproduce: `cd benchmarks && uv run python bench.py --suite dx,server --framework rex,nextjs --iterations 1`
 
 ## Quick Start
 
