@@ -13,26 +13,14 @@ A next-generation React framework built on the Next.js API. Write standard React
 
 ## Quick Start
 
-The fastest way to start is zero-config — no `package.json` needed:
-
-```sh
-npx @limlabs/rex init my-app
-cd my-app
-npx rex dev
-```
-
-Open http://localhost:3000.
-
-### With a package.json
-
-For projects that need a lockfile and additional npm dependencies:
-
 ```sh
 npx @limlabs/rex init my-app
 cd my-app
 npm install
 npx rex dev
 ```
+
+Open http://localhost:3000.
 
 ## Install
 

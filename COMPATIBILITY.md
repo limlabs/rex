@@ -36,7 +36,7 @@ Feature-by-feature comparison of Rex, Next.js, and Vinext.
 | Route groups `(group)` | Yes | Yes | No |
 | `generateMetadata` | Yes | Yes | No |
 | Server Actions (`"use server"`) | Yes | Yes | No |
-| Route handlers (`route.ts`) | Yes | Yes | Yes |
+| Route handlers (`route.ts`) | No | Yes | Yes |
 | Parallel routes (`@folder`) | No | Yes | No |
 | Intercepting routes (`(.)folder`) | No | Yes | No |
 
