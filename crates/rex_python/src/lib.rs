@@ -227,7 +227,8 @@ impl Renderer {
         let project_config =
             rex_core::ProjectConfig::load(&config.project_root).map_err(to_py_err)?;
         let scan =
-            rex_router::scan_project(&config.project_root, &config.pages_dir).map_err(to_py_err)?;
+            rex_router::scan_project(&config.project_root, &config.pages_dir, &config.app_dir)
+                .map_err(to_py_err)?;
 
         let build_result = self
             .rt
@@ -321,7 +322,8 @@ mod tests {
             .unwrap()
             .join("fixtures/basic");
         let pages_dir = fixtures.join("pages");
-        let scan = rex_router::scan_project(&fixtures, &pages_dir).unwrap();
+        let app_dir = fixtures.join("app");
+        let scan = rex_router::scan_project(&fixtures, &pages_dir, &app_dir).unwrap();
         let map = build_module_map(&scan);
 
         assert!(map.contains_key("index"));

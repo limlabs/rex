@@ -27,7 +27,7 @@ pub async fn handle_file_event(
             let t0 = Instant::now();
 
             // Rescan, rebuild, reload isolates, update hot state
-            let scan = scan_project(&config.project_root, &config.pages_dir)?;
+            let scan = scan_project(&config.project_root, &config.pages_dir, &config.app_dir)?;
             let t_scan = t0.elapsed();
 
             // Get project_config from current hot state for build aliases
@@ -140,7 +140,7 @@ pub async fn handle_file_event(
         }
         FileEventKind::PageRemoved => {
             // Full rebuild: routes changed, need new trie + manifest
-            let scan = scan_project(&config.project_root, &config.pages_dir)?;
+            let scan = scan_project(&config.project_root, &config.pages_dir, &config.app_dir)?;
 
             // Get project_config from current hot state for build aliases
             let project_config = {
