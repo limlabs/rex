@@ -274,11 +274,18 @@ if (!window.__REX_NAVIGATING__) {{
                 manifest.app_script = Some(filename);
             } else if let Some(route) = find_route_for_chunk(&name, &scan.routes) {
                 let strategy = detect_data_strategy(&route.abs_path)?;
+                let has_dynamic = !route.dynamic_segments.is_empty();
                 // Check if this route has CSS module files to include
                 if let Some(css_files) = css_modules.route_css.get(&route.pattern) {
-                    manifest.add_page_with_css(&route.pattern, &filename, css_files, strategy);
+                    manifest.add_page_with_css(
+                        &route.pattern,
+                        &filename,
+                        css_files,
+                        strategy,
+                        has_dynamic,
+                    );
                 } else {
-                    manifest.add_page(&route.pattern, &filename, strategy);
+                    manifest.add_page(&route.pattern, &filename, strategy, has_dynamic);
                 }
             }
         }
