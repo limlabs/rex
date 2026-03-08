@@ -28,8 +28,8 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  update-lockfile:
-    name: Update Cargo.lock on release PR
+  update-lockfiles:
+    name: Update lockfiles on release PR
     needs: release-please
     if: ${{ needs.release-please.outputs.pr_branch != '' && needs.release-please.outputs.releases_created != 'true' }}
     runs-on: ubuntu-latest
@@ -39,16 +39,37 @@ jobs:
           ref: ${{ needs.release-please.outputs.pr_branch }}
           token: ${{ secrets.RELEASE_PAT }}
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Update Cargo.lock
         run: cargo generate-lockfile
 
-      - name: Commit updated Cargo.lock
+      - name: Update package-lock.json files
         run: |
-          if [ -n "$(git status --porcelain Cargo.lock)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add Cargo.lock
-            git commit -m "chore: update Cargo.lock"
+          # Packages whose version is bumped by release-please
+          for dir in packages/rex packages/create-rex-app; do
+            if [ -f "$dir/package-lock.json" ]; then
+              echo "Updating $dir/package-lock.json..."
+              npm install --prefix "$dir" --package-lock-only --ignore-scripts
+            fi
+          done
+          # Fixtures that depend on @limlabs/rex via file: reference
+          for dir in fixtures/app-router fixtures/basic fixtures/custom-server fixtures/mcp fixtures/mdx fixtures/tailwind; do
+            if [ -f "$dir/package-lock.json" ]; then
+              echo "Updating $dir/package-lock.json..."
+              npm install --prefix "$dir" --package-lock-only --ignore-scripts
+            fi
+          done
+
+      - name: Commit updated lockfiles
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock '*/package-lock.json' 'packages/*/package-lock.json'
+          if [ -n "$(git diff --cached --name-only)" ]; then
+            git commit -m "chore: update lockfiles"
             git push
           fi
 
