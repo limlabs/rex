@@ -43,26 +43,36 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.version }}
 
-      - name: Wait for package on npm registry
+      - name: Wait for packages on npm registry
         run: |
           VERSION="${INPUT_VERSION#v}"
-          echo "Waiting for @limlabs/rex@$VERSION..."
-          for i in $(seq 1 30); do
-            if npm view "@limlabs/rex@$VERSION" version 2>/dev/null; then
-              echo "@limlabs/rex@$VERSION is available"
-              break
-            fi
-            if [ "$i" -eq 30 ]; then
-              echo "::error::Timed out waiting for @limlabs/rex@$VERSION on npm"
-              exit 1
-            fi
-            sleep 10
+          # Wait for both the main package and the platform-specific binary
+          for pkg in "@limlabs/rex" "@limlabs/rex-linux-x64"; do
+            echo "Waiting for $pkg@$VERSION..."
+            for i in $(seq 1 30); do
+              if npm view "$pkg@$VERSION" version 2>/dev/null; then
+                echo "$pkg@$VERSION is available"
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "::error::Timed out waiting for $pkg@$VERSION on npm"
+                exit 1
+              fi
+              sleep 10
+            done
           done
         env:
           INPUT_VERSION: ${{ inputs.version }}
 
       - name: Install dependencies
-        run: cd "fixtures/${{ matrix.fixture }}" && npm install
+        run: |
+          cd "fixtures/${{ matrix.fixture }}"
+          npm install
+          # Verify the platform binary was installed (optional deps can be silently skipped)
+          if ! node -e "require.resolve('@limlabs/rex-linux-x64/package.json')" 2>/dev/null; then
+            echo "Platform package missing after install, installing explicitly..."
+            npm install @limlabs/rex-linux-x64
+          fi
 
       - name: rex build
         run: npx rex build

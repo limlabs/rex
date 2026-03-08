@@ -367,6 +367,7 @@ jobs:
     name: Cargo Publish
     needs: release-please
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
