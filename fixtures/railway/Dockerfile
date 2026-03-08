@@ -10,5 +10,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=build /app/node_modules/@limlabs/rex-linux-x64/bin/rex /usr/local/bin/rex
 WORKDIR /app
 COPY --from=build /app/.rex .rex
+COPY --from=build /app/pages pages
 EXPOSE 3000
 CMD ["rex", "start", "--port", "3000"]
