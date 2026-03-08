@@ -1,5 +1,8 @@
-use crate::document::{assemble_body_tail, assemble_head_shell, DocumentDescriptor};
-use rex_build::manifest::PageAssets;
+use crate::document::{
+    assemble_body_tail, assemble_head_shell, assemble_rsc_document, DocumentDescriptor,
+    RscDocumentParams,
+};
+use rex_build::manifest::{AppRouteAssets, PageAssets};
 use rex_build::AssetManifest;
 use rex_core::{RenderMode, Route};
 use rex_v8::IsolatePool;
@@ -115,6 +118,125 @@ pub async fn prerender_static_pages(
     prerendered
 }
 
+/// Pre-rendered app route: contains both the full HTML (for initial page loads)
+/// and the flight data (for client-side RSC navigations).
+#[derive(Debug, Clone)]
+pub struct PrerenderedAppRoute {
+    /// Full HTML document (for initial page load)
+    pub html: String,
+    /// RSC flight data (for client-side navigation via /_rex/rsc/ endpoint)
+    pub flight: String,
+}
+
+/// Pre-render all statically optimized app routes and return a map of route pattern -> result.
+///
+/// App routes are eligible for static optimization when their `render_mode` is `Static`:
+/// - No dynamic route segments (e.g., `[slug]`)
+/// - No dynamic function usage (`cookies()`, `headers()`) in the component tree
+pub async fn prerender_static_app_routes(
+    pool: &IsolatePool,
+    manifest: &AssetManifest,
+    manifest_json: &str,
+) -> HashMap<String, PrerenderedAppRoute> {
+    let mut prerendered = HashMap::new();
+
+    let static_app_routes = collect_static_app_routes(manifest);
+
+    // Client manifest JSON needed for RSC document assembly
+    let client_manifest_json = manifest
+        .client_reference_manifest
+        .as_ref()
+        .and_then(|m| serde_json::to_string(m).ok())
+        .unwrap_or_else(|| "{}".to_string());
+
+    for (pattern, assets) in &static_app_routes {
+        // App routes use the pattern as the route key (registered in V8 by pattern)
+        let route_key = pattern.clone();
+
+        // Static app routes have no params and no searchParams
+        let props_json = serde_json::json!({ "params": {}, "searchParams": {} }).to_string();
+
+        // Render flight data for client-side navigation
+        let flight_key = route_key.clone();
+        let flight_props = props_json.clone();
+        let flight_data = match pool
+            .execute(move |iso| iso.render_rsc_flight(&flight_key, &flight_props))
+            .await
+        {
+            Ok(Ok(data)) => data,
+            Ok(Err(e)) => {
+                warn!(pattern, error = %e, "RSC flight render failed, skipping pre-render");
+                continue;
+            }
+            Err(e) => {
+                warn!(pattern, error = %e, "Pool error during RSC flight render");
+                continue;
+            }
+        };
+
+        // Render full HTML via two-pass RSC render (flight -> HTML)
+        let html_key = route_key.clone();
+        let html_props = props_json.clone();
+        let rsc_result = match pool
+            .execute(move |iso| iso.render_rsc_to_html(&html_key, &html_props))
+            .await
+        {
+            Ok(Ok(r)) => r,
+            Ok(Err(e)) => {
+                warn!(pattern, error = %e, "RSC HTML render failed, skipping pre-render");
+                continue;
+            }
+            Err(e) => {
+                warn!(pattern, error = %e, "Pool error during RSC HTML render");
+                continue;
+            }
+        };
+
+        let html = assemble_rsc_document(&RscDocumentParams {
+            ssr_html: &rsc_result.body,
+            head_html: &rsc_result.head,
+            flight_data: &rsc_result.flight,
+            client_chunks: &assets.client_chunks,
+            client_manifest_json: &client_manifest_json,
+            is_dev: false,
+            manifest_json: Some(manifest_json),
+        });
+
+        debug!(
+            pattern,
+            html_bytes = html.len(),
+            flight_bytes = flight_data.len(),
+            "Pre-rendered static app route"
+        );
+        prerendered.insert(
+            pattern.clone(),
+            PrerenderedAppRoute {
+                html,
+                flight: flight_data,
+            },
+        );
+    }
+
+    if !prerendered.is_empty() {
+        info!(
+            count = prerendered.len(),
+            "Static app routes pre-rendered (automatic static optimization)"
+        );
+    }
+
+    prerendered
+}
+
+/// Collect app routes eligible for static pre-rendering from the manifest.
+fn collect_static_app_routes(manifest: &AssetManifest) -> Vec<(String, AppRouteAssets)> {
+    manifest
+        .app_routes
+        .iter()
+        .filter(|(_, assets)| assets.render_mode == RenderMode::Static)
+        .map(|(pattern, assets)| (pattern.clone(), assets.clone()))
+        .collect()
+}
+
 /// Collect pages eligible for static pre-rendering from the manifest.
 fn collect_static_pages(manifest: &AssetManifest) -> Vec<(String, PageAssets)> {
     manifest
@@ -211,6 +333,7 @@ fn assemble_static_html(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use rex_build::manifest::AppRouteAssets;
     use rex_core::DataStrategy;
 
     #[test]
@@ -373,5 +496,69 @@ mod tests {
         assert!(html.contains("global.css"));
         assert!(html.contains("page.css"));
         assert!(html.contains("<p>Styled</p>"));
+    }
+
+    #[test]
+    fn collect_static_app_routes_filters_correctly() {
+        let mut manifest = AssetManifest::new("test".into());
+        manifest.app_routes.insert(
+            "/".to_string(),
+            AppRouteAssets {
+                client_chunks: vec!["chunk.js".into()],
+                layout_chain: vec![],
+                render_mode: RenderMode::Static,
+            },
+        );
+        manifest.app_routes.insert(
+            "/about".to_string(),
+            AppRouteAssets {
+                client_chunks: vec!["chunk.js".into()],
+                layout_chain: vec![],
+                render_mode: RenderMode::Static,
+            },
+        );
+        manifest.app_routes.insert(
+            "/blog/:slug".to_string(),
+            AppRouteAssets {
+                client_chunks: vec!["chunk.js".into()],
+                layout_chain: vec![],
+                render_mode: RenderMode::ServerRendered,
+            },
+        );
+        manifest.app_routes.insert(
+            "/dashboard".to_string(),
+            AppRouteAssets {
+                client_chunks: vec!["chunk.js".into()],
+                layout_chain: vec![],
+                render_mode: RenderMode::ServerRendered,
+            },
+        );
+
+        let static_routes = collect_static_app_routes(&manifest);
+        let patterns: Vec<&str> = static_routes.iter().map(|(p, _)| p.as_str()).collect();
+
+        assert_eq!(static_routes.len(), 2);
+        assert!(patterns.contains(&"/"));
+        assert!(patterns.contains(&"/about"));
+    }
+
+    #[test]
+    fn collect_static_app_routes_empty_manifest() {
+        let manifest = AssetManifest::new("test".into());
+        assert!(collect_static_app_routes(&manifest).is_empty());
+    }
+
+    #[test]
+    fn collect_static_app_routes_all_server_rendered() {
+        let mut manifest = AssetManifest::new("test".into());
+        manifest.app_routes.insert(
+            "/".to_string(),
+            AppRouteAssets {
+                client_chunks: vec![],
+                layout_chain: vec![],
+                render_mode: RenderMode::ServerRendered,
+            },
+        );
+        assert!(collect_static_app_routes(&manifest).is_empty());
     }
 }

@@ -47,6 +47,8 @@ pub struct RscBuildResult {
     pub client_chunks: Vec<String>,
     /// Server action manifest mapping action IDs to their module/export.
     pub server_action_manifest: ServerActionManifest,
+    /// Module graph for detecting dynamic function usage per route.
+    pub module_graph: crate::rsc_graph::ModuleGraph,
 }
 
 /// Build RSC bundles for an app/ directory.
@@ -199,6 +201,7 @@ pub async fn build_rsc_bundles(
         client_manifest,
         client_chunks,
         server_action_manifest,
+        module_graph: graph,
     })
 }
 

@@ -1158,17 +1158,57 @@ fn classify_routes(
 ///   ○  /about           (static)
 ///   λ  /                (server-rendered)
 ///   λ  /blog/:slug      (server-rendered)
+/// Classify app routes into static/server-rendered categories.
+fn classify_app_routes(manifest: &rex_build::AssetManifest) -> (Vec<RouteInfo>, usize, usize) {
+    use rex_core::RenderMode;
+
+    let mut sorted: Vec<_> = manifest.app_routes.keys().collect();
+    sorted.sort();
+
+    let mut static_count = 0usize;
+    let mut dynamic_count = 0usize;
+    let mut infos = Vec::with_capacity(sorted.len());
+
+    for pattern in &sorted {
+        let render_mode = manifest
+            .app_routes
+            .get(*pattern)
+            .map(|a| a.render_mode)
+            .unwrap_or(RenderMode::ServerRendered);
+
+        let (icon, label) = match render_mode {
+            RenderMode::Static => {
+                static_count += 1;
+                ("\u{25cb}", "static") // ○
+            }
+            RenderMode::ServerRendered => {
+                dynamic_count += 1;
+                ("\u{03bb}", "server") // λ
+            }
+        };
+
+        infos.push(RouteInfo {
+            pattern: (*pattern).clone(),
+            icon,
+            label,
+        });
+    }
+
+    (infos, static_count, dynamic_count)
+}
+
 fn print_route_summary_with_manifest(
     routes: &[rex_core::Route],
     api_routes: &[rex_core::Route],
     manifest: &rex_build::AssetManifest,
 ) {
-    if routes.is_empty() && api_routes.is_empty() {
+    if routes.is_empty() && api_routes.is_empty() && manifest.app_routes.is_empty() {
         return;
     }
 
-    let (infos, static_count, dynamic_count) = classify_routes(routes, manifest);
+    let (infos, mut static_count, mut dynamic_count) = classify_routes(routes, manifest);
 
+    // Pages router routes
     for info in &infos {
         eprintln!(
             "    {} {} {}",
@@ -1176,6 +1216,22 @@ fn print_route_summary_with_manifest(
             dim(&format!("{:<30}", info.pattern)),
             dim(&format!("({})", info.label))
         );
+    }
+
+    // App router routes
+    if !manifest.app_routes.is_empty() {
+        let (app_infos, app_static, app_dynamic) = classify_app_routes(manifest);
+        static_count += app_static;
+        dynamic_count += app_dynamic;
+
+        for info in &app_infos {
+            eprintln!(
+                "    {} {} {}",
+                dim(info.icon),
+                dim(&format!("{:<30}", info.pattern)),
+                dim(&format!("({})", info.label))
+            );
+        }
     }
 
     for route in api_routes {
@@ -1844,6 +1900,58 @@ mod tests {
         let (_, static_count, dynamic_count) = classify_routes(&routes, &manifest);
 
         assert_eq!(static_count, 1);
+        assert_eq!(dynamic_count, 0);
+    }
+
+    #[test]
+    fn classify_app_routes_static_and_dynamic() {
+        use rex_build::manifest::AppRouteAssets;
+        use rex_core::RenderMode;
+
+        let mut manifest = rex_build::AssetManifest::new("test".into());
+        manifest.app_routes.insert(
+            "/".to_string(),
+            AppRouteAssets {
+                client_chunks: vec![],
+                layout_chain: vec![],
+                render_mode: RenderMode::Static,
+            },
+        );
+        manifest.app_routes.insert(
+            "/about".to_string(),
+            AppRouteAssets {
+                client_chunks: vec![],
+                layout_chain: vec![],
+                render_mode: RenderMode::Static,
+            },
+        );
+        manifest.app_routes.insert(
+            "/blog/:slug".to_string(),
+            AppRouteAssets {
+                client_chunks: vec![],
+                layout_chain: vec![],
+                render_mode: RenderMode::ServerRendered,
+            },
+        );
+
+        let (infos, static_count, dynamic_count) = classify_app_routes(&manifest);
+
+        assert_eq!(static_count, 2);
+        assert_eq!(dynamic_count, 1);
+        assert_eq!(infos.len(), 3);
+
+        // Verify sorted order
+        assert_eq!(infos[0].pattern, "/");
+        assert_eq!(infos[1].pattern, "/about");
+        assert_eq!(infos[2].pattern, "/blog/:slug");
+    }
+
+    #[test]
+    fn classify_app_routes_empty() {
+        let manifest = rex_build::AssetManifest::new("test".into());
+        let (infos, static_count, dynamic_count) = classify_app_routes(&manifest);
+        assert!(infos.is_empty());
+        assert_eq!(static_count, 0);
         assert_eq!(dynamic_count, 0);
     }
 }
