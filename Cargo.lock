@@ -4258,6 +4258,7 @@ dependencies = [
  "oxc_span 0.115.0",
  "oxc_syntax 0.115.0",
  "oxc_transformer 0.115.0",
+ "reqwest",
  "rex_core",
  "rex_mdx",
  "rex_router",
