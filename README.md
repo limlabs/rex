@@ -17,15 +17,15 @@ Benchmarked against Next.js 15 on the same pages with Apache Bench (10k requests
 
 | Metric | Rex | Next.js 15 |
 |--------|-----|-----------|
-| **SSR throughput** | 28,715 req/s | 3,523 req/s |
-| **SSR latency** | 3.5 ms | 28.4 ms |
-| **Production build** | 126 ms | 7,979 ms |
-| **Dev cold start** | 188 ms | 2,989 ms |
+| **SSR throughput** | 29,222 req/s | 4,054 req/s |
+| **SSR latency** | 3.4 ms | 24.7 ms |
+| **Production build** | 83 ms | 5,770 ms |
+| **Dev cold start** | 205 ms | 2,908 ms |
 | **Install size** | 118 MB | 342 MB |
-| **Install time** | 842 ms | 5,508 ms |
-| **Lint** | 23 ms (oxlint) | 1,015 ms (eslint) |
+| **Install time** | 955 ms | 7,232 ms |
+| **Lint** | 24 ms (oxlint) | 1,358 ms (eslint) |
 
-Reproduce: `cd benchmarks && uv run python bench.py --suite dx,server --framework rex,nextjs --iterations 1` — install times measured with cold npm cache at 126.8 Mbps (speed auto-detected from npm registry).
+Reproduce: `cd benchmarks && uv run python bench.py --suite dx,server --framework rex,nextjs --iterations 1`. Raw data and methodology in [benchmarks/](benchmarks/METHODOLOGY.md).
 
 ## Quick Start
 

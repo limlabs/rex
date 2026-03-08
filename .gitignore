@@ -11,6 +11,7 @@ witness-reports/
 __pycache__/
 __marimo__/
 benchmarks/results*.json
+!benchmarks/results-readme.json
 .tanstack
 .env
 .env*
