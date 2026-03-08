@@ -6,4 +6,3 @@ COPY pages pages
 RUN rex build
 
 EXPOSE 3000
-CMD ["rex", "start", "--port", "3000"]
