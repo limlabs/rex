@@ -5,7 +5,7 @@
 //! reference stubs via rolldown aliases.
 
 use crate::client_manifest::ClientReferenceManifest;
-use crate::rsc_build_config::{build_rex_aliases, react_treeshake_options, RscBuildContext};
+use crate::rsc_build_config::{build_rex_server_aliases, react_treeshake_options, RscBuildContext};
 use crate::rsc_entries::generate_server_entry;
 use crate::rsc_graph::ModuleGraph;
 use crate::server_action_manifest::ServerActionManifest;
@@ -44,7 +44,7 @@ pub(crate) async fn build_rsc_server_bundle(
     fs::write(&entry_path, &entry_source)?;
 
     // Build aliases: rex/* built-ins + "use client" module stubs
-    let mut aliases = build_rex_aliases()?;
+    let mut aliases = build_rex_server_aliases()?;
     for (original, stub) in stub_aliases {
         aliases.push((
             original.to_string_lossy().to_string(),

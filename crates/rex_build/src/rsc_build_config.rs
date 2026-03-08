@@ -72,7 +72,7 @@ impl<'a> RscBuildContext<'a> {
     }
 }
 
-/// Build rolldown resolve aliases for `rex/*` built-in imports.
+/// Build rolldown resolve aliases for `rex/*` built-in imports (client bundles).
 ///
 /// Maps `rex/link`, `rex/head`, `rex/router`, `rex/image` to their
 /// corresponding runtime files in `runtime/client/`, and `rex/actions`
@@ -108,6 +108,34 @@ pub(crate) fn build_rex_aliases() -> Result<Vec<(String, Vec<Option<String>>)>> 
         for ext in &["ts", "tsx", "js", "jsx"] {
             let candidate = server_dir.join(format!("{file_stem}.{ext}"));
             if candidate.exists() {
+                aliases.push((
+                    specifier.to_string(),
+                    vec![Some(candidate.to_string_lossy().to_string())],
+                ));
+                break;
+            }
+        }
+    }
+
+    Ok(aliases)
+}
+
+/// Build rolldown resolve aliases for RSC server bundles.
+///
+/// Same as [`build_rex_aliases`] but overrides `rex/link` and `rex/head`
+/// with server-side stubs from `runtime/server/` that don't contain
+/// event handlers (which are rejected by React's flight protocol).
+pub(crate) fn build_rex_server_aliases() -> Result<Vec<(String, Vec<Option<String>>)>> {
+    let mut aliases = build_rex_aliases()?;
+    let server_dir = runtime_server_dir()?;
+
+    let server_overrides = [("rex/link", "link"), ("rex/head", "head")];
+    for (specifier, file_stem) in &server_overrides {
+        for ext in &["ts", "tsx", "js", "jsx"] {
+            let candidate = server_dir.join(format!("{file_stem}.{ext}"));
+            if candidate.exists() {
+                // Remove the existing client alias and add server one
+                aliases.retain(|(s, _)| s != *specifier);
                 aliases.push((
                     specifier.to_string(),
                     vec![Some(candidate.to_string_lossy().to_string())],
