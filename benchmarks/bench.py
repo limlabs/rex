@@ -545,7 +545,8 @@ def dx_framework(
     section(fw, "DX")
 
     # ── Rex binary size (users must download this too) ──
-    if fw == "rex" and REX_BIN.exists():
+    bin_mb = 0.0
+    if fw in ("rex", "rex_app") and REX_BIN.exists():
         bin_mb = file_size_mb(REX_BIN)
         print(f"  {bold('Binary size:')}    {green(f'{bin_mb}MB')}")
         add("dx", fw, "binary_mb", bin_mb)
@@ -555,10 +556,15 @@ def dx_framework(
     if nm.exists():
         deps = count_deps(project_dir)
         nm_mb = dir_size_mb(nm)
+        total_mb = round(nm_mb + bin_mb, 1)
         print(f"  {bold('Dependencies:')}   {green(str(deps))}")
         print(f"  {bold('node_modules:')}   {green(f'{nm_mb}MB')}")
+        print(
+            f"  {bold('Install size:')}   {green(f'{total_mb}MB')}  {dim('(node_modules + binary)') if bin_mb else ''}"
+        )
         add("dx", fw, "dependency_count", deps)
         add("dx", fw, "node_modules_mb", nm_mb)
+        add("dx", fw, "install_size_mb", total_mb)
 
     # ── npm install time (clean) ──
     install_samples: list[float] = []
