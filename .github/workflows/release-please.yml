@@ -70,8 +70,15 @@ jobs:
           git add Cargo.lock '*/package-lock.json' 'packages/*/package-lock.json'
           if [ -n "$(git diff --cached --name-only)" ]; then
             git commit -m "chore: update lockfiles"
+            # Push with GITHUB_TOKEN so this commit does NOT re-trigger workflows.
+            # The checkout step uses RELEASE_PAT (needed to write to the PR branch),
+            # but PAT-based pushes trigger workflow runs, causing beta-release to
+            # double-fire. GITHUB_TOKEN pushes are deliberately ignored by Actions.
+            git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}"
             git push
           fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-linux:
     name: Build Linux (x86_64)
