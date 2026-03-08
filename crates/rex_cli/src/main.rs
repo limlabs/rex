@@ -56,7 +56,7 @@ enum Commands {
         #[arg(short, long, default_value = "3000", env = "PORT")]
         port: u16,
 
-        /// Host to bind to (also reads $HOST env var)
+        /// Host to bind to
         #[arg(short = 'H', long, default_value = "0.0.0.0", env = "HOST")]
         host: IpAddr,
 
