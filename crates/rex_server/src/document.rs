@@ -375,7 +375,7 @@ pub fn assemble_rsc_head_shell(client_chunks: &[String], client_manifest_json: &
 /// The head shell (from `assemble_rsc_head_shell`) already emitted
 /// `<!DOCTYPE html><html><head>...</head><body>` plus the module map and
 /// webpack shims. This function outputs:
-///   `<div id="__rex">` + SSR body content + `</div>` + scripts + `</body></html>`
+///   SSR body content + scripts + `</body></html>`
 ///
 /// The SSR HTML from V8 may contain `<html>...<body>...</body></html>` from
 /// the root layout; we strip those outer tags and extract only the body content.
@@ -394,10 +394,9 @@ pub fn assemble_rsc_body_tail(
 
     let mut html = String::with_capacity(body_content.len() + 2048);
 
-    // Wrap SSR content in __rex root div for hydration
-    html.push_str("<div id=\"__rex\">");
+    // RSC hydrates the full document (hydrateRoot(document, tree)),
+    // so emit the body content directly without a wrapper div.
     html.push_str(body_content);
-    html.push_str("</div>");
 
     // Inline flight data for hydration
     let escaped_flight = escape_script_content(flight_data);
@@ -518,8 +517,8 @@ mod tests {
             None,
         );
 
-        // Body content extracted and wrapped in __rex div
-        assert!(html.contains("<div id=\"__rex\"><div>Hello</div></div>"));
+        // Body content extracted from SSR HTML
+        assert!(html.contains("<div>Hello</div>"));
         // Flight data present
         assert!(html.contains("__REX_RSC_DATA__"));
         assert!(html.contains("0:\"hello\""));
@@ -537,7 +536,7 @@ mod tests {
         let html = assemble_rsc_body_tail(ssr, "", "0:\"hi\"", &[], "{}", false, None);
 
         // Falls back to using the entire SSR HTML as body content
-        assert!(html.contains("<div id=\"__rex\"><div>Hello</div></div>"));
+        assert!(html.contains("<div>Hello</div>"));
         assert!(html.contains("</body></html>"));
     }
 
@@ -554,8 +553,8 @@ mod tests {
             Some(r#"{"routes":{}}"#),
         );
 
-        // Body tail: __rex div → flight data → route manifest → component scripts → router → HMR
-        let rex_div_pos = html.find("__rex").unwrap();
+        // Body tail: body content → flight data → route manifest → component scripts → router → HMR
+        let body_content_pos = html.find("<p>test</p>").unwrap();
         let flight_pos = html.find("__REX_RSC_DATA__").unwrap();
         let comp_script_pos = html
             .find(r#"<script type="module" src="/_rex/static/rsc/comp.js">"#)
@@ -563,7 +562,7 @@ mod tests {
         let router_pos = html.find("router.js").unwrap();
         let hmr_pos = html.find("hmr-client.js").unwrap();
 
-        assert!(rex_div_pos < flight_pos);
+        assert!(body_content_pos < flight_pos);
         assert!(flight_pos < comp_script_pos);
         assert!(comp_script_pos < router_pos);
         assert!(router_pos < hmr_pos);
