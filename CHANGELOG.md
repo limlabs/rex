@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.12.0](https://github.com/limlabs/rex/compare/v0.11.0...v0.12.0) (2026-03-08)
+
+
+### Features
+
+* **ci:** add Railway deployment fixture and post-release deploy ([#86](https://github.com/limlabs/rex/issues/86)) ([54dc769](https://github.com/limlabs/rex/commit/54dc7691eadc83f901db11c43e7c3c8acb875737))
+
+
+### Bug Fixes
+
+* **ci:** fix cargo publish and smoke test failures in release workflow ([#122](https://github.com/limlabs/rex/issues/122)) ([e5fcb3a](https://github.com/limlabs/rex/commit/e5fcb3a8e3bffe3cdc480dda667610d290ef2a07))
+* **docker:** split ENTRYPOINT/CMD to prevent argument doubling ([#96](https://github.com/limlabs/rex/issues/96)) ([7e25b72](https://github.com/limlabs/rex/commit/7e25b72b9168e4c662510fd56cab7bdee30ab0fd))
+
 ## [0.11.0](https://github.com/limlabs/rex/compare/v0.10.0...v0.11.0) (2026-03-08)
 
 
