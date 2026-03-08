@@ -343,6 +343,7 @@ impl TestAppBuilder {
                 app_route_trie,
                 has_mcp_tools: false,
                 prerendered: std::collections::HashMap::new(),
+                prerendered_app: std::collections::HashMap::new(),
             })),
         });
 

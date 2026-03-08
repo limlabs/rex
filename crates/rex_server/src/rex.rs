@@ -254,17 +254,21 @@ impl Rex {
 
         // Automatic static optimization: pre-render eligible pages at startup.
         // In dev mode, skip pre-rendering so pages always reflect the latest code.
-        let prerendered = if !config.dev {
-            crate::prerender::prerender_static_pages(
+        let (prerendered, prerendered_app) = if !config.dev {
+            let pages = crate::prerender::prerender_static_pages(
                 &pool,
                 &manifest,
                 &scan.routes,
                 &manifest_json,
                 document_descriptor.as_ref(),
             )
-            .await
+            .await;
+            let app =
+                crate::prerender::prerender_static_app_routes(&pool, &manifest, &manifest_json)
+                    .await;
+            (pages, app)
         } else {
-            HashMap::new()
+            (HashMap::new(), HashMap::new())
         };
 
         let image_cache = rex_image::ImageCache::new(
@@ -296,6 +300,7 @@ impl Rex {
                 app_route_trie,
                 has_mcp_tools: !scan.mcp_tools.is_empty(),
                 prerendered,
+                prerendered_app,
             })),
         });
 

@@ -146,8 +146,29 @@ pub async fn build_bundles(
         let rsc_result =
             crate::rsc_bundler::build_rsc_bundles(config, app_scan, &build_id, &define).await?;
 
-        // Populate app_routes in manifest
+        // Populate app_routes in manifest with automatic static optimization
         for route in &app_scan.routes {
+            let has_dynamic_segments = !route.dynamic_segments.is_empty();
+
+            // Check if any server component in this route's tree uses dynamic functions
+            let mut route_entries: Vec<std::path::PathBuf> = Vec::new();
+            route_entries.push(route.page_path.clone());
+            route_entries.extend(route.layout_chain.iter().cloned());
+            // Canonicalize paths to match the module graph keys
+            let canonical_entries: Vec<std::path::PathBuf> = route_entries
+                .iter()
+                .filter_map(|p| p.canonicalize().ok())
+                .collect();
+            let uses_dynamic = rsc_result
+                .module_graph
+                .has_dynamic_functions(&canonical_entries);
+
+            let render_mode = if has_dynamic_segments || uses_dynamic {
+                rex_core::RenderMode::ServerRendered
+            } else {
+                rex_core::RenderMode::Static
+            };
+
             manifest.app_routes.insert(
                 route.pattern.clone(),
                 crate::manifest::AppRouteAssets {
@@ -157,8 +178,7 @@ pub async fn build_bundles(
                         .iter()
                         .map(|p| p.to_string_lossy().to_string())
                         .collect(),
-                    // App routes default to server-rendered; future: auto-detect
-                    render_mode: rex_core::RenderMode::ServerRendered,
+                    render_mode,
                 },
             );
         }

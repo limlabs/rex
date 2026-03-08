@@ -246,6 +246,15 @@ pub(super) async fn page_handler_inner(
                     }
                 }
             }
+            // Automatic static optimization: serve pre-rendered app route HTML
+            if let Some(cached) = hot.prerendered_app.get(&app_match.route.pattern) {
+                debug!(path, "Serving pre-rendered static app route");
+                return Response::builder()
+                    .header("content-type", "text/html; charset=utf-8")
+                    .header("x-rex-render-mode", "static")
+                    .body(Body::from(cached.html.clone()))
+                    .expect("response build");
+            }
             return render_app_route(state, hot, &app_match, path, uri).await;
         }
     }
