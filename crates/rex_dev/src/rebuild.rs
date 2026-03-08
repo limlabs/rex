@@ -74,6 +74,7 @@ pub async fn handle_file_event(
             let hmr_manifest_json = serde_json::json!({
                 "build_id": &build_result.build_id,
                 "pages": &build_result.manifest.pages,
+                "app_routes": &build_result.manifest.app_routes,
             });
 
             // Snapshot the old hot state (Arc clone, cheap)
@@ -114,6 +115,8 @@ pub async fn handle_file_event(
                 manifest_json,
                 document_descriptor,
                 has_mcp_tools: !scan.mcp_tools.is_empty(),
+                // Dev mode: no pre-rendering (always dynamic for fast iteration)
+                prerendered: std::collections::HashMap::new(),
                 // Preserve unchanged fields
                 route_trie: old_hot.route_trie.clone(),
                 api_route_trie: old_hot.api_route_trie.clone(),
@@ -128,6 +131,7 @@ pub async fn handle_file_event(
             let rel_path = event
                 .path
                 .strip_prefix(&config.pages_dir)
+                .or_else(|_| event.path.strip_prefix(&config.app_dir))
                 .unwrap_or(&event.path);
             hmr.send_update(&rel_path.to_string_lossy(), hmr_manifest_json);
 
@@ -210,6 +214,8 @@ pub async fn handle_file_event(
                 document_descriptor,
                 app_route_trie,
                 has_mcp_tools: !scan.mcp_tools.is_empty(),
+                // Dev mode: no pre-rendering
+                prerendered: std::collections::HashMap::new(),
             });
 
             // Signal full reload to clients

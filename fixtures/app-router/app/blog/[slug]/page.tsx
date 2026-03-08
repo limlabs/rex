@@ -1,5 +1,16 @@
 import React from 'react';
 
+export function generateMetadata({ params }: { params: { slug: string } }) {
+  return {
+    title: `Blog: ${params.slug}`,
+    description: `Read about ${params.slug}`,
+    openGraph: {
+      title: `Blog: ${params.slug}`,
+      type: 'article',
+    },
+  };
+}
+
 // Server component with dynamic params
 export default function BlogPost({ params }: { params: { slug: string } }) {
   const { slug } = params;

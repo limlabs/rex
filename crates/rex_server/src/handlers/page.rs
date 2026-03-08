@@ -266,6 +266,16 @@ pub(super) async fn page_handler_inner(
         }
     };
 
+    // Automatic static optimization: serve pre-rendered HTML without V8
+    if let Some(html) = hot.prerendered.get(&route_match.route.pattern) {
+        debug!(path, "Serving pre-rendered static page");
+        return Response::builder()
+            .header("content-type", "text/html; charset=utf-8")
+            .header("x-rex-render-mode", "static")
+            .body(Body::from(html.clone()))
+            .expect("response build");
+    }
+
     let route_key = route_match.route.module_name();
     let params = route_match.params.clone();
 
