@@ -234,7 +234,8 @@ async fn cmd_dev(
     }
 
     // Start file watcher (watches project root for CSS changes too)
-    let event_rx = rex_dev::start_watcher(&config.project_root, &config.pages_dir)?;
+    let event_rx =
+        rex_dev::start_watcher(&config.project_root, &config.pages_dir, &config.app_dir)?;
 
     // Bridge sync file watcher to async rebuild handler
     let (rebuild_tx, mut rebuild_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -414,7 +415,7 @@ async fn cmd_build(root: PathBuf) -> Result<()> {
     }
 
     eprintln!();
-    print_route_summary(&scan.routes, &scan.api_routes);
+    print_route_summary_with_manifest(&scan.routes, &scan.api_routes, &build_result.manifest);
     eprintln!();
     Ok(())
 }
@@ -1100,6 +1101,109 @@ fn print_route_summary(routes: &[rex_core::Route], api_routes: &[rex_core::Route
     }
 }
 
+/// Classified route info for build summary display.
+struct RouteInfo {
+    pattern: String,
+    icon: &'static str,
+    label: &'static str,
+}
+
+/// Classify routes by render mode and count static vs. server-rendered pages.
+///
+/// Returns (route_infos, static_count, dynamic_count) sorted by pattern.
+fn classify_routes(
+    routes: &[rex_core::Route],
+    manifest: &rex_build::AssetManifest,
+) -> (Vec<RouteInfo>, usize, usize) {
+    use rex_core::RenderMode;
+
+    let mut sorted: Vec<_> = routes.iter().collect();
+    sorted.sort_by(|a, b| a.pattern.cmp(&b.pattern));
+
+    let mut static_count = 0usize;
+    let mut dynamic_count = 0usize;
+    let mut infos = Vec::with_capacity(sorted.len());
+
+    for route in &sorted {
+        let render_mode = manifest
+            .pages
+            .get(&route.pattern)
+            .map(|p| p.render_mode)
+            .unwrap_or(RenderMode::ServerRendered);
+
+        let (icon, label) = match render_mode {
+            RenderMode::Static => {
+                static_count += 1;
+                ("\u{25cb}", "static") // ○
+            }
+            RenderMode::ServerRendered => {
+                dynamic_count += 1;
+                ("\u{03bb}", "server") // λ
+            }
+        };
+
+        infos.push(RouteInfo {
+            pattern: route.pattern.clone(),
+            icon,
+            label,
+        });
+    }
+
+    (infos, static_count, dynamic_count)
+}
+
+/// Print route summary with static/dynamic indicators (used by `rex build`).
+///
+/// Like Next.js, shows:
+///   ○  /about           (static)
+///   λ  /                (server-rendered)
+///   λ  /blog/:slug      (server-rendered)
+fn print_route_summary_with_manifest(
+    routes: &[rex_core::Route],
+    api_routes: &[rex_core::Route],
+    manifest: &rex_build::AssetManifest,
+) {
+    if routes.is_empty() && api_routes.is_empty() {
+        return;
+    }
+
+    let (infos, static_count, dynamic_count) = classify_routes(routes, manifest);
+
+    for info in &infos {
+        eprintln!(
+            "    {} {} {}",
+            dim(info.icon),
+            dim(&format!("{:<30}", info.pattern)),
+            dim(&format!("({})", info.label))
+        );
+    }
+
+    for route in api_routes {
+        eprintln!(
+            "    {} {} {}",
+            dim("\u{03bb}"),
+            dim(&format!("{:<30}", route.pattern)),
+            dim("(api)")
+        );
+    }
+
+    eprintln!();
+
+    let mut legend = Vec::new();
+    if static_count > 0 {
+        legend.push(format!("\u{25cb} static ({static_count})"));
+    }
+    if dynamic_count > 0 {
+        legend.push(format!("\u{03bb} server ({dynamic_count})"));
+    }
+    if !api_routes.is_empty() {
+        legend.push(format!("\u{03bb} api ({})", api_routes.len()));
+    }
+    if !legend.is_empty() {
+        eprintln!("  {}", dim(&legend.join("  ")));
+    }
+}
+
 async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
     let start = std::time::Instant::now();
 
@@ -1659,5 +1763,87 @@ mod tests {
             result.contains("\"hello\""),
             "expected double quotes with custom options, got: {result}"
         );
+    }
+
+    fn make_route(
+        pattern: &str,
+        dynamic_segments: Vec<rex_core::DynamicSegment>,
+    ) -> rex_core::Route {
+        rex_core::Route {
+            pattern: pattern.into(),
+            file_path: format!("pages{pattern}.tsx").into(),
+            abs_path: format!("/pages{pattern}.tsx").into(),
+            page_type: rex_core::PageType::Regular,
+            dynamic_segments,
+            specificity: 0,
+        }
+    }
+
+    #[test]
+    fn classify_routes_static_and_dynamic() {
+        use rex_core::DataStrategy;
+
+        let routes = vec![
+            make_route("/about", vec![]),
+            make_route("/", vec![]),
+            make_route(
+                "/blog/:slug",
+                vec![rex_core::DynamicSegment::Single("slug".into())],
+            ),
+        ];
+
+        let mut manifest = rex_build::AssetManifest::new("test".into());
+        manifest.add_page("/", "index.js", DataStrategy::None, false);
+        manifest.add_page("/about", "about.js", DataStrategy::None, false);
+        manifest.add_page("/blog/:slug", "slug.js", DataStrategy::None, true);
+
+        let (infos, static_count, dynamic_count) = classify_routes(&routes, &manifest);
+
+        // Sorted by pattern
+        assert_eq!(infos[0].pattern, "/");
+        assert_eq!(infos[1].pattern, "/about");
+        assert_eq!(infos[2].pattern, "/blog/:slug");
+
+        assert_eq!(static_count, 2);
+        assert_eq!(dynamic_count, 1);
+
+        assert_eq!(infos[0].label, "static");
+        assert_eq!(infos[2].label, "server");
+    }
+
+    #[test]
+    fn classify_routes_gssp_is_server() {
+        use rex_core::DataStrategy;
+
+        let routes = vec![make_route("/dashboard", vec![])];
+
+        let mut manifest = rex_build::AssetManifest::new("test".into());
+        manifest.add_page(
+            "/dashboard",
+            "dashboard.js",
+            DataStrategy::GetServerSideProps,
+            false,
+        );
+
+        let (infos, static_count, dynamic_count) = classify_routes(&routes, &manifest);
+
+        assert_eq!(static_count, 0);
+        assert_eq!(dynamic_count, 1);
+        assert_eq!(infos[0].label, "server");
+    }
+
+    #[test]
+    fn classify_routes_gsp_is_static() {
+        use rex_core::DataStrategy;
+
+        let routes = vec![make_route("/posts", vec![])];
+
+        let mut manifest = rex_build::AssetManifest::new("test".into());
+        manifest.add_page("/posts", "posts.js", DataStrategy::GetStaticProps, false);
+
+        let (_, static_count, dynamic_count) = classify_routes(&routes, &manifest);
+
+        assert_eq!(static_count, 1);
+        assert_eq!(dynamic_count, 0);
     }
 }

@@ -10,6 +10,38 @@ pub enum DataStrategy {
     GetStaticProps,
 }
 
+/// How a page is rendered at request time.
+///
+/// Determined at build time from data strategy and route shape:
+/// - **Static**: pre-rendered at build/startup, served from cache without V8
+/// - **ServerRendered**: rendered on every request via V8
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum RenderMode {
+    /// Pre-rendered HTML served from cache (no GSSP, no dynamic segments)
+    Static,
+    /// Rendered on every request via V8
+    #[default]
+    ServerRendered,
+}
+
+impl RenderMode {
+    /// Determine render mode from data strategy and whether the route has dynamic segments.
+    pub fn from_strategy(strategy: &DataStrategy, has_dynamic_segments: bool) -> Self {
+        match strategy {
+            // No data function + no dynamic segments → fully static
+            DataStrategy::None if !has_dynamic_segments => RenderMode::Static,
+            // getStaticProps + no dynamic segments → static (pre-rendered with data)
+            DataStrategy::GetStaticProps if !has_dynamic_segments => RenderMode::Static,
+            // Everything else is server-rendered
+            _ => RenderMode::ServerRendered,
+        }
+    }
+
+    pub fn is_static(self) -> bool {
+        self == RenderMode::Static
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DynamicSegment {
     /// `[slug]` - matches a single path segment
@@ -506,5 +538,130 @@ no_tui = true
         assert!(matches!(result.action, MiddlewareAction::Rewrite));
         assert_eq!(result.url.as_deref(), Some("/internal"));
         assert_eq!(result.response_headers.get("x-rewritten").unwrap(), "true");
+    }
+
+    #[test]
+    fn render_mode_none_no_dynamic_is_static() {
+        let mode = RenderMode::from_strategy(&DataStrategy::None, false);
+        assert_eq!(mode, RenderMode::Static);
+        assert!(mode.is_static());
+    }
+
+    #[test]
+    fn render_mode_gsp_no_dynamic_is_static() {
+        let mode = RenderMode::from_strategy(&DataStrategy::GetStaticProps, false);
+        assert_eq!(mode, RenderMode::Static);
+    }
+
+    #[test]
+    fn render_mode_gssp_is_server_rendered() {
+        let mode = RenderMode::from_strategy(&DataStrategy::GetServerSideProps, false);
+        assert_eq!(mode, RenderMode::ServerRendered);
+        assert!(!mode.is_static());
+    }
+
+    #[test]
+    fn render_mode_none_with_dynamic_is_server_rendered() {
+        let mode = RenderMode::from_strategy(&DataStrategy::None, true);
+        assert_eq!(mode, RenderMode::ServerRendered);
+    }
+
+    #[test]
+    fn render_mode_gsp_with_dynamic_is_server_rendered() {
+        let mode = RenderMode::from_strategy(&DataStrategy::GetStaticProps, true);
+        assert_eq!(mode, RenderMode::ServerRendered);
+    }
+
+    #[test]
+    fn render_mode_gssp_with_dynamic_is_server_rendered() {
+        let mode = RenderMode::from_strategy(&DataStrategy::GetServerSideProps, true);
+        assert_eq!(mode, RenderMode::ServerRendered);
+    }
+
+    #[test]
+    fn render_mode_default_is_server_rendered() {
+        assert_eq!(RenderMode::default(), RenderMode::ServerRendered);
+    }
+
+    #[test]
+    fn render_mode_serde_round_trip() {
+        let json = serde_json::to_string(&RenderMode::Static).unwrap();
+        let loaded: RenderMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded, RenderMode::Static);
+
+        let json = serde_json::to_string(&RenderMode::ServerRendered).unwrap();
+        let loaded: RenderMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded, RenderMode::ServerRendered);
+    }
+
+    #[test]
+    fn test_match_pattern_wildcard() {
+        let result = ProjectConfig::match_pattern("/api/*", "/api/users/list");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_match_pattern_wildcard_with_param() {
+        let result = ProjectConfig::match_pattern("/:version/*", "/v2/docs/intro");
+        let params = result.unwrap();
+        assert_eq!(params.get("version").unwrap(), "v2");
+    }
+
+    #[test]
+    fn test_match_pattern_wildcard_no_match() {
+        // Segments before wildcard must match
+        let result = ProjectConfig::match_pattern("/api/:name/*", "/other/foo/bar");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_build_config_resolved_aliases_relative() {
+        let config = BuildConfig {
+            alias: {
+                let mut m = HashMap::new();
+                m.insert("@components".into(), "./src/components".into());
+                m
+            },
+            sourcemap: true,
+        };
+        let aliases = config.resolved_aliases(Path::new("/project"));
+        assert_eq!(aliases.len(), 1);
+        let (key, vals) = &aliases[0];
+        assert_eq!(key, "@components");
+        assert!(vals[0].as_ref().unwrap().contains("project"));
+        assert!(vals[0].as_ref().unwrap().contains("src/components"));
+    }
+
+    #[test]
+    fn test_build_config_resolved_aliases_absolute() {
+        let config = BuildConfig {
+            alias: {
+                let mut m = HashMap::new();
+                m.insert("react".into(), "preact/compat".into());
+                m
+            },
+            sourcemap: true,
+        };
+        let aliases = config.resolved_aliases(Path::new("/project"));
+        let (_, vals) = &aliases[0];
+        assert_eq!(vals[0].as_ref().unwrap(), "preact/compat");
+    }
+
+    #[test]
+    fn test_build_config_default() {
+        let config = BuildConfig::default();
+        assert!(config.alias.is_empty());
+        assert!(config.sourcemap);
+    }
+
+    #[test]
+    fn test_data_strategy_serde() {
+        let json = serde_json::to_string(&DataStrategy::GetStaticProps).unwrap();
+        let loaded: DataStrategy = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded, DataStrategy::GetStaticProps);
+
+        let json = serde_json::to_string(&DataStrategy::None).unwrap();
+        let loaded: DataStrategy = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded, DataStrategy::None);
     }
 }

@@ -297,7 +297,8 @@ impl TestAppBuilder {
             } else {
                 DataStrategy::None
             };
-            manifest.add_page(&route.pattern, "test.js", strategy);
+            let has_dynamic = !route.dynamic_segments.is_empty();
+            manifest.add_page(&route.pattern, "test.js", strategy, has_dynamic);
         }
 
         let build_id = "test-build-id".to_string();
@@ -341,6 +342,7 @@ impl TestAppBuilder {
                 middleware_matchers,
                 app_route_trie,
                 has_mcp_tools: false,
+                prerendered: std::collections::HashMap::new(),
             })),
         });
 

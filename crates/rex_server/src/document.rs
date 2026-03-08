@@ -397,7 +397,7 @@ pub fn assemble_rsc_head_shell(client_chunks: &[String], client_manifest_json: &
 /// the root layout; we strip those outer tags and extract only the body content.
 pub fn assemble_rsc_body_tail(
     ssr_html: &str,
-    _head_html: &str,
+    head_html: &str,
     flight_data: &str,
     client_chunks: &[String],
     _client_manifest_json: &str,
@@ -409,6 +409,13 @@ pub fn assemble_rsc_body_tail(
     let body_content = extract_body_content(ssr_html);
 
     let mut html = String::with_capacity(body_content.len() + 2048);
+
+    // Metadata head elements (title, meta, link, etc.) from generateMetadata / metadata exports.
+    // Emitted at the top of the body — browsers relocate these to <head> automatically.
+    // This is the standard approach for streaming SSR (used by Next.js and others).
+    if !head_html.is_empty() {
+        html.push_str(head_html);
+    }
 
     // RSC hydrates the full document (hydrateRoot(document, tree)),
     // so emit the body content directly without a wrapper div.
@@ -591,5 +598,30 @@ mod tests {
 
         assert!(html.contains("__REX_RSC_MODULE_MAP__"));
         assert!(html.contains("abc"));
+    }
+
+    #[test]
+    fn rsc_body_tail_includes_metadata_head() {
+        let ssr = "<html><head></head><body><div>Content</div></body></html>";
+        let head_html = r#"<title>My Page</title><meta name="description" content="Test" />"#;
+        let html = assemble_rsc_body_tail(ssr, head_html, "0:{}", &[], "{}", false, None);
+
+        // Metadata head should appear before body content
+        let title_pos = html.find("<title>My Page</title>").unwrap();
+        let content_pos = html.find("<div>Content</div>").unwrap();
+        assert!(
+            title_pos < content_pos,
+            "Metadata head should appear before body content"
+        );
+        assert!(html.contains(r#"<meta name="description" content="Test" />"#));
+    }
+
+    #[test]
+    fn rsc_body_tail_empty_metadata_head() {
+        let ssr = "<html><head></head><body><div>Content</div></body></html>";
+        let html = assemble_rsc_body_tail(ssr, "", "0:{}", &[], "{}", false, None);
+
+        // No metadata head — body content should be first
+        assert!(html.starts_with("<div>Content</div>"));
     }
 }

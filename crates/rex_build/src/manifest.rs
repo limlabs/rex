@@ -1,5 +1,5 @@
 use crate::client_manifest::ClientReferenceManifest;
-use rex_core::DataStrategy;
+use rex_core::{DataStrategy, RenderMode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -58,6 +58,9 @@ pub struct PageAssets {
     /// Data-fetching strategy detected at build time from source exports
     #[serde(default)]
     pub data_strategy: DataStrategy,
+    /// Whether this page is statically pre-rendered or server-rendered per request
+    #[serde(default)]
+    pub render_mode: RenderMode,
 }
 
 /// Assets for an app/ route (RSC).
@@ -67,6 +70,10 @@ pub struct AppRouteAssets {
     pub client_chunks: Vec<String>,
     /// Layout chain patterns (for nested rendering)
     pub layout_chain: Vec<String>,
+    /// Render mode for this app route (currently always ServerRendered;
+    /// future: auto-detect based on dynamic function usage)
+    #[serde(default)]
+    pub render_mode: RenderMode,
 }
 
 impl AssetManifest {
@@ -93,13 +100,16 @@ impl AssetManifest {
         route_pattern: &str,
         js_filename: &str,
         data_strategy: DataStrategy,
+        has_dynamic_segments: bool,
     ) {
+        let render_mode = RenderMode::from_strategy(&data_strategy, has_dynamic_segments);
         self.pages.insert(
             route_pattern.to_string(),
             PageAssets {
                 js: js_filename.to_string(),
                 css: Vec::new(),
                 data_strategy,
+                render_mode,
             },
         );
     }
@@ -110,13 +120,16 @@ impl AssetManifest {
         js_filename: &str,
         css_filenames: &[String],
         data_strategy: DataStrategy,
+        has_dynamic_segments: bool,
     ) {
+        let render_mode = RenderMode::from_strategy(&data_strategy, has_dynamic_segments);
         self.pages.insert(
             route_pattern.to_string(),
             PageAssets {
                 js: js_filename.to_string(),
                 css: css_filenames.to_vec(),
                 data_strategy,
+                render_mode,
             },
         );
     }
@@ -133,5 +146,132 @@ impl AssetManifest {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let json = std::fs::read_to_string(path)?;
         Ok(serde_json::from_str(&json)?)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use rex_core::{DataStrategy, RenderMode};
+
+    #[test]
+    fn add_page_static_no_dynamic() {
+        let mut m = AssetManifest::new("test".into());
+        m.add_page("/about", "about.js", DataStrategy::None, false);
+        let page = m.pages.get("/about").unwrap();
+        assert_eq!(page.js, "about.js");
+        assert_eq!(page.render_mode, RenderMode::Static);
+    }
+
+    #[test]
+    fn add_page_server_rendered_with_gssp() {
+        let mut m = AssetManifest::new("test".into());
+        m.add_page("/dash", "dash.js", DataStrategy::GetServerSideProps, false);
+        assert_eq!(
+            m.pages.get("/dash").unwrap().render_mode,
+            RenderMode::ServerRendered
+        );
+    }
+
+    #[test]
+    fn add_page_server_rendered_dynamic_segment() {
+        let mut m = AssetManifest::new("test".into());
+        m.add_page("/blog/:slug", "slug.js", DataStrategy::None, true);
+        assert_eq!(
+            m.pages.get("/blog/:slug").unwrap().render_mode,
+            RenderMode::ServerRendered
+        );
+    }
+
+    #[test]
+    fn add_page_with_css_sets_render_mode() {
+        let mut m = AssetManifest::new("test".into());
+        m.add_page_with_css(
+            "/",
+            "index.js",
+            &["style.css".into()],
+            DataStrategy::GetStaticProps,
+            false,
+        );
+        let page = m.pages.get("/").unwrap();
+        assert_eq!(page.css, vec!["style.css"]);
+        assert_eq!(page.render_mode, RenderMode::Static);
+    }
+
+    #[test]
+    fn save_and_load_round_trip() {
+        let tmp = std::env::temp_dir().join("rex_manifest_test.json");
+        let mut m = AssetManifest::new("build123".into());
+        m.add_page("/", "index.js", DataStrategy::None, false);
+        m.save(&tmp).unwrap();
+
+        let loaded = AssetManifest::load(&tmp).unwrap();
+        assert_eq!(loaded.build_id, "build123");
+        assert_eq!(
+            loaded.pages.get("/").unwrap().render_mode,
+            RenderMode::Static
+        );
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn save_and_load_preserves_all_fields() {
+        let tmp = std::env::temp_dir().join("rex_manifest_full_test.json");
+        let mut m = AssetManifest::new("full-test".into());
+        m.add_page("/", "index.js", DataStrategy::None, false);
+        m.add_page("/dash", "dash.js", DataStrategy::GetServerSideProps, false);
+        m.add_page_with_css(
+            "/styled",
+            "styled.js",
+            &["style.css".into(), "extra.css".into()],
+            DataStrategy::GetStaticProps,
+            false,
+        );
+        m.global_css = vec!["global.css".into()];
+        m.shared_chunks = vec!["react-chunk.js".into()];
+        m.app_script = Some("_app.js".into());
+        m.css_contents
+            .insert("style.css".into(), ".foo{color:red}".into());
+        m.save(&tmp).unwrap();
+
+        let loaded = AssetManifest::load(&tmp).unwrap();
+        assert_eq!(loaded.build_id, "full-test");
+        assert_eq!(loaded.pages.len(), 3);
+        assert_eq!(
+            loaded.pages.get("/").unwrap().render_mode,
+            RenderMode::Static
+        );
+        assert_eq!(
+            loaded.pages.get("/dash").unwrap().render_mode,
+            RenderMode::ServerRendered
+        );
+        let styled = loaded.pages.get("/styled").unwrap();
+        assert_eq!(styled.render_mode, RenderMode::Static);
+        assert_eq!(styled.css, vec!["style.css", "extra.css"]);
+        assert_eq!(loaded.global_css, vec!["global.css"]);
+        assert_eq!(loaded.shared_chunks, vec!["react-chunk.js"]);
+        assert_eq!(loaded.app_script.as_deref(), Some("_app.js"));
+        assert_eq!(
+            loaded.css_contents.get("style.css").unwrap(),
+            ".foo{color:red}"
+        );
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn new_manifest_has_empty_collections() {
+        let m = AssetManifest::new("empty".into());
+        assert!(m.pages.is_empty());
+        assert!(m.global_css.is_empty());
+        assert!(m.shared_chunks.is_empty());
+        assert!(m.app_script.is_none());
+        assert!(m.css_contents.is_empty());
+        assert!(m.middleware_matchers.is_none());
+        assert!(m.app_routes.is_empty());
+        assert!(m.client_reference_manifest.is_none());
+        assert!(m.rsc_server_bundle.is_none());
+        assert!(m.rsc_ssr_bundle.is_none());
+        assert!(m.server_actions.is_empty());
     }
 }

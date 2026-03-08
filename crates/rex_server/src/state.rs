@@ -1,6 +1,7 @@
 use crate::document::DocumentDescriptor;
 use rex_core::ProjectConfig;
 use rex_router::RouteTrie;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -27,6 +28,9 @@ pub struct HotState {
     pub app_route_trie: Option<RouteTrie>,
     /// Whether mcp/ directory has tool files.
     pub has_mcp_tools: bool,
+    /// Pre-rendered HTML for statically optimized pages (route pattern → full HTML).
+    /// Populated at startup for production builds; empty in dev mode.
+    pub prerendered: HashMap<String, String>,
 }
 
 impl HotState {

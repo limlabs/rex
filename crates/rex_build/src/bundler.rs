@@ -191,6 +191,8 @@ pub async fn build_bundles(
                         .iter()
                         .map(|p| p.to_string_lossy().to_string())
                         .collect(),
+                    // App routes default to server-rendered; future: auto-detect
+                    render_mode: rex_core::RenderMode::ServerRendered,
                 },
             );
         }
