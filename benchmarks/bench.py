@@ -610,8 +610,6 @@ def dx_framework(
 
         with server:
             curl_body(port, "/")
-            if fw != "rex":
-                time.sleep(2)
             cold_samples.append(round((time.monotonic() - t0) * 1000))
             # Capture memory on last iteration
             if i == iterations - 1:
