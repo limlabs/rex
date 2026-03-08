@@ -61,7 +61,7 @@ serde_json = "1"
 toml = "0.8"
 
 # CLI
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 
 # OXC (not published to crates.io)
 oxc_formatter = { git = "https://github.com/oxc-project/oxc", branch = "main" }
