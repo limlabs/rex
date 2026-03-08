@@ -40,8 +40,8 @@ RUN cargo build --release --bin rex -p rex_cli --features build && \
     cargo build --release --bin rex -p rex_cli --no-default-features
 
 # ── App build (available for downstream `FROM ... AS app-build`) ────
-# Users can extend this stage to run `rex build` with the full binary,
-# then the final stage copies only the runtime binary + built assets.
+# Users extend this stage to run `rex build` with the full binary,
+# then copy only the built assets into a runtime-only final image.
 FROM debian:bookworm-slim AS app-build
 
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
@@ -50,10 +50,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=builder /usr/local/bin/rex-builder /usr/local/bin/rex
 
 # ── Runtime ─────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
-
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+# Distroless cc image: glibc + libgcc + ca-certs, no shell, no package manager.
+FROM gcr.io/distroless/cc-debian12
 
 COPY --from=builder /usr/src/rex/target/release/rex /usr/local/bin/rex
 
