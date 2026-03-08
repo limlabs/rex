@@ -75,7 +75,14 @@ pub(crate) fn collect_css_files(
             let chunk_name = route_to_chunk_name(route);
             let js_filename = format!("{chunk_name}-{hash}.js");
             let strategy = detect_data_strategy(&route.abs_path)?;
-            manifest.add_page_with_css(&route.pattern, &js_filename, &page_css, strategy);
+            let has_dynamic = !route.dynamic_segments.is_empty();
+            manifest.add_page_with_css(
+                &route.pattern,
+                &js_filename,
+                &page_css,
+                strategy,
+                has_dynamic,
+            );
         }
     }
 

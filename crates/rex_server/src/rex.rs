@@ -222,7 +222,7 @@ impl Rex {
     }
 
     /// Shared initialization logic: builds route tries, computes document descriptor,
-    /// creates AppState and HotState.
+    /// pre-renders static pages, and creates AppState and HotState.
     #[allow(clippy::too_many_arguments)]
     async fn init_from_parts(
         config: RexConfig,
@@ -250,6 +250,20 @@ impl Rex {
             crate::handlers::compute_document_descriptor(&pool).await
         } else {
             None
+        };
+
+        // Automatic static optimization: pre-render eligible pages at startup.
+        // In dev mode, skip pre-rendering so pages always reflect the latest code.
+        let prerendered = if !config.dev {
+            crate::prerender::prerender_static_pages(
+                &pool,
+                &manifest,
+                &manifest_json,
+                document_descriptor.as_ref(),
+            )
+            .await
+        } else {
+            HashMap::new()
         };
 
         let image_cache = rex_image::ImageCache::new(
@@ -280,6 +294,7 @@ impl Rex {
                 document_descriptor,
                 app_route_trie,
                 has_mcp_tools: !scan.mcp_tools.is_empty(),
+                prerendered,
             })),
         });
 

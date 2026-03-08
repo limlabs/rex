@@ -114,6 +114,8 @@ pub async fn handle_file_event(
                 manifest_json,
                 document_descriptor,
                 has_mcp_tools: !scan.mcp_tools.is_empty(),
+                // Dev mode: no pre-rendering (always dynamic for fast iteration)
+                prerendered: std::collections::HashMap::new(),
                 // Preserve unchanged fields
                 route_trie: old_hot.route_trie.clone(),
                 api_route_trie: old_hot.api_route_trie.clone(),
@@ -210,6 +212,8 @@ pub async fn handle_file_event(
                 document_descriptor,
                 app_route_trie,
                 has_mcp_tools: !scan.mcp_tools.is_empty(),
+                // Dev mode: no pre-rendering
+                prerendered: std::collections::HashMap::new(),
             });
 
             // Signal full reload to clients

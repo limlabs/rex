@@ -381,8 +381,8 @@ mod tests {
     #[test]
     fn client_scripts_for_known_page() {
         let mut manifest = AssetManifest::new("test123".to_string());
-        manifest.add_page("/", "index-abc.js", DataStrategy::None);
-        manifest.add_page("/about", "about-def.js", DataStrategy::None);
+        manifest.add_page("/", "index-abc.js", DataStrategy::None, false);
+        manifest.add_page("/about", "about-def.js", DataStrategy::None, false);
 
         assert_eq!(client_scripts_for(&manifest, "/"), vec!["index-abc.js"]);
         assert_eq!(
@@ -407,6 +407,7 @@ mod tests {
             "index.js",
             &["page.css".to_string()],
             DataStrategy::None,
+            false,
         );
 
         let css = css_files_for(&manifest, "/");
