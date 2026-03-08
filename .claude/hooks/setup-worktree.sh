@@ -24,3 +24,9 @@ if [ -d "$ROOT/fixtures/basic" ] && [ ! -d "$ROOT/fixtures/basic/node_modules" ]
   echo "Installing fixtures/basic/ dependencies..." >&2
   (cd "$ROOT/fixtures/basic" && npm install --no-audit --no-fund) >&2
 fi
+
+# fixtures/app-router/ — needed for app-router tests (matches CI setup)
+if [ -d "$ROOT/fixtures/app-router" ] && [ ! -d "$ROOT/fixtures/app-router/node_modules" ]; then
+  echo "Installing fixtures/app-router/ dependencies..." >&2
+  (cd "$ROOT/fixtures/app-router" && npm install --no-audit --no-fund) >&2
+fi
