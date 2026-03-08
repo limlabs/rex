@@ -40,12 +40,12 @@ enum Commands {
     /// Start the development server with HMR
     #[cfg(feature = "dev")]
     Dev {
-        /// Port to listen on
-        #[arg(short, long, default_value = "3000")]
+        /// Port to listen on (also reads $PORT env var)
+        #[arg(short, long, default_value = "3000", env = "PORT")]
         port: u16,
 
-        /// Host to bind to (use 0.0.0.0 to listen on all interfaces)
-        #[arg(short = 'H', long, default_value = "127.0.0.1")]
+        /// Host to bind to (also reads $HOST env var)
+        #[arg(short = 'H', long, default_value = "127.0.0.1", env = "HOST")]
         host: IpAddr,
 
         /// Project root directory
@@ -67,12 +67,12 @@ enum Commands {
 
     /// Start the production server
     Start {
-        /// Port to listen on
-        #[arg(short, long, default_value = "3000")]
+        /// Port to listen on (also reads $PORT env var)
+        #[arg(short, long, default_value = "3000", env = "PORT")]
         port: u16,
 
         /// Host to bind to
-        #[arg(short = 'H', long, default_value = "0.0.0.0")]
+        #[arg(short = 'H', long, default_value = "0.0.0.0", env = "HOST")]
         host: IpAddr,
 
         /// Project root directory
