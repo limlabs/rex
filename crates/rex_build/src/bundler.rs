@@ -1,6 +1,7 @@
 use crate::build_utils::{extract_middleware_matchers, generate_build_id, runtime_server_dir};
 use crate::client_bundle::build_client_bundles;
 use crate::css_modules::process_css_modules;
+use crate::font::process_fonts;
 use crate::manifest::AssetManifest;
 use crate::server_bundle::build_server_bundle;
 use crate::tailwind::process_tailwind_css;
@@ -73,6 +74,26 @@ pub async fn build_bundles(
     // Pre-process MDX pages and CSS modules (generates compiled JSX, scoped CSS + JS proxy files)
     let css_modules = process_css_modules(scan, &client_dir, &build_id, &config.project_root)?;
 
+    // Pre-process font imports (downloads Google Fonts, generates @font-face CSS)
+    let font_result = process_fonts(
+        scan,
+        &client_dir,
+        &build_id,
+        &config.project_root,
+        &css_modules.page_overrides,
+    )?;
+
+    // Merge font page overrides into CSS module overrides
+    let mut merged_page_overrides = css_modules.page_overrides.clone();
+    merged_page_overrides.extend(font_result.page_overrides);
+
+    // Create a merged CssModuleProcessing with font overrides folded in
+    let css_modules_merged = crate::css_modules::CssModuleProcessing {
+        page_overrides: merged_page_overrides.clone(),
+        route_css: css_modules.route_css.clone(),
+        global_css: css_modules.global_css.clone(),
+    };
+
     // Pre-process Tailwind CSS files (compile with tailwindcss CLI)
     let tailwind_outputs = process_tailwind_css(config, scan, &client_dir)?;
 
@@ -95,7 +116,7 @@ pub async fn build_bundles(
             config,
             scan,
             &server_dir,
-            &css_modules.page_overrides,
+            &merged_page_overrides,
             &define,
             project_config,
             &module_dirs,
@@ -106,7 +127,7 @@ pub async fn build_bundles(
             scan,
             &client_dir,
             &build_id,
-            &css_modules,
+            &css_modules_merged,
             &define,
             &tailwind_outputs,
             project_config,
@@ -128,6 +149,18 @@ pub async fn build_bundles(
         )
         .await?
     };
+
+    // Add font CSS and preloads to manifest
+    if !font_result.font_css.is_empty() {
+        let font_css_filename = format!("fonts-{}.css", &build_id[..8]);
+        let font_css_path = client_dir.join(&font_css_filename);
+        fs::write(&font_css_path, &font_result.font_css)?;
+        manifest
+            .css_contents
+            .insert(font_css_filename.clone(), font_result.font_css);
+        manifest.global_css.insert(0, font_css_filename);
+        manifest.font_preloads = font_result.font_preloads;
+    }
 
     // Set middleware matchers on manifest (if middleware exists)
     if let Some(mw_path) = &scan.middleware {
@@ -182,6 +215,8 @@ pub async fn build_bundles(
     // Clean up temp dirs from pre-processing
     let css_modules_dir = client_dir.join("_css_modules");
     let _ = fs::remove_dir_all(&css_modules_dir);
+    let fonts_dir = client_dir.join("_fonts");
+    let _ = fs::remove_dir_all(&fonts_dir);
     let mdx_dir = client_dir.join("_mdx");
     let _ = fs::remove_dir_all(&mdx_dir);
     let server_mdx_dir = server_dir.join("_mdx");
