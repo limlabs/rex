@@ -369,6 +369,66 @@ jobs:
     with:
       version: ${{ needs.release-please.outputs.tag_name }}
 
+  deploy-railway:
+    name: Deploy to Railway
+    needs: [release-please, docker]
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    runs-on: ubuntu-latest
+    environment: railway-production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Pin Rex version in Dockerfile
+        run: |
+          VERSION="${TAG#v}"
+          sed -i "s|ARG REX_VERSION=latest|ARG REX_VERSION=$VERSION|" fixtures/railway/Dockerfile
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        run: railway up --service "${{ secrets.RAILWAY_SERVICE_ID }}"
+        working-directory: fixtures/railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+  smoke-test-railway:
+    name: Smoke Test (Railway)
+    needs: [release-please, deploy-railway]
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    runs-on: ubuntu-latest
+    environment: railway-production
+    steps:
+      - name: Wait for deployment to be ready
+        run: |
+          echo "Waiting for Railway deployment..."
+          for i in $(seq 1 60); do
+            if curl -sf "${{ secrets.RAILWAY_URL }}" > /dev/null 2>&1; then
+              echo "Deployment is ready"
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "::error::Railway deployment failed to become ready within 60s"
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Verify HTTP 200
+        run: |
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${{ secrets.RAILWAY_URL }}")
+          echo "GET / → HTTP $STATUS"
+          if [ "$STATUS" -ne 200 ]; then
+            echo "::error::Expected HTTP 200, got $STATUS"
+            exit 1
+          fi
+
   cleanup-beta-releases:
     name: Clean up beta releases
     needs: release-please

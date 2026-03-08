@@ -92,3 +92,15 @@ jobs:
 
       - name: Run e2e tests
         run: cargo test -p rex_e2e --lib -- --ignored
+
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build rex image
+        run: docker build -t ghcr.io/limlabs/rex:ci .
+
+      - name: Build railway fixture
+        run: docker build --build-arg REX_VERSION=ci -t rex-railway-fixture fixtures/railway
