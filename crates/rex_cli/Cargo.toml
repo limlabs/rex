@@ -11,30 +11,50 @@ workspace = true
 name = "rex"
 path = "src/main.rs"
 
+[features]
+default = ["full"]
+full = ["build", "dev", "lint"]
+## Runtime only: `rex start` and `rex init`. No bundler, no dev server, no linter.
+runtime = []
+## Adds `rex build` (pulls in rolldown + OXC bundler).
+build = ["dep:rex_build", "rex_server/build"]
+## Adds `rex dev` + `rex typecheck` (pulls in file watcher, TUI, and build deps).
+dev = ["build", "dep:rex_dev", "dep:ratatui", "dep:crossterm"]
+## Adds `rex lint` + `rex fmt` (pulls in OXC linter/formatter).
+lint = [
+    "dep:oxc_formatter",
+    "dep:oxc_linter",
+    "dep:oxc_diagnostics",
+    "dep:oxc_allocator",
+    "dep:oxc_parser",
+    "dep:oxc_span",
+    "dep:rayon",
+]
+
 [dependencies]
 rex_core = { path = "../rex_core" }
 rex_router = { path = "../rex_router" }
-rex_build = { path = "../rex_build" }
 rex_v8 = { path = "../rex_v8" }
-rex_server = { path = "../rex_server" }
-rex_dev = { path = "../rex_dev" }
+rex_server = { path = "../rex_server", default-features = false }
+rex_build = { path = "../rex_build", optional = true }
+rex_dev = { path = "../rex_dev", optional = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 axum = { workspace = true }
-ratatui = { workspace = true }
-crossterm = { workspace = true }
-futures = { workspace = true }
-oxc_formatter = { workspace = true }
-oxc_linter = { workspace = true }
-oxc_diagnostics = { workspace = true }
-oxc_allocator = { git = "https://github.com/oxc-project/oxc", branch = "main" }
-oxc_parser = { git = "https://github.com/oxc-project/oxc", branch = "main" }
-oxc_span = { git = "https://github.com/oxc-project/oxc", branch = "main" }
-rayon = { workspace = true }
 serde_json = { workspace = true }
+futures = { workspace = true }
+ratatui = { workspace = true, optional = true }
+crossterm = { workspace = true, optional = true }
+oxc_formatter = { workspace = true, optional = true }
+oxc_linter = { workspace = true, optional = true }
+oxc_diagnostics = { workspace = true, optional = true }
+oxc_allocator = { git = "https://github.com/oxc-project/oxc", branch = "main", optional = true }
+oxc_parser = { git = "https://github.com/oxc-project/oxc", branch = "main", optional = true }
+oxc_span = { git = "https://github.com/oxc-project/oxc", branch = "main", optional = true }
+rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"

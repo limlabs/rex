@@ -31,9 +31,9 @@ RUN cargo fetch
 # Copy runtime/ (needed by include_str! in rex_server)
 COPY runtime/ runtime/
 
-# Copy full source and build
+# Copy full source and build (runtime-only: no bundler, linter, or dev server)
 COPY crates/ crates/
-RUN cargo build --release --bin rex
+RUN cargo build --release --bin rex -p rex_cli --no-default-features
 
 # ── Runtime ─────────────────────────────────────────────────────────
 FROM debian:bookworm-slim

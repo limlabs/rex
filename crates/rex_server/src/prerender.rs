@@ -2,9 +2,7 @@ use crate::document::{
     assemble_body_tail, assemble_head_shell, assemble_rsc_document, DocumentDescriptor,
     RscDocumentParams,
 };
-use rex_build::manifest::{AppRouteAssets, PageAssets};
-use rex_build::AssetManifest;
-use rex_core::{RenderMode, Route};
+use rex_core::{AppRouteAssets, AssetManifest, PageAssets, RenderMode, Route};
 use rex_v8::IsolatePool;
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
@@ -333,8 +331,7 @@ fn assemble_static_html(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use rex_build::manifest::AppRouteAssets;
-    use rex_core::DataStrategy;
+    use rex_core::{AppRouteAssets, DataStrategy};
 
     #[test]
     fn parse_gsp_result_with_props() {

@@ -7,10 +7,14 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+default = ["build"]
+build = ["dep:rex_build"]
+
 [dependencies]
 rex_core = { path = "../rex_core" }
 rex_router = { path = "../rex_router" }
-rex_build = { path = "../rex_build" }
+rex_build = { path = "../rex_build", optional = true }
 rex_v8 = { path = "../rex_v8" }
 rex_image = { path = "../rex_image" }
 axum = { workspace = true }

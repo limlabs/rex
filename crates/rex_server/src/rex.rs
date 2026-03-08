@@ -3,8 +3,7 @@ use crate::server::RexServer;
 use crate::state::{snapshot, AppState, HotState};
 use anyhow::Result;
 use axum::Router;
-use rex_build::AssetManifest;
-use rex_core::{DataStrategy, ProjectConfig, RexConfig, ServerSidePropsContext};
+use rex_core::{AssetManifest, DataStrategy, ProjectConfig, RexConfig, ServerSidePropsContext};
 use rex_router::{scan_project, RouteTrie, ScanResult};
 use rex_v8::{init_v8, IsolatePool};
 use std::collections::HashMap;
@@ -95,6 +94,8 @@ impl Rex {
     /// Create a new Rex instance by scanning pages, building bundles, and initializing V8.
     ///
     /// This is the primary constructor for dev mode and fresh builds.
+    /// Requires the `build` feature (pulls in the rolldown bundler).
+    #[cfg(feature = "build")]
     pub async fn new(opts: RexOptions) -> Result<Self> {
         let root = std::fs::canonicalize(&opts.root)?;
         let config = RexConfig::new(root).with_dev(opts.dev).with_port(opts.port);
