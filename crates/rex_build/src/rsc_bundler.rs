@@ -70,7 +70,9 @@ pub async fn build_rsc_bundles(
 
     // Collect all entry points from the app scan
     let mut entries: Vec<PathBuf> = Vec::new();
-    entries.push(app_scan.root_layout.clone());
+    if let Some(root_layout) = &app_scan.root_layout {
+        entries.push(root_layout.clone());
+    }
     for route in &app_scan.routes {
         entries.push(route.page_path.clone());
         entries.extend(route.layout_chain.iter().cloned());
@@ -314,7 +316,7 @@ mod tests {
                 dynamic_segments: vec![],
                 specificity: 10,
             }],
-            root_layout: layout_path,
+            root_layout: Some(layout_path),
         };
 
         let define = vec![(
@@ -416,7 +418,7 @@ mod tests {
                 dynamic_segments: vec![],
                 specificity: 10,
             }],
-            root_layout: layout_path,
+            root_layout: Some(layout_path),
         };
 
         let define = vec![(
@@ -527,7 +529,7 @@ mod tests {
                 dynamic_segments: vec![],
                 specificity: 10,
             }],
-            root_layout: layout_path,
+            root_layout: Some(layout_path),
         };
 
         let define = vec![(
@@ -612,7 +614,7 @@ mod tests {
                 dynamic_segments: vec![],
                 specificity: 10,
             }],
-            root_layout: layout_path,
+            root_layout: Some(layout_path),
         };
 
         let define = vec![(

@@ -52,8 +52,8 @@ pub struct AppScanResult {
     pub root: AppSegment,
     /// Flattened routes with resolved layout chains
     pub routes: Vec<AppRoute>,
-    /// Path to the root layout (required)
-    pub root_layout: PathBuf,
+    /// Path to the root layout. `None` when route groups each provide their own layout.
+    pub root_layout: Option<PathBuf>,
 }
 
 impl AppRoute {

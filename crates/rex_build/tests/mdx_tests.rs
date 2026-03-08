@@ -252,7 +252,7 @@ async fn test_integration_mdx_app_router_build() {
             dynamic_segments: vec![],
             specificity: 1,
         }],
-        root_layout: layout_path,
+        root_layout: Some(layout_path),
     };
 
     let config = RexConfig::new(root).with_dev(true);

@@ -13,7 +13,9 @@ const PAGE_EXTENSIONS: &[&str] = &["tsx", "ts", "jsx", "js", "mdx"];
 
 /// Scan the `app/` directory and produce an `AppScanResult`.
 ///
-/// Returns `None` if the directory doesn't exist or has no root layout.
+/// Returns `None` if the directory doesn't exist or has no routes.
+/// Supports both a shared root `layout.tsx` and the route-group-only pattern
+/// where each `(group)/` provides its own layout (Next.js convention).
 pub fn scan_app(app_dir: &Path) -> anyhow::Result<Option<AppScanResult>> {
     if !app_dir.exists() {
         return Ok(None);
@@ -21,14 +23,21 @@ pub fn scan_app(app_dir: &Path) -> anyhow::Result<Option<AppScanResult>> {
 
     let root = scan_segment(app_dir, "")?;
 
-    // Root layout is required for the app router.
-    let root_layout = match &root.layout {
-        Some(layout) => layout.clone(),
-        None => {
-            debug!("app/ directory found but no root layout.tsx — skipping app router");
+    let root_layout = root.layout.clone();
+
+    // If there is no root layout, check that at least one route group child
+    // has a layout — otherwise the app directory has no usable routes.
+    if root_layout.is_none() {
+        let has_group_layout = root
+            .children
+            .iter()
+            .any(|child| is_route_group(&child.segment) && child.layout.is_some());
+        if !has_group_layout {
+            debug!("app/ directory found but no root layout and no route group layouts — skipping app router");
             return Ok(None);
         }
-    };
+        debug!("app/ directory has no root layout but route groups provide layouts");
+    }
 
     let mut routes = Vec::new();
     flatten_routes(
@@ -287,7 +296,7 @@ mod tests {
 
         let result = scan_app(&app_dir).unwrap().unwrap();
 
-        assert!(result.root_layout.exists());
+        assert!(result.root_layout.as_ref().unwrap().exists());
         assert!(!result.routes.is_empty());
     }
 
@@ -409,15 +418,70 @@ mod tests {
     }
 
     #[test]
-    fn no_root_layout_returns_none() {
+    fn no_root_layout_no_groups_returns_none() {
         let tmp = tempfile::tempdir().unwrap();
         let app_dir = tmp.path().join("app");
         fs::create_dir_all(&app_dir).unwrap();
         fs::write(app_dir.join("page.tsx"), "// page").unwrap();
-        // No layout.tsx
+        // No layout.tsx, no route groups
 
         let result = scan_app(&app_dir).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn route_groups_with_own_layouts_no_root_layout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app_dir = tmp.path().join("app");
+
+        // app/
+        //   (frontend)/
+        //     layout.tsx     <- group provides its own layout
+        //     page.tsx
+        //     about/
+        //       page.tsx
+        //   (admin)/
+        //     layout.tsx
+        //     dashboard/
+        //       page.tsx
+        fs::create_dir_all(app_dir.join("(frontend)/about")).unwrap();
+        fs::create_dir_all(app_dir.join("(admin)/dashboard")).unwrap();
+
+        fs::write(app_dir.join("(frontend)/layout.tsx"), "// frontend layout").unwrap();
+        fs::write(app_dir.join("(frontend)/page.tsx"), "// home page").unwrap();
+        fs::write(app_dir.join("(frontend)/about/page.tsx"), "// about page").unwrap();
+        fs::write(app_dir.join("(admin)/layout.tsx"), "// admin layout").unwrap();
+        fs::write(app_dir.join("(admin)/dashboard/page.tsx"), "// dashboard").unwrap();
+
+        let result = scan_app(&app_dir).unwrap().unwrap();
+
+        // No root layout
+        assert!(result.root_layout.is_none());
+
+        // Should have 3 routes: /, /about, /dashboard
+        assert_eq!(result.routes.len(), 3);
+
+        let patterns: Vec<&str> = result.routes.iter().map(|r| r.pattern.as_str()).collect();
+        assert!(patterns.contains(&"/"));
+        assert!(patterns.contains(&"/about"));
+        assert!(patterns.contains(&"/dashboard"));
+
+        // Each route's layout chain should contain its group's layout
+        let home = result.routes.iter().find(|r| r.pattern == "/").unwrap();
+        assert_eq!(home.layout_chain.len(), 1);
+        assert!(home.layout_chain[0]
+            .to_string_lossy()
+            .contains("(frontend)"));
+
+        let dashboard = result
+            .routes
+            .iter()
+            .find(|r| r.pattern == "/dashboard")
+            .unwrap();
+        assert_eq!(dashboard.layout_chain.len(), 1);
+        assert!(dashboard.layout_chain[0]
+            .to_string_lossy()
+            .contains("(admin)"));
     }
 
     #[test]
