@@ -1,18 +1,31 @@
+#[cfg(feature = "dev")]
 mod tui;
 
-use anyhow::{Context, Result};
+#[cfg(feature = "dev")]
+use anyhow::Context;
+use anyhow::Result;
 use clap::{Parser, Subcommand};
+#[cfg(feature = "lint")]
 use rayon::prelude::*;
+#[cfg(feature = "build")]
 use rex_build::build_bundles;
-use rex_core::{ProjectConfig, RexConfig};
+#[cfg(feature = "build")]
+use rex_core::{AssetManifest, ProjectConfig, RexConfig};
+#[cfg(feature = "build")]
 use rex_router::scan_project;
 use std::net::IpAddr;
 use std::path::PathBuf;
+#[cfg(feature = "dev")]
 use std::process::Command;
+#[cfg(feature = "lint")]
 use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(any(feature = "build", feature = "dev"))]
 use tracing::{debug, info};
+#[cfg(feature = "dev")]
 use tracing_subscriber::layer::SubscriberExt;
+#[cfg(feature = "dev")]
 use tracing_subscriber::util::SubscriberInitExt;
+#[cfg(feature = "dev")]
 use tui::log_layer::{LogBuffer, TuiLogLayer};
 
 #[derive(Parser)]
@@ -25,6 +38,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Start the development server with HMR
+    #[cfg(feature = "dev")]
     Dev {
         /// Port to listen on (also reads $PORT env var)
         #[arg(short, long, default_value = "3000", env = "PORT")]
@@ -44,6 +58,7 @@ enum Commands {
     },
 
     /// Create a production build
+    #[cfg(feature = "build")]
     Build {
         /// Project root directory
         #[arg(long, default_value = ".")]
@@ -66,6 +81,7 @@ enum Commands {
     },
 
     /// Lint source files with oxlint (React + Next.js rules)
+    #[cfg(feature = "lint")]
     Lint {
         /// Project root directory
         #[arg(long, default_value = ".")]
@@ -85,6 +101,7 @@ enum Commands {
     },
 
     /// Type-check pages with tsc
+    #[cfg(feature = "dev")]
     Typecheck {
         /// Project root directory
         #[arg(long, default_value = ".")]
@@ -102,6 +119,7 @@ enum Commands {
     },
 
     /// Format source files with oxfmt
+    #[cfg(feature = "lint")]
     Fmt {
         /// Project root directory
         #[arg(long, default_value = ".")]
@@ -125,6 +143,7 @@ fn init_plain_tracing() {
         .init();
 }
 
+#[cfg(feature = "dev")]
 fn init_tui_tracing() -> LogBuffer {
     let buffer = LogBuffer::new(1000);
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -143,6 +162,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        #[cfg(feature = "dev")]
         Commands::Dev {
             port,
             host,
@@ -171,6 +191,7 @@ async fn main() -> Result<()> {
                 cmd_dev(root, port, host, false, None).await
             }
         }
+        #[cfg(feature = "build")]
         Commands::Build { root } => {
             init_plain_tracing();
             cmd_build(root).await
@@ -179,6 +200,7 @@ async fn main() -> Result<()> {
             init_plain_tracing();
             cmd_start(root, port, host).await
         }
+        #[cfg(feature = "lint")]
         Commands::Lint {
             root,
             fix,
@@ -188,6 +210,7 @@ async fn main() -> Result<()> {
             init_plain_tracing();
             cmd_lint(root, fix, deny_warnings, paths)
         }
+        #[cfg(feature = "dev")]
         Commands::Typecheck { root, args } => {
             init_plain_tracing();
             cmd_typecheck(root, args)
@@ -196,6 +219,7 @@ async fn main() -> Result<()> {
             init_plain_tracing();
             cmd_init(name)
         }
+        #[cfg(feature = "lint")]
         Commands::Fmt { root, check } => {
             init_plain_tracing();
             cmd_fmt(root, check)
@@ -203,6 +227,7 @@ async fn main() -> Result<()> {
     }
 }
 
+#[cfg(feature = "dev")]
 async fn cmd_dev(
     root: PathBuf,
     port: u16,
@@ -352,6 +377,7 @@ async fn cmd_dev(
     Ok(())
 }
 
+#[cfg(feature = "build")]
 async fn cmd_build(root: PathBuf) -> Result<()> {
     let root = std::fs::canonicalize(&root)?;
     let config = RexConfig::new(root);
@@ -579,6 +605,7 @@ a {
     Ok(())
 }
 
+#[cfg(feature = "lint")]
 fn cmd_lint(root: PathBuf, fix: bool, deny_warnings: bool, paths: Vec<PathBuf>) -> Result<()> {
     use oxc_linter::{
         ConfigStore, ConfigStoreBuilder, ExternalPluginStore, FixKind, LintOptions, LintRunner,
@@ -725,8 +752,10 @@ fn cmd_lint(root: PathBuf, fix: bool, deny_warnings: bool, paths: Vec<PathBuf>) 
 /// Walk a directory recursively, collecting lintable source files.
 /// Hardcoded directories that should always be skipped during linting,
 /// even when no `.gitignore` is present.
+#[cfg(feature = "lint")]
 const LINT_SKIP_DIRS: &[&str] = &["node_modules", ".rex", ".git", "dist", "target", ".next"];
 
+#[cfg(feature = "lint")]
 fn walk_lint_dir(
     dir: &std::path::Path,
     root: &std::path::Path,
@@ -768,6 +797,7 @@ fn walk_lint_dir(
 }
 
 /// Load ignore patterns from `.gitignore` (if present).
+#[cfg(feature = "lint")]
 fn load_gitignore_patterns(root: &std::path::Path) -> Vec<String> {
     let gitignore_path = root.join(".gitignore");
     let content = match std::fs::read_to_string(&gitignore_path) {
@@ -784,6 +814,7 @@ fn load_gitignore_patterns(root: &std::path::Path) -> Vec<String> {
         .collect()
 }
 
+#[cfg(feature = "dev")]
 fn cmd_typecheck(root: PathBuf, extra_args: Vec<String>) -> Result<()> {
     let root = std::fs::canonicalize(&root)?;
 
@@ -818,6 +849,7 @@ fn cmd_typecheck(root: PathBuf, extra_args: Vec<String>) -> Result<()> {
     std::process::exit(status.code().unwrap_or(1));
 }
 
+#[cfg(feature = "lint")]
 fn cmd_fmt(root: PathBuf, check: bool) -> Result<()> {
     let root = std::fs::canonicalize(&root)?;
     let options = load_format_options(&root);
@@ -944,6 +976,7 @@ fn cmd_fmt(root: PathBuf, check: bool) -> Result<()> {
     }
 }
 
+#[cfg(feature = "lint")]
 fn discover_source_files(root: &std::path::Path) -> Vec<PathBuf> {
     let extensions: &[&str] = &["ts", "tsx", "js", "jsx"];
     let skip_dirs: &[&str] = &["node_modules", ".rex", ".git", "dist", "target", ".next"];
@@ -978,6 +1011,7 @@ fn discover_source_files(root: &std::path::Path) -> Vec<PathBuf> {
     files
 }
 
+#[cfg(feature = "lint")]
 fn walk_dir(
     dir: &std::path::Path,
     extensions: &[&str],
@@ -1006,6 +1040,7 @@ fn walk_dir(
     }
 }
 
+#[cfg(feature = "lint")]
 fn default_oxlintrc() -> &'static str {
     r#"{
   "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
@@ -1082,6 +1117,7 @@ fn format_duration(d: std::time::Duration) -> String {
     }
 }
 
+#[cfg(feature = "build")]
 fn format_size(bytes: u64) -> String {
     if bytes >= 1024 * 1024 {
         format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
@@ -1118,6 +1154,7 @@ fn print_route_summary(routes: &[rex_core::Route], api_routes: &[rex_core::Route
 }
 
 /// Classified route info for build summary display.
+#[cfg(feature = "build")]
 struct RouteInfo {
     pattern: String,
     icon: &'static str,
@@ -1127,9 +1164,10 @@ struct RouteInfo {
 /// Classify routes by render mode and count static vs. server-rendered pages.
 ///
 /// Returns (route_infos, static_count, dynamic_count) sorted by pattern.
+#[cfg(feature = "build")]
 fn classify_routes(
     routes: &[rex_core::Route],
-    manifest: &rex_build::AssetManifest,
+    manifest: &AssetManifest,
 ) -> (Vec<RouteInfo>, usize, usize) {
     use rex_core::RenderMode;
 
@@ -1175,7 +1213,8 @@ fn classify_routes(
 ///   λ  /                (server-rendered)
 ///   λ  /blog/:slug      (server-rendered)
 /// Classify app routes into static/server-rendered categories.
-fn classify_app_routes(manifest: &rex_build::AssetManifest) -> (Vec<RouteInfo>, usize, usize) {
+#[cfg(feature = "build")]
+fn classify_app_routes(manifest: &AssetManifest) -> (Vec<RouteInfo>, usize, usize) {
     use rex_core::RenderMode;
 
     let mut sorted: Vec<_> = manifest.app_routes.keys().collect();
@@ -1213,10 +1252,11 @@ fn classify_app_routes(manifest: &rex_build::AssetManifest) -> (Vec<RouteInfo>, 
     (infos, static_count, dynamic_count)
 }
 
+#[cfg(feature = "build")]
 fn print_route_summary_with_manifest(
     routes: &[rex_core::Route],
     api_routes: &[rex_core::Route],
-    manifest: &rex_build::AssetManifest,
+    manifest: &AssetManifest,
 ) {
     if routes.is_empty() && api_routes.is_empty() && manifest.app_routes.is_empty() {
         return;
@@ -1308,6 +1348,7 @@ async fn cmd_start(root: PathBuf, port: u16, host: IpAddr) -> Result<()> {
     rex.serve().await
 }
 
+#[cfg(feature = "dev")]
 async fn hmr_client_handler() -> impl axum::response::IntoResponse {
     let js = include_str!(concat!(env!("OUT_DIR"), "/hmr_client.js"));
     (
@@ -1316,6 +1357,7 @@ async fn hmr_client_handler() -> impl axum::response::IntoResponse {
     )
 }
 
+#[cfg(feature = "lint")]
 fn load_format_options(root: &std::path::Path) -> oxc_formatter::FormatOptions {
     let config_files = [".prettierrc", ".prettierrc.json"];
 
@@ -1423,6 +1465,7 @@ fn load_format_options(root: &std::path::Path) -> oxc_formatter::FormatOptions {
     options
 }
 
+#[cfg(feature = "lint")]
 fn load_ignore_patterns(root: &std::path::Path) -> Vec<String> {
     let ignore_path = root.join(".prettierignore");
     let content = match std::fs::read_to_string(&ignore_path) {
@@ -1438,6 +1481,7 @@ fn load_ignore_patterns(root: &std::path::Path) -> Vec<String> {
         .collect()
 }
 
+#[cfg(feature = "lint")]
 fn is_ignored(path: &std::path::Path, root: &std::path::Path, patterns: &[String]) -> bool {
     let rel = match path.strip_prefix(root) {
         Ok(r) => r.to_string_lossy(),
@@ -1466,6 +1510,7 @@ fn is_ignored(path: &std::path::Path, root: &std::path::Path, patterns: &[String
     false
 }
 
+#[cfg(feature = "lint")]
 fn format_source(
     source: &str,
     path: &std::path::Path,
@@ -1865,7 +1910,7 @@ mod tests {
             ),
         ];
 
-        let mut manifest = rex_build::AssetManifest::new("test".into());
+        let mut manifest = AssetManifest::new("test".into());
         manifest.add_page("/", "index.js", DataStrategy::None, false);
         manifest.add_page("/about", "about.js", DataStrategy::None, false);
         manifest.add_page("/blog/:slug", "slug.js", DataStrategy::None, true);
@@ -1890,7 +1935,7 @@ mod tests {
 
         let routes = vec![make_route("/dashboard", vec![])];
 
-        let mut manifest = rex_build::AssetManifest::new("test".into());
+        let mut manifest = AssetManifest::new("test".into());
         manifest.add_page(
             "/dashboard",
             "dashboard.js",
@@ -1911,7 +1956,7 @@ mod tests {
 
         let routes = vec![make_route("/posts", vec![])];
 
-        let mut manifest = rex_build::AssetManifest::new("test".into());
+        let mut manifest = AssetManifest::new("test".into());
         manifest.add_page("/posts", "posts.js", DataStrategy::GetStaticProps, false);
 
         let (_, static_count, dynamic_count) = classify_routes(&routes, &manifest);
@@ -1922,10 +1967,9 @@ mod tests {
 
     #[test]
     fn classify_app_routes_static_and_dynamic() {
-        use rex_build::manifest::AppRouteAssets;
-        use rex_core::RenderMode;
+        use rex_core::{AppRouteAssets, RenderMode};
 
-        let mut manifest = rex_build::AssetManifest::new("test".into());
+        let mut manifest = AssetManifest::new("test".into());
         manifest.app_routes.insert(
             "/".to_string(),
             AppRouteAssets {
@@ -1965,7 +2009,7 @@ mod tests {
 
     #[test]
     fn classify_app_routes_empty() {
-        let manifest = rex_build::AssetManifest::new("test".into());
+        let manifest = AssetManifest::new("test".into());
         let (infos, static_count, dynamic_count) = classify_app_routes(&manifest);
         assert!(infos.is_empty());
         assert_eq!(static_count, 0);

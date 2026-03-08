@@ -1,5 +1,5 @@
 use crate::document::DocumentDescriptor;
-use rex_core::ProjectConfig;
+use rex_core::{AssetManifest, ProjectConfig};
 use rex_router::RouteTrie;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -10,7 +10,7 @@ use std::sync::{Arc, RwLock};
 pub struct HotState {
     pub route_trie: RouteTrie,
     pub api_route_trie: RouteTrie,
-    pub manifest: rex_build::AssetManifest,
+    pub manifest: AssetManifest,
     pub build_id: String,
     pub has_custom_404: bool,
     pub has_custom_error: bool,
@@ -38,7 +38,7 @@ pub struct HotState {
 
 impl HotState {
     /// Compute the manifest_json field from current state.
-    pub fn compute_manifest_json(build_id: &str, manifest: &rex_build::AssetManifest) -> String {
+    pub fn compute_manifest_json(build_id: &str, manifest: &AssetManifest) -> String {
         let mut json = serde_json::json!({
             "build_id": build_id,
             "pages": manifest.pages,

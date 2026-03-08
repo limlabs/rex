@@ -240,7 +240,17 @@ jobs:
         env:
           TAG: ${{ needs.release-please.outputs.tag_name }}
 
-      - name: Build & push
+      - name: Build & push (build stage — includes `rex build`)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: app-build
+          push: true
+          tags: |
+            ghcr.io/limlabs/rex:${{ steps.version.outputs.version }}-build
+            ghcr.io/limlabs/rex:latest-build
+
+      - name: Build & push (runtime — `rex start` only)
         uses: docker/build-push-action@v6
         with:
           context: .

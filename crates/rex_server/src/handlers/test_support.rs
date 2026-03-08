@@ -289,7 +289,7 @@ impl TestAppBuilder {
             rex_v8::IsolatePool::new(1, Arc::new(bundle), None).expect("failed to create pool");
 
         let trie = RouteTrie::from_routes(&self.routes);
-        let mut manifest = rex_build::AssetManifest::new("test-build-id".to_string());
+        let mut manifest = rex_core::AssetManifest::new("test-build-id".to_string());
 
         for (route, (_, _, gssp)) in self.routes.iter().zip(self.pages.iter()) {
             let strategy = if gssp.is_some() {

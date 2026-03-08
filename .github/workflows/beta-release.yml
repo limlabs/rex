@@ -190,7 +190,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & push
+      - name: Build & push (build stage — includes `rex build`)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: app-build
+          push: true
+          tags: |
+            ghcr.io/limlabs/rex:${{ needs.check-release-pr.outputs.beta_version }}-build
+            ghcr.io/limlabs/rex:beta-build
+
+      - name: Build & push (runtime — `rex start` only)
         uses: docker/build-push-action@v6
         with:
           context: .

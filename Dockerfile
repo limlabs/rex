@@ -31,15 +31,27 @@ RUN cargo fetch
 # Copy runtime/ (needed by include_str! in rex_server)
 COPY runtime/ runtime/
 
-# Copy full source and build
+# Copy full source and build two binaries:
+#   1. rex-builder: includes `build` feature for `rex build` (used in app-build stage)
+#   2. rex:         runtime-only, no bundler/linter/dev (ships in final image)
 COPY crates/ crates/
-RUN cargo build --release --bin rex
+RUN cargo build --release --bin rex -p rex_cli --features build && \
+    cp target/release/rex /usr/local/bin/rex-builder && \
+    cargo build --release --bin rex -p rex_cli --no-default-features
 
-# ── Runtime ─────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+# ── App build (available for downstream `FROM ... AS app-build`) ────
+# Users extend this stage to run `rex build` with the full binary,
+# then copy only the built assets into a runtime-only final image.
+FROM debian:bookworm-slim AS app-build
 
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/bin/rex-builder /usr/local/bin/rex
+
+# ── Runtime ─────────────────────────────────────────────────────────
+# Distroless cc image: glibc + libgcc + ca-certs, no shell, no package manager.
+FROM gcr.io/distroless/cc-debian12
 
 COPY --from=builder /usr/src/rex/target/release/rex /usr/local/bin/rex
 

@@ -1,10 +1,14 @@
 pub mod app_route;
+pub mod client_manifest;
 pub mod config;
 pub mod error;
+pub mod manifest;
 pub mod route;
 
+pub use client_manifest::{ClientRefEntry, ClientReferenceManifest};
 pub use config::RexConfig;
 pub use error::RexError;
+pub use manifest::{AppRouteAssets, AssetManifest, PageAssets};
 pub use route::{
     BuildConfig, DataStrategy, DevConfig, DynamicSegment, HeaderEntry, HeaderRule, McpToolRoute,
     MiddlewareAction, MiddlewareResult, PageType, ProjectConfig, RedirectConfig, RedirectRule,
