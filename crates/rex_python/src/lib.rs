@@ -123,6 +123,7 @@ impl Renderer {
                 root: root.into(),
                 dev,
                 port: 0,
+                ..Default::default()
             }))
             .map_err(to_py_err)?;
 
@@ -306,6 +307,7 @@ mod tests {
             root: fixtures,
             dev: false,
             port: 0,
+            ..Default::default()
         }))
         .unwrap()
     });

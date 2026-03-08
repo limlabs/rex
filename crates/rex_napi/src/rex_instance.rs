@@ -98,6 +98,7 @@ pub async fn create_rex(options: RexOptions) -> Result<RexInstance> {
         root: options.root.into(),
         dev: is_dev,
         port: 0, // NAPI doesn't serve directly
+        ..Default::default()
     })
     .await
     .map_err(|e| Error::from_reason(e.to_string()))?;

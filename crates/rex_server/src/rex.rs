@@ -8,6 +8,7 @@ use rex_core::{DataStrategy, ProjectConfig, RexConfig, ServerSidePropsContext};
 use rex_router::{scan_project, RouteTrie, ScanResult};
 use rex_v8::{init_v8, IsolatePool};
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tracing::debug;
@@ -21,6 +22,8 @@ pub struct RexOptions {
     pub dev: bool,
     /// Port to listen on (used by `serve()`).
     pub port: u16,
+    /// Host/IP address to bind to (e.g. 127.0.0.1 for local, 0.0.0.0 for all interfaces).
+    pub host: IpAddr,
 }
 
 impl Default for RexOptions {
@@ -29,6 +32,7 @@ impl Default for RexOptions {
             root: PathBuf::from("."),
             dev: false,
             port: 3000,
+            host: IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
         }
     }
 }
@@ -84,6 +88,7 @@ pub struct Rex {
     static_dir: PathBuf,
     scan: ScanResult,
     port: u16,
+    host: IpAddr,
 }
 
 impl Rex {
@@ -157,6 +162,7 @@ impl Rex {
             static_dir,
             project_config,
             opts.port,
+            opts.host,
         )
         .await
     }
@@ -217,6 +223,7 @@ impl Rex {
             static_dir,
             project_config,
             opts.port,
+            opts.host,
         )
         .await
     }
@@ -233,6 +240,7 @@ impl Rex {
         static_dir: PathBuf,
         project_config: ProjectConfig,
         port: u16,
+        host: IpAddr,
     ) -> Result<Self> {
         let trie = RouteTrie::from_routes(&scan.routes);
         let api_trie = RouteTrie::from_routes(&scan.api_routes);
@@ -310,6 +318,7 @@ impl Rex {
             static_dir,
             scan,
             port,
+            host,
         })
     }
 
@@ -486,10 +495,10 @@ impl Rex {
         server.build_router_with_extra(extra)
     }
 
-    /// Bind to the configured port and serve.
+    /// Bind to the configured host and port and serve.
     pub async fn serve(self) -> Result<()> {
         let router = self.router();
-        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], self.port));
+        let addr = std::net::SocketAddr::new(self.host, self.port);
 
         tracing::info!("Rex server listening on http://{addr}");
 
@@ -504,6 +513,7 @@ impl Rex {
         RexServer::from_state(
             self.state.clone(),
             self.port,
+            self.host,
             self.static_dir.clone(),
             self.config.project_root.clone(),
         )
