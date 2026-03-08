@@ -23,6 +23,9 @@ pub struct AssetManifest {
     /// These are modulepreloaded in the HTML head to avoid import waterfalls.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shared_chunks: Vec<String>,
+    /// Font files to preload (self-hosted woff2 filenames)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub font_preloads: Vec<String>,
     /// Middleware matcher patterns extracted from `export const config = { matcher: [...] }`.
     /// None = no middleware, Some(empty) = run on all paths.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -82,6 +85,7 @@ impl AssetManifest {
             global_css: Vec::new(),
             css_contents: HashMap::new(),
             shared_chunks: Vec::new(),
+            font_preloads: Vec::new(),
             middleware_matchers: None,
             app_routes: HashMap::new(),
             client_reference_manifest: None,
