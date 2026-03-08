@@ -34,7 +34,14 @@ pub(crate) async fn build_client_bundles(
     let hash = &build_id[..8];
 
     // Collect and copy CSS files referenced by source (rolldown doesn't bundle CSS)
-    collect_css_files(scan, output_dir, build_id, &mut manifest, tailwind_outputs)?;
+    collect_css_files(
+        scan,
+        output_dir,
+        build_id,
+        &mut manifest,
+        tailwind_outputs,
+        &css_modules.page_overrides,
+    )?;
 
     // Add CSS module files to manifest
     for css_file in &css_modules.global_css {
