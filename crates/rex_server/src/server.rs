@@ -83,6 +83,7 @@ impl RexServer {
                 document_descriptor,
                 app_route_trie: config.app_route_trie,
                 has_mcp_tools: config.has_mcp_tools,
+                prerendered: std::collections::HashMap::new(),
             })),
         });
 
