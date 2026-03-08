@@ -1,5 +1,6 @@
 use anyhow::Result;
 use oxc_span::GetSpan;
+use rex_core::app_route::AppScanResult;
 use rex_router::ScanResult;
 use std::collections::HashMap;
 use std::fs;
@@ -163,6 +164,204 @@ pub(crate) async fn process_fonts(
         font_css: all_font_css,
         font_preloads: all_preloads,
     })
+}
+
+/// Result of font pre-processing for app router files.
+pub(crate) struct AppFontProcessing {
+    /// Modified `AppScanResult` with font-rewritten file paths.
+    pub app_scan: AppScanResult,
+    /// Combined @font-face + utility class CSS content
+    pub font_css: String,
+    /// Font filenames to preload (served from /_rex/static/)
+    pub font_preloads: Vec<String>,
+}
+
+/// Pre-process font imports in app router layout/page files.
+///
+/// Follows the same pattern as `process_mdx_app_pages`: scans all layout and
+/// page files for font imports, rewrites them, and returns a cloned
+/// `AppScanResult` with modified paths.
+pub(crate) async fn process_font_app_pages(
+    app_scan: &AppScanResult,
+    output_dir: &Path,
+    build_id: &str,
+    project_root: &Path,
+) -> Result<AppFontProcessing> {
+    let temp_dir = output_dir.join("_fonts");
+    let cache_dir = project_root.join(".rex").join("font-cache");
+
+    // Collect all unique source paths from layouts and pages
+    let mut all_paths: Vec<PathBuf> = Vec::new();
+    all_paths.push(app_scan.root_layout.clone());
+    for route in &app_scan.routes {
+        all_paths.push(route.page_path.clone());
+        all_paths.extend(route.layout_chain.iter().cloned());
+    }
+    all_paths.sort();
+    all_paths.dedup();
+
+    // Check which files have font imports
+    let mut files_with_fonts: Vec<PathBuf> = Vec::new();
+    for path in &all_paths {
+        let source = fs::read_to_string(path)?;
+        let font_imports = find_font_imports(&source, path)?;
+        if !font_imports.is_empty() {
+            files_with_fonts.push(path.clone());
+        }
+    }
+
+    if files_with_fonts.is_empty() {
+        return Ok(AppFontProcessing {
+            app_scan: app_scan.clone(),
+            font_css: String::new(),
+            font_preloads: Vec::new(),
+        });
+    }
+
+    fs::create_dir_all(&temp_dir)?;
+    fs::create_dir_all(&cache_dir)?;
+
+    let mut overrides: HashMap<PathBuf, PathBuf> = HashMap::new();
+    let mut processed_fonts: HashMap<String, ProcessedFont> = HashMap::new();
+
+    for source_path in &files_with_fonts {
+        let modified_path = rewrite_font_source(
+            source_path,
+            output_dir,
+            build_id,
+            &cache_dir,
+            &temp_dir,
+            &mut processed_fonts,
+        )
+        .await?;
+        if let Some(path) = modified_path {
+            overrides.insert(source_path.clone(), path);
+        }
+    }
+
+    let mut all_font_css = String::new();
+    let mut all_preloads: Vec<String> = Vec::new();
+    for font in processed_fonts.values() {
+        all_font_css.push_str(&font.css);
+        all_preloads.extend(font.preload_files.iter().cloned());
+    }
+
+    // Clone and patch the scan result (same pattern as MDX)
+    let mut result = app_scan.clone();
+    if let Some(replacement) = overrides.get(&result.root_layout) {
+        result.root_layout = replacement.clone();
+    }
+    for route in &mut result.routes {
+        if let Some(replacement) = overrides.get(&route.page_path) {
+            route.page_path = replacement.clone();
+        }
+        for layout in &mut route.layout_chain {
+            if let Some(replacement) = overrides.get(layout) {
+                *layout = replacement.clone();
+            }
+        }
+    }
+    patch_segment_fonts(&mut result.root, &overrides);
+
+    Ok(AppFontProcessing {
+        app_scan: result,
+        font_css: all_font_css,
+        font_preloads: all_preloads,
+    })
+}
+
+/// Recursively patch font-rewritten paths in the segment tree.
+fn patch_segment_fonts(
+    segment: &mut rex_core::app_route::AppSegment,
+    overrides: &HashMap<PathBuf, PathBuf>,
+) {
+    if let Some(ref p) = segment.layout {
+        if let Some(replacement) = overrides.get(p) {
+            segment.layout = Some(replacement.clone());
+        }
+    }
+    if let Some(ref p) = segment.page {
+        if let Some(replacement) = overrides.get(p) {
+            segment.page = Some(replacement.clone());
+        }
+    }
+    for child in &mut segment.children {
+        patch_segment_fonts(child, overrides);
+    }
+}
+
+/// Rewrite a single source file, replacing font imports with static objects.
+///
+/// Returns `Some(modified_path)` if the file had font imports, or `None` if not.
+async fn rewrite_font_source(
+    effective_path: &Path,
+    output_dir: &Path,
+    build_id: &str,
+    cache_dir: &Path,
+    temp_dir: &Path,
+    processed_fonts: &mut HashMap<String, ProcessedFont>,
+) -> Result<Option<PathBuf>> {
+    let source = fs::read_to_string(effective_path)?;
+    let font_imports = find_font_imports(&source, effective_path)?;
+    if font_imports.is_empty() {
+        return Ok(None);
+    }
+
+    let mut replacements: Vec<(u32, u32, String)> = Vec::new();
+
+    for import_info in &font_imports {
+        replacements.push((
+            import_info.import_span.0,
+            import_info.import_span.1,
+            String::new(),
+        ));
+
+        for call in &import_info.calls {
+            let font = font_google::process_single_font(
+                &call.config.family,
+                &call.config.weights,
+                &call.config.display,
+                call.config.variable.as_deref(),
+                &call.config.fallback,
+                output_dir,
+                build_id,
+                cache_dir,
+                processed_fonts,
+            )
+            .await?;
+
+            let replacement = font_google::build_font_object(
+                &call.config.family,
+                &call.config.fallback,
+                call.config.variable.as_deref(),
+                &font.scoped_family,
+            );
+            replacements.push((call.call_span.0, call.call_span.1, replacement));
+        }
+    }
+
+    if replacements.is_empty() {
+        return Ok(None);
+    }
+
+    let mut modified = source.clone();
+    replacements.sort_by_key(|(start, _, _)| std::cmp::Reverse(*start));
+    for (start, end, replacement) in &replacements {
+        modified.replace_range(*start as usize..*end as usize, replacement);
+    }
+
+    let source_dir = effective_path.parent().unwrap_or(Path::new("."));
+    modified = crate::css_modules::absolutize_relative_imports(&modified, source_dir);
+
+    let hash = font_google::short_hash(effective_path.to_string_lossy().as_bytes());
+    let filename = effective_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let modified_path = temp_dir.join(format!("{hash}_{filename}"));
+    fs::write(&modified_path, &modified)?;
+
+    Ok(Some(modified_path))
 }
 
 /// Find font imports and their corresponding function calls in source.

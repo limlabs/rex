@@ -177,6 +177,29 @@ pub async fn build_bundles(
             &config.server_build_dir(),
             &config.project_root,
         )?;
+
+        // Pre-process font imports in app router layout/page files
+        let app_font_result = crate::font::process_font_app_pages(
+            app_scan,
+            &client_dir,
+            &build_id,
+            &config.project_root,
+        )
+        .await?;
+        let app_scan = &app_font_result.app_scan;
+
+        // Add app router font CSS and preloads to manifest
+        if !app_font_result.font_css.is_empty() {
+            let font_css_filename = format!("app-fonts-{}.css", &build_id[..8]);
+            let font_css_path = client_dir.join(&font_css_filename);
+            fs::write(&font_css_path, &app_font_result.font_css)?;
+            manifest
+                .css_contents
+                .insert(font_css_filename.clone(), app_font_result.font_css);
+            manifest.global_css.insert(0, font_css_filename);
+            manifest.font_preloads.extend(app_font_result.font_preloads);
+        }
+
         let rsc_result =
             crate::rsc_bundler::build_rsc_bundles(config, app_scan, &build_id, &define).await?;
 
