@@ -8,7 +8,7 @@ use rex_build::AssetManifest;
 use rex_core::ProjectConfig;
 use rex_router::RouteTrie;
 use rex_v8::IsolatePool;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tower_http::compression::CompressionLayer;
@@ -35,11 +35,13 @@ pub struct ServerConfig {
     /// App route trie for RSC app/ routes. None if no app/ directory.
     pub app_route_trie: Option<RouteTrie>,
     pub has_mcp_tools: bool,
+    pub host: IpAddr,
 }
 
 pub struct RexServer {
     state: Arc<AppState>,
     port: u16,
+    host: IpAddr,
     static_dir: PathBuf,
     project_root: PathBuf,
 }
@@ -91,6 +93,7 @@ impl RexServer {
         Self {
             state,
             port: config.port,
+            host: config.host,
             static_dir: config.static_dir,
             project_root: config.project_root,
         }
@@ -100,12 +103,14 @@ impl RexServer {
     pub fn from_state(
         state: Arc<AppState>,
         port: u16,
+        host: IpAddr,
         static_dir: PathBuf,
         project_root: PathBuf,
     ) -> Self {
         Self {
             state,
             port,
+            host,
             static_dir,
             project_root,
         }
@@ -161,7 +166,7 @@ impl RexServer {
 
     pub async fn serve(self) -> Result<()> {
         let router = self.build_router();
-        let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
+        let addr = SocketAddr::new(self.host, self.port);
 
         info!("Rex server listening on http://{addr}");
 

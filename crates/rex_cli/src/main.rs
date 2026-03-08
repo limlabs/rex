@@ -6,6 +6,7 @@ use rayon::prelude::*;
 use rex_build::build_bundles;
 use rex_core::{ProjectConfig, RexConfig};
 use rex_router::scan_project;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -29,6 +30,10 @@ enum Commands {
         #[arg(short, long, default_value = "3000")]
         port: u16,
 
+        /// Host to bind to (use 0.0.0.0 to listen on all interfaces)
+        #[arg(short = 'H', long, default_value = "127.0.0.1")]
+        host: IpAddr,
+
         /// Project root directory
         #[arg(long, default_value = ".")]
         root: PathBuf,
@@ -50,6 +55,10 @@ enum Commands {
         /// Port to listen on
         #[arg(short, long, default_value = "3000")]
         port: u16,
+
+        /// Host to bind to
+        #[arg(short = 'H', long, default_value = "0.0.0.0")]
+        host: IpAddr,
 
         /// Project root directory
         #[arg(long, default_value = ".")]
@@ -134,7 +143,12 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Dev { port, root, no_tui } => {
+        Commands::Dev {
+            port,
+            host,
+            root,
+            no_tui,
+        } => {
             let root = std::fs::canonicalize(&root)?;
             let project_config = ProjectConfig::load(&root)?;
             let is_terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
@@ -143,7 +157,7 @@ async fn main() -> Result<()> {
             if tui_enabled {
                 let log_buffer = init_tui_tracing();
                 let log_buffer_fallback = log_buffer.clone();
-                let result = cmd_dev(root, port, true, Some(log_buffer)).await;
+                let result = cmd_dev(root, port, host, true, Some(log_buffer)).await;
                 if result.is_err() {
                     // The TUI never started — dump buffered logs to stderr
                     // so the user can see what happened before the error.
@@ -154,16 +168,16 @@ async fn main() -> Result<()> {
                 result
             } else {
                 init_plain_tracing();
-                cmd_dev(root, port, false, None).await
+                cmd_dev(root, port, host, false, None).await
             }
         }
         Commands::Build { root } => {
             init_plain_tracing();
             cmd_build(root).await
         }
-        Commands::Start { port, root } => {
+        Commands::Start { port, host, root } => {
             init_plain_tracing();
-            cmd_start(root, port).await
+            cmd_start(root, port, host).await
         }
         Commands::Lint {
             root,
@@ -192,16 +206,17 @@ async fn main() -> Result<()> {
 async fn cmd_dev(
     root: PathBuf,
     port: u16,
+    host: IpAddr,
     tui_enabled: bool,
     log_buffer: Option<LogBuffer>,
 ) -> Result<()> {
     let start = std::time::Instant::now();
 
     // Bind the port early — fail fast on conflicts before the expensive build.
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = std::net::SocketAddr::new(host, port);
     let listener = tokio::net::TcpListener::bind(addr)
         .await
-        .with_context(|| format!("failed to bind port {port} — is another server running?"))?;
+        .with_context(|| format!("failed to bind {addr} — is another server running?"))?;
 
     if !tui_enabled {
         print_mascot_header(env!("CARGO_PKG_VERSION"), "");
@@ -211,6 +226,7 @@ async fn cmd_dev(
         root: root.clone(),
         dev: true,
         port,
+        host,
     })
     .await?;
 
@@ -1260,7 +1276,7 @@ fn print_route_summary_with_manifest(
     }
 }
 
-async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
+async fn cmd_start(root: PathBuf, port: u16, host: IpAddr) -> Result<()> {
     let start = std::time::Instant::now();
 
     print_mascot_header(env!("CARGO_PKG_VERSION"), "(production)");
@@ -1269,6 +1285,7 @@ async fn cmd_start(root: PathBuf, port: u16) -> Result<()> {
         root,
         dev: false,
         port,
+        host,
     })
     .await?;
 
