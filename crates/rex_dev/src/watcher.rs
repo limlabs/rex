@@ -24,12 +24,17 @@ pub struct FileEvent {
 /// Start watching the project root for file changes. Returns a receiver for file events.
 ///
 /// Watches recursively but skips `node_modules/`, `.rex/`, `.git/`, and `target/`.
-/// - `.tsx/.ts/.jsx/.js/.mdx` files under `pages_dir` → PageModified / PageRemoved
+/// - `.tsx/.ts/.jsx/.js/.mdx` files under `pages_dir` or `app_dir` → PageModified / PageRemoved
 /// - `.css` files anywhere → CssModified
-pub fn start_watcher(project_root: &Path, pages_dir: &Path) -> Result<mpsc::Receiver<FileEvent>> {
+pub fn start_watcher(
+    project_root: &Path,
+    pages_dir: &Path,
+    app_dir: &Path,
+) -> Result<mpsc::Receiver<FileEvent>> {
     let (tx, rx) = mpsc::channel();
     let project_root_owned = project_root.to_path_buf();
     let pages_dir_owned = pages_dir.to_path_buf();
+    let app_dir_owned = app_dir.to_path_buf();
     let watch_dir = project_root_owned.clone();
 
     let mut debouncer = new_debouncer(
@@ -65,7 +70,9 @@ pub fn start_watcher(project_root: &Path, pages_dir: &Path) -> Result<mpsc::Rece
                                     } else {
                                         continue;
                                     }
-                                } else if is_page_file(&path) && path.starts_with(&pages_dir_owned)
+                                } else if is_page_file(&path)
+                                    && (path.starts_with(&pages_dir_owned)
+                                        || path.starts_with(&app_dir_owned))
                                 {
                                     if path.exists() {
                                         FileEventKind::PageModified

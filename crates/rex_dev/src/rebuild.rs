@@ -74,6 +74,7 @@ pub async fn handle_file_event(
             let hmr_manifest_json = serde_json::json!({
                 "build_id": &build_result.build_id,
                 "pages": &build_result.manifest.pages,
+                "app_routes": &build_result.manifest.app_routes,
             });
 
             // Snapshot the old hot state (Arc clone, cheap)
@@ -128,6 +129,7 @@ pub async fn handle_file_event(
             let rel_path = event
                 .path
                 .strip_prefix(&config.pages_dir)
+                .or_else(|_| event.path.strip_prefix(&config.app_dir))
                 .unwrap_or(&event.path);
             hmr.send_update(&rel_path.to_string_lossy(), hmr_manifest_json);
 

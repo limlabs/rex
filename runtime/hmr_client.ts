@@ -111,8 +111,21 @@
     const manifest = window.__REX_MANIFEST__;
     const newManifest = msg.manifest;
 
-    if (!manifest || !newManifest || !newManifest.pages) {
+    if (!manifest || !newManifest) {
       console.log("[Rex HMR] No manifest, falling back to full reload");
+      window.location.reload();
+      return;
+    }
+
+    // App Router pages use RSC Flight protocol — full reload for now
+    if (newManifest.app_routes && Object.keys(newManifest.app_routes).length > 0 && !newManifest.pages) {
+      console.log("[Rex HMR] App router update, reloading");
+      window.location.reload();
+      return;
+    }
+
+    if (!newManifest.pages) {
+      console.log("[Rex HMR] No pages in manifest, falling back to full reload");
       window.location.reload();
       return;
     }
@@ -123,7 +136,7 @@
       router && router.state ? router.state.route : null;
 
     if (!currentPattern || !newManifest.pages[currentPattern]) {
-      // Current page isn't in the new manifest (removed?), full reload
+      // Current page not in pages manifest — could be an app router page, full reload
       console.log(
         "[Rex HMR] Current route not in manifest, falling back to full reload",
       );

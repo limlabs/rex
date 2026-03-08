@@ -234,7 +234,8 @@ async fn cmd_dev(
     }
 
     // Start file watcher (watches project root for CSS changes too)
-    let event_rx = rex_dev::start_watcher(&config.project_root, &config.pages_dir)?;
+    let event_rx =
+        rex_dev::start_watcher(&config.project_root, &config.pages_dir, &config.app_dir)?;
 
     // Bridge sync file watcher to async rebuild handler
     let (rebuild_tx, mut rebuild_rx) = tokio::sync::mpsc::unbounded_channel();
