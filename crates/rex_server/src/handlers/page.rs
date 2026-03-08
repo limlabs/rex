@@ -462,6 +462,7 @@ pub(super) async fn page_handler_inner(
         app_script.as_deref(),
         &client_scripts,
         hot.document_descriptor.as_ref(),
+        &hot.manifest.font_preloads,
     );
 
     // Stream response in two chunks: shell (immediate) → render + tail (after V8)

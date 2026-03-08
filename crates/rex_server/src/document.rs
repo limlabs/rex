@@ -23,6 +23,7 @@ pub struct DocumentParams<'a> {
     pub is_dev: bool,
     pub doc_descriptor: Option<&'a DocumentDescriptor>,
     pub manifest_json: Option<&'a str>,
+    pub font_preloads: &'a [String],
 }
 
 /// Assemble the final HTML document
@@ -58,6 +59,13 @@ pub fn assemble_document(params: &DocumentParams<'_>) -> String {
             html.push_str(&desc.head_content);
             html.push('\n');
         }
+    }
+
+    // Font preloads: start fetching font files early to prevent layout shift
+    for font_file in params.font_preloads {
+        html.push_str(&format!(
+            "  <link rel=\"preload\" as=\"font\" type=\"font/woff2\" href=\"/_rex/static/{font_file}\" crossorigin />\n"
+        ));
     }
 
     // CSS: inline content to avoid render-blocking network requests
@@ -156,6 +164,7 @@ pub fn assemble_head_shell(
     app_script: Option<&str>,
     client_scripts: &[String],
     doc_descriptor: Option<&DocumentDescriptor>,
+    font_preloads: &[String],
 ) -> String {
     let mut html = String::with_capacity(2048);
 
@@ -179,6 +188,13 @@ pub fn assemble_head_shell(
             html.push_str(&desc.head_content);
             html.push('\n');
         }
+    }
+
+    // Font preloads: start fetching font files early to prevent layout shift
+    for font_file in font_preloads {
+        html.push_str(&format!(
+            "  <link rel=\"preload\" as=\"font\" type=\"font/woff2\" href=\"/_rex/static/{font_file}\" crossorigin />\n"
+        ));
     }
 
     // CSS: inline content to avoid render-blocking network requests

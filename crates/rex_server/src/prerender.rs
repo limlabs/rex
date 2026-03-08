@@ -191,6 +191,7 @@ fn assemble_static_html(
         manifest.app_script.as_deref(),
         &client_scripts,
         doc_descriptor,
+        &manifest.font_preloads,
     );
 
     let tail = assemble_body_tail(
