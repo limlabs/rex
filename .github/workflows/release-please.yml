@@ -48,7 +48,15 @@ jobs:
 
       - name: Update package-lock.json files
         run: |
+          # Packages whose version is bumped by release-please
           for dir in packages/rex packages/create-rex-app; do
+            if [ -f "$dir/package-lock.json" ]; then
+              echo "Updating $dir/package-lock.json..."
+              npm install --prefix "$dir" --package-lock-only --ignore-scripts
+            fi
+          done
+          # Fixtures that depend on @limlabs/rex via file: reference
+          for dir in fixtures/app-router fixtures/basic fixtures/custom-server fixtures/mcp fixtures/mdx fixtures/tailwind; do
             if [ -f "$dir/package-lock.json" ]; then
               echo "Updating $dir/package-lock.json..."
               npm install --prefix "$dir" --package-lock-only --ignore-scripts
@@ -59,7 +67,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.lock packages/rex/package-lock.json packages/create-rex-app/package-lock.json
+          git add Cargo.lock '*/package-lock.json' 'packages/*/package-lock.json'
           if [ -n "$(git diff --cached --name-only)" ]; then
             git commit -m "chore: update lockfiles"
             git push
