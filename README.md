@@ -1,8 +1,31 @@
 # Rex
 
-A Rust-native reimplementation of Next.js. The server, router, build pipeline, and SSR engine are all Rust — you write React pages with `getServerSideProps` exactly like Next.js, but requests are handled by Axum, rendered in V8, and bundled by Rolldown.
+A next-generation React framework built on the Next.js API. Write standard React — pages, layouts, server components, server actions — with the same file conventions you already know. Under the hood, Rex replaces the Node.js runtime with a purpose-built Rust engine.
+
+### Why Rex
+
+- **Fast** — Axum HTTP server, pooled V8 isolates for SSR, Rolldown bundler. No cold starts, no single-threaded bottlenecks.
+- **Both routers** — Pages Router (`pages/` with `getServerSideProps`) and App Router (`app/` with RSC, layouts, streaming) in one framework.
+- **Batteries included** — CSS Modules, Tailwind (auto-detected), MDX, image optimization, Google Fonts, middleware, server actions — no plugins to install.
+- **One CLI** — `rex dev`, `rex build`, `rex start`, plus built-in `lint` (oxlint), `fmt` (oxfmt), and `typecheck` (tsc).
+- **Single binary** — ships as one native executable per platform via npm. No Node.js required at runtime.
+- **Zero-config** — works without a `package.json`. Add one when you need a lockfile or extra dependencies.
 
 ## Quick Start
+
+The fastest way to start is zero-config — no `package.json` needed:
+
+```sh
+npx @limlabs/rex init my-app
+cd my-app
+npx rex dev
+```
+
+Open http://localhost:3000.
+
+### With a package.json
+
+For projects that need a lockfile and additional npm dependencies:
 
 ```sh
 npx @limlabs/rex init my-app
@@ -10,8 +33,6 @@ cd my-app
 npm install
 npx rex dev
 ```
-
-Open http://localhost:3000.
 
 ## Install
 
@@ -21,7 +42,7 @@ Open http://localhost:3000.
 npm install -D @limlabs/rex
 ```
 
-This installs the `rex` binary for your platform (macOS arm64/x64, Linux x64/arm64).
+Installs the `rex` binary for your platform (macOS arm64/x64, Linux x64/arm64).
 
 ### From source
 
@@ -39,273 +60,23 @@ docker build -t rex .
 docker run -v $(pwd):/app -w /app -p 3000:3000 rex
 ```
 
-## Pages & Routing
+## What's Supported
 
-Rex uses file-system routing from the `pages/` directory, identical to Next.js:
+Rex aims for high compatibility with Next.js across both routers. Here's the high-level picture:
 
-| File | URL |
-|------|-----|
-| `pages/index.tsx` | `/` |
-| `pages/about.tsx` | `/about` |
-| `pages/blog/index.tsx` | `/blog` |
-| `pages/blog/[slug].tsx` | `/blog/:slug` |
-| `pages/docs/[...path].tsx` | `/docs/*` (catch-all) |
-| `pages/docs/[[...path]].tsx` | `/docs/*` (optional catch-all) |
+### Pages Router
 
-### Basic page
+File-system routing in `pages/`, server-side rendering with `getServerSideProps` (sync and async), dynamic routes (`[slug]`, `[...slug]`, `[[...slug]]`), API routes, custom `_app` and `_document`, client-side navigation, and data fetching via JSON endpoints.
 
-```tsx
-export default function Home({ message }: { message: string }) {
-  return <h1>{message}</h1>;
-}
+### App Router
 
-export function getServerSideProps() {
-  return {
-    props: { message: "Hello from Rex!" },
-  };
-}
-```
+`app/` directory with nested layouts, React Server Components, `"use client"` boundary, streaming SSR with Suspense, `loading.tsx` / `error.tsx` / `not-found.tsx`, route groups `(group)`, `generateMetadata`, server actions (`"use server"`), and automatic static optimization.
 
-### Dynamic routes
+### Shared Features
 
-```tsx
-export default function Post({ slug }: { slug: string }) {
-  return <h1>Post: {slug}</h1>;
-}
+CSS Modules, Tailwind CSS (auto-detected), MDX pages, Google Fonts optimization, image optimization with blur placeholders, middleware, redirects/rewrites/headers config, TypeScript/TSX, and HMR in dev mode.
 
-export function getServerSideProps(context: { params: { slug: string } }) {
-  return {
-    props: { slug: context.params.slug },
-  };
-}
-```
-
-### getServerSideProps
-
-Runs on every request. Receives `context` with `params`, `query`, `headers`, and `cookies`. Can return:
-
-- **props** — `{ props: { ... } }` passed to the page component
-- **redirect** — `{ redirect: { destination: "/login", permanent: false } }`
-- **notFound** — `{ notFound: true }` renders a 404
-
-Supports `async` for data fetching with the built-in `fetch` API.
-
-### API routes
-
-Files in `pages/api/` export a request handler instead of a React component:
-
-```ts
-// pages/api/hello.ts
-export default function handler(req, res) {
-  res.json({ message: "Hello" });
-}
-```
-
-## Features
-
-### Custom `_app`
-
-Wrap all pages with a shared layout:
-
-```tsx
-// pages/_app.tsx
-export default function App({ Component, pageProps }) {
-  return (
-    <div className="layout">
-      <Component {...pageProps} />
-    </div>
-  );
-}
-```
-
-### Custom `_document`
-
-Control the HTML shell:
-
-```tsx
-// pages/_document.tsx
-import { Html, Head, Main, Script } from "@limlabs/rex/document";
-
-export default function Document() {
-  return (
-    <Html lang="en">
-      <Head />
-      <body>
-        <Main />
-        <Script />
-      </body>
-    </Html>
-  );
-}
-```
-
-### Head
-
-Set `<head>` tags per page:
-
-```tsx
-import Head from "@limlabs/rex/head";
-
-export default function About() {
-  return (
-    <>
-      <Head>
-        <title>About</title>
-        <meta name="description" content="About page" />
-      </Head>
-      <h1>About</h1>
-    </>
-  );
-}
-```
-
-### Link
-
-Client-side navigation with prefetching:
-
-```tsx
-import Link from "@limlabs/rex/link";
-
-export default function Nav() {
-  return <Link href="/about">About</Link>;
-}
-```
-
-### Image
-
-Optimized image component with blur placeholders and format negotiation:
-
-```tsx
-import Image from "@limlabs/rex/image";
-
-export default function Hero() {
-  return <Image src="/hero.jpg" width={800} height={400} alt="Hero" />;
-}
-```
-
-### CSS Modules
-
-`.module.css` files are scoped automatically:
-
-```tsx
-import styles from "./button.module.css";
-
-export default function Button() {
-  return <button className={styles.primary}>Click</button>;
-}
-```
-
-Class names are scoped to `{File}_{class}_{hash}` to prevent collisions.
-
-### Tailwind CSS
-
-Rex automatically detects Tailwind and processes it during builds. Install `@tailwindcss/cli` and add your config — no extra setup needed.
-
-### MDX
-
-Write pages in MDX with full component support:
-
-```mdx
-// pages/docs/intro.mdx
-import { Chart } from "../components/Chart";
-
-# Introduction
-
-Here's an interactive chart:
-
-<Chart data={[1, 2, 3]} />
-```
-
-### Google Fonts
-
-Rex optimizes Google Fonts automatically — downloading font files at build time, generating `@font-face` CSS, and adding preload hints.
-
-### Middleware
-
-Add a `middleware.ts` at the project root to intercept requests:
-
-```ts
-// middleware.ts
-import { NextRequest, NextResponse } from "@limlabs/rex/middleware";
-
-export function middleware(request: NextRequest) {
-  if (!request.cookies.get("session")) {
-    return NextResponse.redirect("/login");
-  }
-  return NextResponse.next();
-}
-```
-
-### Server Actions
-
-Use `"use server"` directives for form handling and mutations:
-
-```tsx
-async function submitForm(formData: FormData) {
-  "use server";
-  await saveToDatabase(formData.get("email"));
-}
-
-export default function SignUp() {
-  return (
-    <form action={submitForm}>
-      <input name="email" type="email" />
-      <button type="submit">Sign Up</button>
-    </form>
-  );
-}
-```
-
-### Client-Side Router
-
-The built-in router supports `push`, `replace`, and `prefetch`:
-
-```tsx
-import { useRouter } from "@limlabs/rex/router";
-
-export default function Page() {
-  const router = useRouter();
-  return <button onClick={() => router.push("/dashboard")}>Go</button>;
-}
-```
-
-Client navigations fetch data via `/_rex/data/{buildId}/{path}.json` without full page reloads.
-
-## Configuration
-
-Create `rex.config.json` (or `rex.config.toml`) in your project root:
-
-```json
-{
-  "redirects": [
-    {
-      "source": "/old-blog/:slug",
-      "destination": "/blog/:slug",
-      "permanent": true
-    }
-  ],
-  "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "/api/v2/:path*"
-    }
-  ],
-  "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        { "key": "X-Frame-Options", "value": "DENY" }
-      ]
-    }
-  ],
-  "build": {
-    "alias": {
-      "@components": "./src/components"
-    },
-    "sourcemap": true
-  }
-}
-```
+For the full feature-by-feature breakdown — including comparison with Next.js and Vinext — see the [Compatibility Matrix](COMPATIBILITY.md).
 
 ## CLI Reference
 
@@ -326,14 +97,36 @@ All port/host flags also read `$PORT` and `$HOST` environment variables.
 
 Set `RUST_LOG=rex=debug` for verbose logging.
 
+## Configuration
+
+Create `rex.config.json` (or `rex.config.toml`) in your project root:
+
+```json
+{
+  "redirects": [
+    { "source": "/old/:slug", "destination": "/new/:slug", "permanent": true }
+  ],
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/v2/:path*" }
+  ],
+  "headers": [
+    { "source": "/(.*)", "headers": [{ "key": "X-Frame-Options", "value": "DENY" }] }
+  ],
+  "build": {
+    "alias": { "@components": "./src/components" },
+    "sourcemap": true
+  }
+}
+```
+
 ## How It Works
 
-1. **Route scanning** — walks `pages/` and builds a trie for URL matching (static > dynamic > catch-all priority)
+1. **Route scanning** — walks `pages/` and `app/` directories, builds a trie for URL matching (static > dynamic > catch-all priority)
 2. **Rolldown bundling** — OXC parses TSX/JSX and strips TypeScript; Rolldown produces an IIFE server bundle and ESM client bundles with code splitting
-3. **V8 SSR** — a pool of V8 isolates (one per thread) evaluates the server bundle, calls `getServerSideProps`, then `renderToString`
-4. **Axum serving** — assembles the HTML document with SSR markup, props JSON, and `<script type="module">` tags
-5. **Client hydration** — React hydrates the server-rendered HTML; the client-side router takes over navigation
-6. **HMR** — file watcher triggers incremental rebuilds, V8 isolates reload, WebSocket pushes full-page refresh to the browser
+3. **V8 SSR** — a pool of V8 isolates (one per thread) evaluates the server bundle, runs data fetching, then renders to HTML
+4. **Axum serving** — assembles the HTML document with SSR markup, props/flight data, and `<script type="module">` tags
+5. **Client hydration** — React hydrates the server-rendered HTML; the client-side router handles subsequent navigations
+6. **HMR** — file watcher triggers incremental rebuilds, V8 isolates reload, WebSocket pushes updates to the browser
 
 ## Architecture
 
@@ -376,7 +169,7 @@ CMD ["start"]
 
 ### Railway
 
-Rex includes a Railway deployment config. See `fixtures/railway/` for an example with `railway.toml`.
+See `fixtures/railway/` for a ready-to-deploy example with `railway.toml`.
 
 ### Any server
 
