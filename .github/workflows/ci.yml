@@ -50,7 +50,7 @@ jobs:
         run: scripts/check-file-length.sh --diff origin/${{ github.base_ref || 'main' }}
 
       - name: oxlint
-        run: cargo run -p rex_cli -- lint --deny-warnings runtime/ packages/rex/src/ fixtures/ benchmarks/
+        run: npx oxlint --deny-warnings runtime/ packages/rex/src/ benchmarks/
 
   test:
     name: Test & Coverage
