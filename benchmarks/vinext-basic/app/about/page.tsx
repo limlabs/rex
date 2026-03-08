@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 export const metadata = {
   title: 'About - Rex',
   description: 'Learn about Rex, a Next.js Pages Router in Rust.',

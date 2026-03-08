@@ -51,7 +51,7 @@ REX_TW_FIXTURE = PROJECT_ROOT / "fixtures/tailwind"
 ENDPOINTS = ["/", "/about", "/static", "/blog/hello-world", "/api/hello", "/gallery"]
 ENDPOINT_LABELS = {
     "/": "SSR index",
-    "/about": "SSG about",
+    "/about": "SSR about",
     "/static": "Static (no data)",
     "/blog/hello-world": "Dynamic route",
     "/api/hello": "API route",
