@@ -336,7 +336,7 @@ def start_vinext(mode: str, port: int) -> Optional[ServerProcess]:
             f"  {yellow('SKIP')}: Vinext not installed. Run: cd benchmarks/vinext-basic && npm install"
         )
         return None
-    cmd = ["npx", "vinext", mode, "--port", str(port)]
+    cmd = ["npx", "vinext", mode, "--hostname", "127.0.0.1", "--port", str(port)]
     proc = subprocess.Popen(
         cmd, cwd=VINEXT_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
@@ -428,7 +428,7 @@ def run_ab(url: str, requests: int, concurrency: int, warmup: int) -> AbResult:
     # Benchmark
     try:
         out = subprocess.check_output(
-            ["ab", "-n", str(requests), "-c", str(concurrency), url],
+            ["ab", "-l", "-n", str(requests), "-c", str(concurrency), url],
             stderr=subprocess.STDOUT,
             text=True,
             timeout=120,
