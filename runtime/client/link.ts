@@ -39,6 +39,19 @@ export default function Link(props: LinkProps): React.ReactElement {
 
     e.preventDefault();
 
+    // RSC app router navigation (fetches flight data, re-renders in place)
+    const rscNavigate = window.__REX_RSC_NAVIGATE;
+    if (rscNavigate) {
+      if (replace) {
+        history.replaceState(null, "", href);
+      } else {
+        history.pushState(null, "", href);
+      }
+      rscNavigate(href);
+      return;
+    }
+
+    // Pages router navigation
     const router = window.__REX_ROUTER;
     if (router) {
       if (replace) {
@@ -52,6 +65,8 @@ export default function Link(props: LinkProps): React.ReactElement {
   };
 
   aProps.onMouseEnter = function () {
+    // RSC routes: no prefetch yet (could add flight data prefetch later)
+    if (window.__REX_RSC_NAVIGATE) return;
     const router = window.__REX_ROUTER;
     if (router && router.prefetch) {
       router.prefetch(href);

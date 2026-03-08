@@ -11,6 +11,9 @@
 //   - __rex_app_pages: page component registry
 //   - __rex_app_layout_chains: layout chains per route
 //   - __rex_webpack_bundler_config: server-side bundler config for client refs
+//   - __rex_decodeReply: from react-server-dom-webpack/server (when server actions exist)
+//   - __rex_decodeAction: from react-server-dom-webpack/server (when server actions exist)
+//   - __rex_server_action_manifest: dispatch table for decodeReply/decodeAction
 
 // --- State ---
 let _chunks: (string | Uint8Array)[] = [];
@@ -200,6 +203,88 @@ globalThis.__rex_finalize_rsc_to_html = function(): string {
 let _actionResult: string | null = null;
 let _actionDone = false;
 
+// --- redirect() and notFound() sentinel errors ---
+
+const REDIRECT_TYPE = '__rex_redirect__';
+const NOT_FOUND_TYPE = '__rex_notFound__';
+
+globalThis.__rex_redirect = function(url: string, status?: number): never {
+    throw { __rex_type: REDIRECT_TYPE, url: url, status: status || 303 };
+};
+
+globalThis.__rex_notFound = function(): never {
+    throw { __rex_type: NOT_FOUND_TYPE };
+};
+
+// --- Request context (set by Rust before action execution) ---
+
+globalThis.__rex_request_headers = {};
+globalThis.__rex_request_cookies = {};
+
+// --- Flight serialization for action results ---
+
+function _storeActionResult(val: unknown): void {
+    const bundlerConfig = globalThis.__rex_webpack_bundler_config || {};
+    try {
+        // renderToReadableStream can serialize any value, not just ReactElements
+        const stream = __rex_renderToReadableStream(val as React.ReactElement, bundlerConfig);
+        const reader = stream.getReader();
+        const chunks: (string | Uint8Array)[] = [];
+
+        function drain(): void {
+            reader.read().then(function(result: ReadableStreamReadResult<Uint8Array>) {
+                if (result.done) {
+                    const decoder = new TextDecoder();
+                    const parts: string[] = [];
+                    for (let i = 0; i < chunks.length; i++) {
+                        const c = chunks[i];
+                        parts.push(typeof c === 'string' ? c : decoder.decode(c));
+                    }
+                    _actionResult = JSON.stringify({ flight: parts.join('') });
+                    _actionDone = true;
+                } else {
+                    chunks.push(result.value);
+                    drain();
+                }
+            }, function(err: unknown) {
+                _actionResult = JSON.stringify({ error: 'Flight serialization failed: ' + String(err) });
+                _actionDone = true;
+            });
+        }
+        drain();
+    } catch {
+        // Fallback to JSON if flight serialization not available
+        _actionResult = JSON.stringify({ result: val });
+        _actionDone = true;
+    }
+}
+
+function _handleActionError(err: unknown): void {
+    if (err && typeof err === 'object') {
+        const sentinel = err as Record<string, unknown>;
+        if (sentinel.__rex_type === REDIRECT_TYPE) {
+            _actionResult = JSON.stringify({
+                redirect: sentinel.url,
+                redirectStatus: sentinel.status
+            });
+            _actionDone = true;
+            return;
+        }
+        if (sentinel.__rex_type === NOT_FOUND_TYPE) {
+            _actionResult = JSON.stringify({ notFound: true });
+            _actionDone = true;
+            return;
+        }
+    }
+    _actionResult = JSON.stringify({ error: String(err) });
+    _actionDone = true;
+}
+
+function _handleActionValue(val: unknown): void {
+    _storeActionResult(val);
+}
+
+// Legacy JSON-only path (backward compat for plain JSON args)
 globalThis.__rex_call_server_action = function(actionId: string, argsJson: string): string {
     const actions = globalThis.__rex_server_actions || {};
     const fn = actions[actionId];
@@ -221,23 +306,135 @@ globalThis.__rex_call_server_action = function(actionId: string, argsJson: strin
     try {
         const result = fn.apply(null, args);
         if (result && typeof result === 'object' && typeof (result as Record<string, unknown>).then === 'function') {
-            // Async — store promise resolution
             (result as Promise<unknown>).then(
-                function(val: unknown) {
-                    _actionResult = JSON.stringify({ result: val });
-                    _actionDone = true;
-                },
-                function(err: unknown) {
-                    _actionResult = JSON.stringify({ error: String(err) });
-                    _actionDone = true;
-                }
+                _handleActionValue,
+                _handleActionError
             );
             return '__REX_ACTION_ASYNC__';
         }
-        return JSON.stringify({ result: result });
+        _handleActionValue(result);
+        return '__REX_ACTION_ASYNC__';
     } catch (e) {
-        return JSON.stringify({ error: String(e) });
+        _handleActionError(e);
+        return '__REX_ACTION_ASYNC__';
     }
+};
+
+// Encoded reply path: uses React's decodeReply to handle FormData, Blob, etc.
+// body is either a string (from encodeReply) or a JSON array of [key, value] pairs
+// when isFormFields is true (multipart from encodeReply returning FormData).
+// Returns '__REX_ACTION_ASYNC__' since decodeReply is always async.
+globalThis.__rex_call_server_action_encoded = function(actionId: string, body: string, isFormFields?: boolean): string {
+    const actions = globalThis.__rex_server_actions || {};
+    const fn = actions[actionId];
+    if (!fn) {
+        return JSON.stringify({ error: 'Server action not found: ' + actionId });
+    }
+
+    // Reset state
+    _actionResult = null;
+    _actionDone = false;
+
+    const serverManifest = globalThis.__rex_server_action_manifest || {};
+
+    // Build the body for decodeReply: either a raw string or reconstructed FormData
+    let decodedBody: string | FormData;
+    if (isFormFields) {
+        let fields: [string, string][];
+        try {
+            fields = JSON.parse(body);
+        } catch {
+            return JSON.stringify({ error: 'Invalid form fields JSON' });
+        }
+        const formData = new FormData();
+        for (let i = 0; i < fields.length; i++) {
+            formData.append(fields[i][0], fields[i][1]);
+        }
+        decodedBody = formData;
+    } else {
+        decodedBody = body;
+    }
+
+    // decodeReply returns a thenable/Promise of the decoded args
+    const decoded = globalThis.__rex_decodeReply(decodedBody, serverManifest);
+
+    Promise.resolve(decoded).then(
+        function(args: unknown) {
+            const argArray = Array.isArray(args) ? args : [args];
+            try {
+                const result = fn.apply(null, argArray);
+                if (result && typeof result === 'object' && typeof (result as Record<string, unknown>).then === 'function') {
+                    return (result as Promise<unknown>).then(
+                        _handleActionValue,
+                        _handleActionError
+                    );
+                }
+                _handleActionValue(result);
+            } catch (e) {
+                _handleActionError(e);
+            }
+        },
+        function(err: unknown) {
+            _actionResult = JSON.stringify({ error: 'decodeReply failed: ' + String(err) });
+            _actionDone = true;
+        }
+    );
+
+    return '__REX_ACTION_ASYNC__';
+};
+
+// Form action path: uses React's decodeAction to resolve action + args from FormData.
+// fieldsJson is a JSON array of [key, value] pairs from Rust's multipart parsing.
+// Returns '__REX_ACTION_ASYNC__' since decodeAction is always async.
+globalThis.__rex_call_form_action = function(fieldsJson: string): string {
+    // Reset state
+    _actionResult = null;
+    _actionDone = false;
+
+    let fields: [string, string][];
+    try {
+        fields = JSON.parse(fieldsJson);
+    } catch {
+        return JSON.stringify({ error: 'Invalid form fields JSON' });
+    }
+
+    // Reconstruct FormData from parsed fields
+    const formData = new FormData();
+    for (let i = 0; i < fields.length; i++) {
+        formData.append(fields[i][0], fields[i][1]);
+    }
+
+    const serverManifest = globalThis.__rex_server_action_manifest || {};
+
+    const actionPromise = globalThis.__rex_decodeAction(formData, serverManifest);
+
+    Promise.resolve(actionPromise).then(
+        function(boundFn: unknown) {
+            if (typeof boundFn !== 'function') {
+                _actionResult = JSON.stringify({ error: 'decodeAction did not return a function' });
+                _actionDone = true;
+                return;
+            }
+            try {
+                const result = (boundFn as () => unknown)();
+                if (result && typeof result === 'object' && typeof (result as Record<string, unknown>).then === 'function') {
+                    return (result as Promise<unknown>).then(
+                        _handleActionValue,
+                        _handleActionError
+                    );
+                }
+                _handleActionValue(result);
+            } catch (e) {
+                _handleActionError(e);
+            }
+        },
+        function(err: unknown) {
+            _actionResult = JSON.stringify({ error: 'decodeAction failed: ' + String(err) });
+            _actionDone = true;
+        }
+    );
+
+    return '__REX_ACTION_ASYNC__';
 };
 
 globalThis.__rex_resolve_action_pending = function(): "pending" | "done" {

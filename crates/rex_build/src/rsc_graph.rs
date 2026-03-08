@@ -13,12 +13,15 @@ pub struct ModuleInfo {
     pub path: PathBuf,
     /// Whether this module has `"use client"` directive.
     pub is_client: bool,
-    /// Whether this module has `"use server"` directive.
+    /// Whether this module has `"use server"` directive (module-level).
     pub is_server: bool,
     /// Resolved import paths from this module.
     pub imports: Vec<PathBuf>,
     /// Export names from this module.
     pub exports: Vec<String>,
+    /// Exported functions that have function-level `"use server"` directives.
+    /// Only populated for modules without a module-level `"use server"` directive.
+    pub server_functions: Vec<String>,
 }
 
 /// The analyzed module graph.
@@ -38,9 +41,18 @@ impl ModuleGraph {
         self.modules.values().filter(|m| !m.is_client).collect()
     }
 
-    /// Return all modules that have `"use server"` directive.
+    /// Return all modules that have `"use server"` directive (module-level).
     pub fn server_action_modules(&self) -> Vec<&ModuleInfo> {
         self.modules.values().filter(|m| m.is_server).collect()
+    }
+
+    /// Return all modules that have function-level `"use server"` directives
+    /// (without a module-level directive).
+    pub fn inline_server_action_modules(&self) -> Vec<&ModuleInfo> {
+        self.modules
+            .values()
+            .filter(|m| !m.is_server && !m.server_functions.is_empty())
+            .collect()
     }
 }
 
@@ -64,6 +76,32 @@ pub fn has_use_client_directive(source: &str, source_type: oxc_span::SourceType)
         .directives
         .iter()
         .any(|d| d.directive.as_str() == "use client")
+}
+
+/// Check if a function body has a `"use server"` directive.
+fn has_function_body_use_server(
+    body: Option<&oxc_allocator::Box<oxc_ast::ast::FunctionBody>>,
+) -> bool {
+    body.is_some_and(|b| {
+        b.directives
+            .iter()
+            .any(|d| d.directive.as_str() == "use server")
+    })
+}
+
+/// Check if an expression (arrow function or function expression) has `"use server"`.
+fn has_expression_use_server(expr: &oxc_ast::ast::Expression) -> bool {
+    match expr {
+        oxc_ast::ast::Expression::ArrowFunctionExpression(arrow) => arrow
+            .body
+            .directives
+            .iter()
+            .any(|d| d.directive.as_str() == "use server"),
+        oxc_ast::ast::Expression::FunctionExpression(func) => {
+            has_function_body_use_server(func.body.as_ref())
+        }
+        _ => false,
+    }
 }
 
 /// Detect `"use client"` directive and extract exports from a source file.
@@ -102,6 +140,7 @@ fn analyze_module(path: &Path, root: &Path) -> Result<ModuleInfo> {
 
     let mut imports = Vec::new();
     let mut exports = Vec::new();
+    let mut server_functions = Vec::new();
 
     for stmt in &parsed.program.body {
         // Collect imports
@@ -112,10 +151,20 @@ fn analyze_module(path: &Path, root: &Path) -> Result<ModuleInfo> {
             }
         }
 
-        // Collect export names
+        // Collect export names and detect function-level "use server"
         match stmt {
-            oxc_ast::ast::Statement::ExportDefaultDeclaration(_) => {
+            oxc_ast::ast::Statement::ExportDefaultDeclaration(export) => {
                 exports.push("default".to_string());
+                // Check if the default export is a function with "use server"
+                if !is_server {
+                    if let oxc_ast::ast::ExportDefaultDeclarationKind::FunctionDeclaration(ref f) =
+                        export.declaration
+                    {
+                        if has_function_body_use_server(f.body.as_ref()) {
+                            server_functions.push("default".to_string());
+                        }
+                    }
+                }
             }
             oxc_ast::ast::Statement::ExportNamedDeclaration(export) => {
                 for spec in &export.specifiers {
@@ -126,7 +175,11 @@ fn analyze_module(path: &Path, root: &Path) -> Result<ModuleInfo> {
                     match decl {
                         oxc_ast::ast::Declaration::FunctionDeclaration(f) => {
                             if let Some(ref id) = f.id {
-                                exports.push(id.name.to_string());
+                                let name = id.name.to_string();
+                                exports.push(name.clone());
+                                if !is_server && has_function_body_use_server(f.body.as_ref()) {
+                                    server_functions.push(name);
+                                }
                             }
                         }
                         oxc_ast::ast::Declaration::ClassDeclaration(c) => {
@@ -135,11 +188,20 @@ fn analyze_module(path: &Path, root: &Path) -> Result<ModuleInfo> {
                             }
                         }
                         oxc_ast::ast::Declaration::VariableDeclaration(v) => {
-                            for decl in &v.declarations {
+                            for vardecl in &v.declarations {
                                 if let oxc_ast::ast::BindingPattern::BindingIdentifier(ref id) =
-                                    decl.id
+                                    vardecl.id
                                 {
-                                    exports.push(id.name.to_string());
+                                    let name = id.name.to_string();
+                                    exports.push(name.clone());
+                                    // Check arrow/function expressions for "use server"
+                                    if !is_server {
+                                        if let Some(ref init) = vardecl.init {
+                                            if has_expression_use_server(init) {
+                                                server_functions.push(name);
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -157,6 +219,7 @@ fn analyze_module(path: &Path, root: &Path) -> Result<ModuleInfo> {
         is_server,
         imports,
         exports,
+        server_functions,
     })
 }
 
@@ -752,5 +815,115 @@ export function add(a: number, b: number) { return a + b; }
         let graph = analyze_module_graph(&entries, root).unwrap();
         let mjs_mod = graph.modules.values().next().unwrap();
         assert!(mjs_mod.exports.contains(&"value".to_string()));
+    }
+
+    #[test]
+    fn function_level_use_server_declaration() {
+        let dir = setup_temp_dir();
+        let root = dir.path();
+
+        fs::write(
+            root.join("page.tsx"),
+            r#"
+export async function submitForm() {
+    "use server";
+    return { ok: true };
+}
+
+export default function Page() { return null; }
+"#,
+        )
+        .unwrap();
+
+        let entries = vec![root.join("page.tsx")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+
+        let canonical = root.join("page.tsx").canonicalize().unwrap();
+        let info = graph.modules.get(&canonical).unwrap();
+        assert!(!info.is_server); // no module-level directive
+        assert!(info.server_functions.contains(&"submitForm".to_string()));
+        assert!(!info.server_functions.contains(&"default".to_string()));
+    }
+
+    #[test]
+    fn function_level_use_server_arrow() {
+        let dir = setup_temp_dir();
+        let root = dir.path();
+
+        fs::write(
+            root.join("actions.ts"),
+            r#"
+export const increment = async (n: number) => {
+    "use server";
+    return n + 1;
+};
+
+export const helper = (x: number) => x * 2;
+"#,
+        )
+        .unwrap();
+
+        let entries = vec![root.join("actions.ts")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+
+        let canonical = root.join("actions.ts").canonicalize().unwrap();
+        let info = graph.modules.get(&canonical).unwrap();
+        assert!(!info.is_server);
+        assert!(info.server_functions.contains(&"increment".to_string()));
+        assert!(!info.server_functions.contains(&"helper".to_string()));
+    }
+
+    #[test]
+    fn inline_server_action_modules_method() {
+        let dir = setup_temp_dir();
+        let root = dir.path();
+
+        fs::write(
+            root.join("page.tsx"),
+            r#"
+export async function submit() {
+    "use server";
+    return 1;
+}
+export default function Page() { return null; }
+"#,
+        )
+        .unwrap();
+
+        let entries = vec![root.join("page.tsx")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+
+        let inline = graph.inline_server_action_modules();
+        assert_eq!(inline.len(), 1);
+        assert!(inline[0].server_functions.contains(&"submit".to_string()));
+
+        // module-level server action modules should be empty
+        assert!(graph.server_action_modules().is_empty());
+    }
+
+    #[test]
+    fn module_level_use_server_overrides_function_level() {
+        let dir = setup_temp_dir();
+        let root = dir.path();
+
+        // Module-level "use server" — all exports are server actions,
+        // function-level detection should be skipped
+        fs::write(
+            root.join("actions.ts"),
+            r#"
+"use server";
+export async function inc() { return 1; }
+export async function dec() { return -1; }
+"#,
+        )
+        .unwrap();
+
+        let entries = vec![root.join("actions.ts")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+
+        let canonical = root.join("actions.ts").canonicalize().unwrap();
+        let info = graph.modules.get(&canonical).unwrap();
+        assert!(info.is_server);
+        assert!(info.server_functions.is_empty()); // not populated when module-level
     }
 }

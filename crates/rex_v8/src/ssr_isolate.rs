@@ -38,6 +38,10 @@ pub struct SsrIsolate {
     pub(crate) mcp_list_fn: Option<v8::Global<v8::Function>>,
     /// Server action dispatch function (app/ routes only)
     pub(crate) server_action_fn: Option<v8::Global<v8::Function>>,
+    /// Encoded reply server action dispatch (uses decodeReply)
+    pub(crate) server_action_encoded_fn: Option<v8::Global<v8::Function>>,
+    /// Form action dispatch (uses decodeAction)
+    pub(crate) form_action_fn: Option<v8::Global<v8::Function>>,
     /// Last successfully loaded bundle, used to restore state on failed reload.
     /// Uses `Arc<String>` to share memory across pool isolates instead of cloning.
     pub(crate) last_bundle: std::sync::Arc<String>,
@@ -67,6 +71,8 @@ impl SsrIsolate {
             mcp_call_fn,
             mcp_list_fn,
             server_action_fn,
+            server_action_encoded_fn,
+            form_action_fn,
         ) = {
             v8::scope!(scope, &mut isolate);
 
@@ -180,6 +186,9 @@ impl SsrIsolate {
 
             // Server actions — only present when "use server" modules exist
             let server_action_fn = v8_get_optional_fn!(scope, global, "__rex_call_server_action");
+            let server_action_encoded_fn =
+                v8_get_optional_fn!(scope, global, "__rex_call_server_action_encoded");
+            let form_action_fn = v8_get_optional_fn!(scope, global, "__rex_call_form_action");
 
             (
                 v8::Global::new(scope, context),
@@ -194,6 +203,8 @@ impl SsrIsolate {
                 mcp_call_fn,
                 mcp_list_fn,
                 server_action_fn,
+                server_action_encoded_fn,
+                form_action_fn,
             )
         };
 
@@ -211,6 +222,8 @@ impl SsrIsolate {
             mcp_call_fn,
             mcp_list_fn,
             server_action_fn,
+            server_action_encoded_fn,
+            form_action_fn,
             last_bundle: std::sync::Arc::new(server_bundle_js.to_string()),
         })
     }
@@ -437,6 +450,9 @@ impl SsrIsolate {
 
         // Re-lookup server action dispatch (may be added/removed on reload)
         self.server_action_fn = v8_get_optional_fn!(scope, global, "__rex_call_server_action");
+        self.server_action_encoded_fn =
+            v8_get_optional_fn!(scope, global, "__rex_call_server_action_encoded");
+        self.form_action_fn = v8_get_optional_fn!(scope, global, "__rex_call_form_action");
 
         self.last_bundle = std::sync::Arc::new(server_bundle_js.to_string());
         debug!("SSR isolate reloaded");
@@ -488,8 +504,3 @@ fn console_error(
 ) {
     tracing::error!(target: "v8::console", "{}", format_args(scope, &args));
 }
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-#[path = "ssr_isolate_tests.rs"]
-mod tests;

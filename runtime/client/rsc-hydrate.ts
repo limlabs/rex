@@ -12,24 +12,65 @@
 //   modules using window.__REX_RSC_MODULE_MAP__ which maps ref_id → chunk_url.
 //   After all modules are loaded into the webpack cache, we hydrate.
 
-import { createFromReadableStream, createFromFetch } from 'react-server-dom-webpack/client';
+import { createFromReadableStream, createFromFetch, encodeReply } from 'react-server-dom-webpack/client';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
 // --- callServer: server action RPC ---
 // Must be defined before module loading since stubs reference it at module scope.
+// Uses encodeReply to properly serialize args (handles FormData, Blob, etc.)
 function callServer(id: string, args: unknown[]): Promise<unknown> {
   const manifest = window.__REX_MANIFEST__;
   const buildId = manifest ? manifest.build_id : '';
-  return fetch('/_rex/action/' + buildId + '/' + id, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(args),
+  const url = '/_rex/action/' + buildId + '/' + id;
+
+  return encodeReply(args).then(function(body: string | FormData) {
+    let headers: Record<string, string> = {};
+    // encodeReply returns a string for simple args, FormData for complex (Blob, File, etc.)
+    // For string bodies, set content type so the server knows to use decodeReply
+    if (typeof body === 'string') {
+      headers['Content-Type'] = 'text/x-component';
+    }
+    // For FormData, the browser sets the multipart content-type automatically
+    return fetch(url, {
+      method: 'POST',
+      headers: headers,
+      body: body,
+    });
   }).then(function(r: Response) {
-    return r.json();
-  }).then(function(d: { result?: unknown; error?: string }) {
-    if (d.error) throw new Error(d.error);
-    return d.result;
+    // Handle redirect
+    const redirectUrl = r.headers.get('x-rex-redirect');
+    if (redirectUrl) {
+      if (window.__REX_RSC_NAVIGATE) {
+        window.__REX_RSC_NAVIGATE(redirectUrl);
+      } else {
+        window.location.href = redirectUrl;
+      }
+      return undefined;
+    }
+
+    // Handle not found
+    if (r.headers.get('x-rex-not-found') === '1') {
+      throw new Error('Not Found');
+    }
+
+    // Flight format response
+    const ct = r.headers.get('content-type') || '';
+    if (ct.startsWith('text/x-component')) {
+      const ssrManifest = buildSSRManifest();
+      return Promise.resolve(
+        createFromFetch(Promise.resolve(r), {
+          ssrManifest: { moduleMap: ssrManifest, moduleLoading: null },
+          callServer: callServer
+        })
+      );
+    }
+
+    // JSON fallback (errors, legacy)
+    return r.json().then(function(d: { result?: unknown; error?: string }) {
+      if (d.error) throw new Error(d.error);
+      return d.result;
+    });
   });
 }
 
@@ -163,7 +204,9 @@ function navigateRsc(pathname: string): Promise<void> {
   if (!manifest) return Promise.reject(new Error('No manifest'));
 
   const buildId = manifest.build_id;
-  const url = '/_rex/rsc/' + buildId + pathname;
+  // Root path "/" becomes empty to hit /_rex/rsc/{buildId} (no trailing slash)
+  const suffix = pathname === '/' ? '' : pathname;
+  const url = '/_rex/rsc/' + buildId + suffix;
   const ssrManifest = buildSSRManifest();
 
   const treePromise = Promise.resolve(

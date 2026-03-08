@@ -3,6 +3,7 @@
 //! Contains helpers shared across the RSC server, SSR, and client bundle builders:
 //! resolve aliases, treeshake options, common rolldown config fragments.
 
+use crate::build_utils::runtime_server_dir;
 use crate::bundler::runtime_client_dir;
 use anyhow::Result;
 use rex_core::RexConfig;
@@ -71,10 +72,11 @@ impl<'a> RscBuildContext<'a> {
     }
 }
 
-/// Build rolldown resolve aliases for `rex/*` built-in imports.
+/// Build rolldown resolve aliases for `rex/*` built-in imports (client bundles).
 ///
 /// Maps `rex/link`, `rex/head`, `rex/router`, `rex/image` to their
-/// corresponding runtime files in `runtime/client/`.
+/// corresponding runtime files in `runtime/client/`, and `rex/actions`
+/// to `runtime/server/actions`.
 pub(crate) fn build_rex_aliases() -> Result<Vec<(String, Vec<Option<String>>)>> {
     let client_dir = runtime_client_dir()?;
     let mut aliases = Vec::new();
@@ -90,6 +92,50 @@ pub(crate) fn build_rex_aliases() -> Result<Vec<(String, Vec<Option<String>>)>> 
         for ext in &["ts", "tsx", "js", "jsx"] {
             let candidate = client_dir.join(format!("{file_stem}.{ext}"));
             if candidate.exists() {
+                aliases.push((
+                    specifier.to_string(),
+                    vec![Some(candidate.to_string_lossy().to_string())],
+                ));
+                break;
+            }
+        }
+    }
+
+    // Server-side aliases (rex/actions → runtime/server/actions.ts)
+    let server_dir = runtime_server_dir()?;
+    let server_mappings = [("rex/actions", "actions")];
+    for (specifier, file_stem) in &server_mappings {
+        for ext in &["ts", "tsx", "js", "jsx"] {
+            let candidate = server_dir.join(format!("{file_stem}.{ext}"));
+            if candidate.exists() {
+                aliases.push((
+                    specifier.to_string(),
+                    vec![Some(candidate.to_string_lossy().to_string())],
+                ));
+                break;
+            }
+        }
+    }
+
+    Ok(aliases)
+}
+
+/// Build rolldown resolve aliases for RSC server bundles.
+///
+/// Same as [`build_rex_aliases`] but overrides `rex/link` and `rex/head`
+/// with server-side stubs from `runtime/server/` that don't contain
+/// event handlers (which are rejected by React's flight protocol).
+pub(crate) fn build_rex_server_aliases() -> Result<Vec<(String, Vec<Option<String>>)>> {
+    let mut aliases = build_rex_aliases()?;
+    let server_dir = runtime_server_dir()?;
+
+    let server_overrides = [("rex/link", "link"), ("rex/head", "head")];
+    for (specifier, file_stem) in &server_overrides {
+        for ext in &["ts", "tsx", "js", "jsx"] {
+            let candidate = server_dir.join(format!("{file_stem}.{ext}"));
+            if candidate.exists() {
+                // Remove the existing client alias and add server one
+                aliases.retain(|(s, _)| s != *specifier);
                 aliases.push((
                     specifier.to_string(),
                     vec![Some(candidate.to_string_lossy().to_string())],

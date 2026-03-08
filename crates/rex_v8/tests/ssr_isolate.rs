@@ -1,232 +1,9 @@
-use super::*;
+#![allow(clippy::unwrap_used)]
 
-/// Minimal React stub: provides React.createElement and ReactDOMServer.renderToString
-/// without needing node_modules. Renders elements as simple HTML strings.
-const MOCK_REACT_RUNTIME: &str = r#"
-    globalThis.__React = {
-        createElement: function(type, props) {
-            var children = Array.prototype.slice.call(arguments, 2);
-            return { type: type, props: props || {}, children: children };
-        },
-        Suspense: Symbol.for('react.suspense')
-    };
-    var React = globalThis.__React;
+mod common;
 
-    function renderElement(el) {
-        if (el === null || el === undefined) return '';
-        if (typeof el === 'string') return el;
-        if (typeof el === 'number') return String(el);
-        if (Array.isArray(el)) return el.map(renderElement).join('');
-        if (el.type === globalThis.__React.Suspense) {
-            try {
-                var inner = '';
-                if (el.props && el.props.children) inner += renderElement(el.props.children);
-                inner += el.children.map(renderElement).join('');
-                return inner;
-            } catch (e) {
-                if (e && typeof e.then === 'function') {
-                    return renderElement(el.props && el.props.fallback);
-                }
-                throw e;
-            }
-        }
-        if (typeof el.type === 'function') {
-            var merged = Object.assign({}, el.props);
-            if (el.children.length > 0) merged.children = el.children.length === 1 ? el.children[0] : el.children;
-            return renderElement(el.type(merged));
-        }
-        if (typeof el.type === 'string') {
-            var attrs = '';
-            var p = el.props || {};
-            for (var k in p) {
-                if (k === 'children' || k === 'dangerouslySetInnerHTML') continue;
-                if (!p.hasOwnProperty(k)) continue;
-                var v = p[k];
-                // Skip event handlers and undefined/null
-                if (typeof v === 'function' || v === null || v === undefined) continue;
-                // Convert React prop names to HTML attributes
-                var attrName = k;
-                if (k === 'className') attrName = 'class';
-                else if (k === 'htmlFor') attrName = 'for';
-                else if (k === 'fetchPriority') attrName = 'fetchpriority';
-                // Serialize style objects to CSS strings
-                if (k === 'style' && typeof v === 'object') {
-                    var css = '';
-                    for (var sk in v) {
-                        if (v.hasOwnProperty(sk)) {
-                            // Convert camelCase to kebab-case
-                            var prop = sk.replace(/([A-Z])/g, '-$1').toLowerCase();
-                            var sv = v[sk];
-                            if (typeof sv === 'number' && sv !== 0 && prop !== 'opacity' && prop !== 'z-index' && prop !== 'font-weight' && prop !== 'line-height' && prop !== 'flex' && prop !== 'order') sv = sv + 'px';
-                            css += prop + ':' + sv + ';';
-                        }
-                    }
-                    attrs += ' style="' + css + '"';
-                    continue;
-                }
-                // Boolean attributes
-                if (v === true) { attrs += ' ' + attrName; continue; }
-                if (v === false) continue;
-                attrs += ' ' + attrName + '="' + String(v).replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '"';
-            }
-            var inner = '';
-            if (p.children) inner += renderElement(p.children);
-            inner += el.children.map(renderElement).join('');
-            if (!inner) return '<' + el.type + attrs + '/>';
-            return '<' + el.type + attrs + '>' + inner + '</' + el.type + '>';
-        }
-        return '';
-    }
-
-    globalThis.__ReactDOMServer = {
-        renderToString: function(el) { return renderElement(el); }
-    };
-"#;
-
-/// Page definition for test server bundle.
-struct TestPage<'a> {
-    key: &'a str,
-    component: &'a str,
-    gssp: Option<&'a str>,
-    gsp: Option<&'a str>,
-}
-
-/// Build a minimal server bundle JS with given page definitions.
-/// Each page entry: (route_key, component_js, gssp_js)
-fn make_server_bundle(pages: &[(&str, &str, Option<&str>)]) -> String {
-    let test_pages: Vec<TestPage> = pages
-        .iter()
-        .map(|(key, component, gssp)| TestPage {
-            key,
-            component,
-            gssp: *gssp,
-            gsp: None,
-        })
-        .collect();
-    make_server_bundle_ext(&test_pages)
-}
-
-fn make_server_bundle_ext(pages: &[TestPage]) -> String {
-    let mut bundle = String::new();
-    bundle.push_str("'use strict';\n");
-    bundle.push_str("globalThis.__rex_pages = globalThis.__rex_pages || {};\n\n");
-
-    for page in pages {
-        bundle.push_str(&format!(
-            "globalThis.__rex_pages['{}'] = (function() {{\n  var exports = {{}};\n",
-            page.key
-        ));
-        bundle.push_str(&format!("  exports.default = {};\n", page.component));
-        if let Some(gssp_code) = page.gssp {
-            bundle.push_str(&format!("  exports.getServerSideProps = {};\n", gssp_code));
-        }
-        if let Some(gsp_code) = page.gsp {
-            bundle.push_str(&format!("  exports.getStaticProps = {};\n", gsp_code));
-        }
-        bundle.push_str("  return exports;\n})();\n\n");
-    }
-
-    // SSR runtime (same as bundler.rs produces)
-    bundle.push_str(
-        r#"
-globalThis.__rex_head_elements = [];
-globalThis.__rex_head_component = function Head(props) {
-    if (props.children) {
-        var children = Array.isArray(props.children) ? props.children : [props.children];
-        for (var i = 0; i < children.length; i++) {
-            if (children[i]) globalThis.__rex_head_elements.push(children[i]);
-        }
-    }
-    return null;
-};
-
-globalThis.__rex_render_page = function(routeKey, propsJson) {
-    var React = globalThis.__React;
-    var ReactDOMServer = globalThis.__ReactDOMServer;
-    if (!React || !ReactDOMServer) {
-        throw new Error('React/ReactDOMServer not loaded');
-    }
-    var page = globalThis.__rex_pages[routeKey];
-    if (!page) throw new Error('Page not found: ' + routeKey);
-    var Component = page.default;
-    if (!Component) throw new Error('No default export: ' + routeKey);
-    var props = JSON.parse(propsJson);
-
-    globalThis.__rex_head_elements = [];
-    var element = React.createElement(Component, props);
-    var bodyHtml = ReactDOMServer.renderToString(element);
-
-    var headHtml = '';
-    for (var i = 0; i < globalThis.__rex_head_elements.length; i++) {
-        headHtml += ReactDOMServer.renderToString(globalThis.__rex_head_elements[i]);
-    }
-
-    return JSON.stringify({ body: bodyHtml, head: headHtml });
-};
-
-globalThis.__rex_gssp_resolved = null;
-globalThis.__rex_gssp_rejected = null;
-
-globalThis.__rex_get_server_side_props = function(routeKey, contextJson) {
-    var page = globalThis.__rex_pages[routeKey];
-    if (!page || !page.getServerSideProps) {
-        return JSON.stringify({ props: {} });
-    }
-    var context = JSON.parse(contextJson);
-    var result = page.getServerSideProps(context);
-    if (result && typeof result.then === 'function') {
-        globalThis.__rex_gssp_resolved = null;
-        globalThis.__rex_gssp_rejected = null;
-        result.then(
-            function(v) { globalThis.__rex_gssp_resolved = v; },
-            function(e) { globalThis.__rex_gssp_rejected = e; }
-        );
-        return '__REX_ASYNC__';
-    }
-    return JSON.stringify(result);
-};
-
-globalThis.__rex_resolve_gssp = function() {
-    if (globalThis.__rex_gssp_rejected) throw globalThis.__rex_gssp_rejected;
-    if (globalThis.__rex_gssp_resolved !== null) return JSON.stringify(globalThis.__rex_gssp_resolved);
-    throw new Error('GSSP promise did not resolve');
-};
-
-globalThis.__rex_gsp_resolved = null;
-globalThis.__rex_gsp_rejected = null;
-
-globalThis.__rex_get_static_props = function(routeKey, contextJson) {
-    var page = globalThis.__rex_pages[routeKey];
-    if (!page || !page.getStaticProps) return JSON.stringify({ props: {} });
-    var context = JSON.parse(contextJson);
-    var result = page.getStaticProps(context);
-    if (result && typeof result.then === 'function') {
-        globalThis.__rex_gsp_resolved = null;
-        globalThis.__rex_gsp_rejected = null;
-        result.then(
-            function(v) { globalThis.__rex_gsp_resolved = v; },
-            function(e) { globalThis.__rex_gsp_rejected = e; }
-        );
-        return '__REX_GSP_ASYNC__';
-    }
-    return JSON.stringify(result);
-};
-
-globalThis.__rex_resolve_gsp = function() {
-    if (globalThis.__rex_gsp_rejected) throw globalThis.__rex_gsp_rejected;
-    if (globalThis.__rex_gsp_resolved !== null) return JSON.stringify(globalThis.__rex_gsp_resolved);
-    throw new Error('GSP promise did not resolve');
-};
-"#,
-    );
-    bundle
-}
-
-fn make_isolate(pages: &[(&str, &str, Option<&str>)]) -> SsrIsolate {
-    crate::init_v8();
-    let bundle = format!("{}\n{}", MOCK_REACT_RUNTIME, make_server_bundle(pages));
-    SsrIsolate::new(&bundle, None).expect("failed to create isolate")
-}
+use common::{make_isolate, make_isolate_ext, make_server_bundle, TestPage, MOCK_REACT_RUNTIME};
+use rex_v8::SsrIsolate;
 
 #[test]
 fn test_render_simple_page() {
@@ -425,7 +202,7 @@ fn test_reload_adds_new_pages() {
 
 #[test]
 fn test_invalid_server_bundle() {
-    crate::init_v8();
+    rex_v8::init_v8();
     let result = SsrIsolate::new("this is not valid javascript {{{{", None);
     assert!(result.is_err());
 }
@@ -480,12 +257,6 @@ fn test_render_with_head_elements() {
         "head should contain meta description: {}",
         result.head
     );
-}
-
-fn make_isolate_ext(pages: &[TestPage]) -> SsrIsolate {
-    crate::init_v8();
-    let bundle = format!("{}\n{}", MOCK_REACT_RUNTIME, make_server_bundle_ext(pages));
-    SsrIsolate::new(&bundle, None).expect("failed to create isolate")
 }
 
 #[test]
@@ -595,7 +366,6 @@ fn test_head_reset_between_renders() {
 
 #[test]
 fn test_reload_updates_pages() {
-    // Start with a page that renders "v1"
     let mut iso = make_isolate(&[(
         "index",
         "function Index() { return React.createElement('p', null, 'v1'); }",
@@ -604,7 +374,6 @@ fn test_reload_updates_pages() {
     let r1 = iso.render_page("index", "{}").unwrap();
     assert_eq!(r1.body, "<p>v1</p>");
 
-    // Reload with a new bundle that renders "v2"
     let new_bundle = format!(
         "{}\n{}",
         MOCK_REACT_RUNTIME,
@@ -629,17 +398,127 @@ fn test_reload_bad_bundle_restores_previous() {
     let r1 = iso.render_page("index", "{}").unwrap();
     assert_eq!(r1.body, "<p>ok</p>");
 
-    // Reload with syntactically invalid JS — should fail and restore previous
     let result = iso.reload("this is not valid javascript {{{{");
     assert!(result.is_err(), "reload should fail for bad JS");
 
-    // Previous bundle should still work
     let r2 = iso.render_page("index", "{}").unwrap();
     assert_eq!(r2.body, "<p>ok</p>");
 }
 
-#[path = "ssr_isolate_tests_ext.rs"]
-mod ext;
+#[test]
+fn test_process_env_from_rust() {
+    std::env::set_var("REX_TEST_POLYFILL", "hello_from_rust");
 
-#[path = "ssr_isolate_tests_crypto.rs"]
-mod crypto;
+    let mut iso = make_isolate(&[(
+        "envtest",
+        "function EnvTest() { return React.createElement('p', null, process.env.REX_TEST_POLYFILL || 'MISSING'); }",
+        Some("function(ctx) { return { props: { val: process.env.REX_TEST_POLYFILL } }; }"),
+    )]);
+
+    let gssp_result = iso.get_server_side_props("envtest", "{}").unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&gssp_result).unwrap();
+    assert_eq!(parsed["props"]["val"], "hello_from_rust");
+
+    let render = iso.render_page("envtest", "{}").unwrap();
+    assert!(
+        render.body.contains("hello_from_rust"),
+        "SSR body should contain env var value, got: {}",
+        render.body
+    );
+
+    std::env::remove_var("REX_TEST_POLYFILL");
+}
+
+#[test]
+fn test_process_env_is_writable() {
+    let mut iso = make_isolate(&[(
+        "writetest",
+        "function WriteTest() { process.env.DYNAMIC = 'set_at_runtime'; return React.createElement('p', null, process.env.DYNAMIC); }",
+        None,
+    )]);
+    let render = iso.render_page("writetest", "{}").unwrap();
+    assert!(
+        render.body.contains("set_at_runtime"),
+        "process.env should be writable, got: {}",
+        render.body
+    );
+}
+
+#[test]
+fn test_console_log_emits_tracing_event() {
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::layer::SubscriberExt;
+
+    struct CaptureLayer {
+        messages: Arc<Mutex<Vec<(tracing::Level, String)>>>,
+    }
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CaptureLayer {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            struct Visitor(String);
+            impl tracing::field::Visit for Visitor {
+                fn record_debug(
+                    &mut self,
+                    field: &tracing::field::Field,
+                    value: &dyn std::fmt::Debug,
+                ) {
+                    if field.name() == "message" {
+                        self.0 = format!("{value:?}");
+                    }
+                }
+            }
+            let mut visitor = Visitor(String::new());
+            event.record(&mut visitor);
+            self.messages
+                .lock()
+                .unwrap()
+                .push((*event.metadata().level(), visitor.0));
+        }
+    }
+
+    let messages = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new("v8::console=info"))
+        .with(CaptureLayer {
+            messages: messages.clone(),
+        });
+
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let mut iso = make_isolate(&[(
+        "logpage",
+        r#"function LogPage() {
+            console.log("hello from ssr");
+            console.warn("warning from ssr");
+            console.error("error from ssr");
+            return React.createElement('p', null, 'logged');
+        }"#,
+        None,
+    )]);
+    let render = iso.render_page("logpage", "{}").unwrap();
+    assert!(render.body.contains("logged"), "page should render");
+
+    let captured = messages.lock().unwrap();
+    assert!(
+        captured
+            .iter()
+            .any(|(_, msg)| msg.contains("hello from ssr")),
+        "console.log should emit tracing event, captured: {captured:?}"
+    );
+    assert!(
+        captured
+            .iter()
+            .any(|(level, msg)| *level == tracing::Level::WARN && msg.contains("warning from ssr")),
+        "console.warn should emit WARN-level event, captured: {captured:?}"
+    );
+    assert!(
+        captured
+            .iter()
+            .any(|(level, msg)| *level == tracing::Level::ERROR && msg.contains("error from ssr")),
+        "console.error should emit ERROR-level event, captured: {captured:?}"
+    );
+}

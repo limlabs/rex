@@ -128,6 +128,21 @@ pub async fn build_rsc_bundles(
         }
     }
 
+    // Also register function-level "use server" exports
+    let inline_action_modules = graph.inline_server_action_modules();
+    for module in &inline_action_modules {
+        let rel_path = module
+            .path
+            .strip_prefix(&ctx.project_root)
+            .unwrap_or(&module.path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        for export in &module.server_functions {
+            let action_id = server_action_id(&rel_path, export, build_id);
+            server_action_manifest.add(&action_id, rel_path.clone(), export.clone());
+        }
+    }
+
     // Build rex/* → stub aliases for client boundaries discovered via rex/* imports.
     // The stub_aliases map absolute paths, but rolldown also needs the specifier alias
     // (e.g. "rex/link" → stub) for when source code uses `import Link from 'rex/link'`.
@@ -194,70 +209,48 @@ mod tests {
     use rex_core::app_route::{AppRoute, AppScanResult, AppSegment};
     use std::path::Path;
 
-    fn setup_rsc_mock_node_modules(root: &Path) {
-        let nm = root.join("node_modules");
+    /// Assert that an IIFE bundle has no unresolved external parameters.
+    ///
+    /// Rolldown wraps IIFE bundles as `(function(ext) { ... })(ext)` when it treats
+    /// an import as external. The trailing `)(ext);` will fail at V8 eval time because
+    /// `ext` is not a global. This check catches missing resolve aliases at build time.
+    fn assert_no_iife_externals(bundle_js: &str, label: &str) {
+        // The IIFE footer pattern: `})(some_identifier);` at the end of the bundle.
+        // A self-contained IIFE ends with `})();\n` (no arguments).
+        let trimmed = bundle_js.trim_end();
+        if let Some(tail) = trimmed.strip_suffix(';') {
+            if let Some(before_paren) = tail.strip_suffix(')') {
+                // Find the matching '(' for the IIFE call arguments
+                if let Some(args_start) = before_paren.rfind(")(") {
+                    let args = &before_paren[args_start + 2..];
+                    assert!(
+                        args.is_empty(),
+                        "{label} has unresolved IIFE externals: `({args})` — \
+                         this means rolldown treated an import as external. \
+                         Add a resolve alias for the missing module."
+                    );
+                }
+            }
+        }
+    }
 
-        // react
-        let react_dir = nm.join("react");
-        fs::create_dir_all(&react_dir).unwrap();
-        fs::write(
-            react_dir.join("package.json"),
-            r#"{"name":"react","version":"19.0.0","main":"index.js"}"#,
+    /// Symlink the real node_modules from fixtures/app-router into a test directory.
+    fn setup_rsc_node_modules(root: &Path) {
+        let fixture_nm =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/app-router/node_modules");
+        assert!(
+            fixture_nm.exists(),
+            "fixtures/app-router/node_modules not found — run `cd fixtures/app-router && npm install`"
+        );
+        std::os::unix::fs::symlink(
+            fixture_nm.canonicalize().unwrap(),
+            root.join("node_modules"),
         )
         .unwrap();
+        // package.json is needed so the build doesn't try to use built-in modules
         fs::write(
-            react_dir.join("index.js"),
-            "export function createElement(type, props, ...children) { return { type, props, children }; }\nexport default { createElement };\n",
-        )
-        .unwrap();
-        fs::write(
-            react_dir.join("jsx-runtime.js"),
-            "export function jsx(type, props) { return { type, props }; }\nexport function jsxs(type, props) { return { type, props }; }\nexport const Fragment = 'Fragment';\n",
-        )
-        .unwrap();
-        fs::write(
-            react_dir.join("jsx-dev-runtime.js"),
-            "export function jsxDEV(type, props) { return { type, props }; }\nexport const Fragment = 'Fragment';\n",
-        )
-        .unwrap();
-
-        // react-dom
-        let react_dom_dir = nm.join("react-dom");
-        fs::create_dir_all(&react_dom_dir).unwrap();
-        fs::write(
-            react_dom_dir.join("package.json"),
-            r#"{"name":"react-dom","version":"19.0.0","main":"index.js","exports":{".":{"default":"./index.js"},"./client":{"default":"./client.js"},"./server":{"default":"./server.js"}}}"#,
-        )
-        .unwrap();
-        fs::write(react_dom_dir.join("index.js"), "export default {};\n").unwrap();
-        fs::write(
-            react_dom_dir.join("client.js"),
-            "export function hydrateRoot() {}\nexport function createRoot() {}\n",
-        )
-        .unwrap();
-        fs::write(
-            react_dom_dir.join("server.js"),
-            "export function renderToString(el) { return '<div></div>'; }\n",
-        )
-        .unwrap();
-
-        // react-server-dom-webpack
-        let rsdw_dir = nm.join("react-server-dom-webpack");
-        fs::create_dir_all(&rsdw_dir).unwrap();
-        fs::write(
-            rsdw_dir.join("package.json"),
-            r#"{"name":"react-server-dom-webpack","version":"19.0.0","main":"index.js","exports":{".":{"default":"./index.js"},"./client":{"default":"./client.js"},"./server":{"default":"./server.js"}}}"#,
-        )
-        .unwrap();
-        fs::write(rsdw_dir.join("index.js"), "export default {};\n").unwrap();
-        fs::write(
-            rsdw_dir.join("client.js"),
-            "export function createFromReadableStream(s) { return {}; }\nexport function createServerReference(id, callServer) { return function(...args) { return callServer(id, args); }; }\n",
-        )
-        .unwrap();
-        fs::write(
-            rsdw_dir.join("server.js"),
-            "export function renderToReadableStream(el, config) { return new ReadableStream(); }\nexport function registerServerReference(fn, id, name) { return fn; }\n",
+            root.join("package.json"),
+            r#"{"name":"rsc-test","private":true}"#,
         )
         .unwrap();
     }
@@ -267,7 +260,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().to_path_buf();
 
-        setup_rsc_mock_node_modules(&root);
+        setup_rsc_node_modules(&root);
 
         // Create app directory with layout + page
         let app_dir = root.join("app");
@@ -358,6 +351,12 @@ mod tests {
         // Client manifest was created (may be empty if no "use client" modules in entries)
         // Verify the manifest struct exists and is accessible
         let _ = &result.client_manifest.entries;
+
+        // Verify bundle has no unresolved externals in IIFE wrapper.
+        // Unresolved imports produce `(function(some_external) { ... })(some_external);`
+        // which fails at runtime since `some_external` is undefined.
+        assert_no_iife_externals(&server_content, "RSC server bundle");
+        assert_no_iife_externals(&ssr_content, "RSC SSR bundle");
     }
 
     #[tokio::test]
@@ -365,7 +364,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().to_path_buf();
 
-        setup_rsc_mock_node_modules(&root);
+        setup_rsc_node_modules(&root);
 
         let app_dir = root.join("app");
         fs::create_dir_all(&app_dir).unwrap();
@@ -458,6 +457,9 @@ mod tests {
             server_content.contains("__rex_call_server_action"),
             "Server bundle should contain action call function"
         );
+
+        // Verify bundle has no unresolved externals in IIFE wrapper
+        assert_no_iife_externals(&server_content, "RSC server bundle");
     }
 
     #[tokio::test]
@@ -465,7 +467,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().to_path_buf();
 
-        setup_rsc_mock_node_modules(&root);
+        setup_rsc_node_modules(&root);
 
         let app_dir = root.join("app");
         fs::create_dir_all(&app_dir).unwrap();
@@ -567,7 +569,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().to_path_buf();
 
-        setup_rsc_mock_node_modules(&root);
+        setup_rsc_node_modules(&root);
 
         let app_dir = root.join("app");
         fs::create_dir_all(&app_dir).unwrap();

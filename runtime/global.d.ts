@@ -138,9 +138,21 @@ declare global {
 
   // Server action globals (V8 environment — set by flight.ts runtime)
   var __rex_server_actions: Record<string, (...args: unknown[]) => unknown>;
+  var __rex_server_action_manifest: Record<string, unknown>;
   var __rex_call_server_action: (actionId: string, argsJson: string) => string;
+  var __rex_call_server_action_encoded: (actionId: string, body: string, isFormFields?: boolean) => string;
+  var __rex_call_form_action: (fieldsJson: string) => string;
   var __rex_resolve_action_pending: () => "pending" | "done";
   var __rex_finalize_action: () => string;
+  var __rex_decodeReply: (body: string | FormData, manifest: Record<string, unknown>) => PromiseLike<unknown[]>;
+  var __rex_decodeAction: (body: FormData, manifest: Record<string, unknown>) => Promise<(() => unknown) | null>;
+  var __rex_decodeFormState: (result: unknown, body: FormData, manifest: Record<string, unknown>) => Promise<unknown>;
+
+  // Server action utilities (V8 environment — set by flight.ts runtime)
+  var __rex_redirect: (url: string, status?: number) => never;
+  var __rex_notFound: () => never;
+  var __rex_request_headers: Record<string, string>;
+  var __rex_request_cookies: Record<string, string>;
 }
 
 export {};

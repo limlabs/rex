@@ -1,6 +1,6 @@
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
 use futures::stream::{self, StreamExt};
 use rex_core::{DataStrategy, MiddlewareAction, ServerSidePropsContext};
@@ -10,6 +10,7 @@ use tracing::{debug, error, info};
 
 use crate::document::{assemble_body_tail, assemble_head_shell};
 
+use super::action::parse_form_action_fields;
 use super::{
     check_redirects, check_rewrites, collect_headers, dev_error_overlay, execute_middleware,
     render_error_page, rsc::render_app_route, should_run_middleware, AppState, HotState,
@@ -19,11 +20,13 @@ use crate::state::snapshot;
 /// Main page handler - catches all routes and performs SSR
 pub async fn page_handler(
     State(state): State<Arc<AppState>>,
+    method: Method,
     uri: Uri,
     headers: HeaderMap,
+    body: axum::body::Bytes,
 ) -> Response {
     let path = uri.path();
-    info!(path, "Handling page request");
+    info!(path, method = %method, "Handling page request");
 
     let hot = snapshot(&state);
 
@@ -34,7 +37,7 @@ pub async fn page_handler(
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
-        match execute_middleware(&state, path, "GET", &header_map).await {
+        match execute_middleware(&state, path, method.as_str(), &header_map).await {
             Ok(Some(mw)) => match mw.action {
                 MiddlewareAction::Redirect => {
                     let url = mw.url.as_deref().unwrap_or("/");
@@ -56,8 +59,16 @@ pub async fn page_handler(
                         };
                         mw_response_headers = mw.response_headers.into_iter().collect();
                         let custom_headers = collect_headers(&rewrite_path, &hot.project_config);
-                        let mut response =
-                            page_handler_inner(&state, &hot, &rewrite_path, &uri, &headers).await;
+                        let mut response = page_handler_inner(
+                            &state,
+                            &hot,
+                            &rewrite_path,
+                            &uri,
+                            &headers,
+                            &method,
+                            &body,
+                        )
+                        .await;
                         for (key, value) in custom_headers.into_iter().chain(mw_response_headers) {
                             if let (Ok(name), Ok(val)) = (
                                 axum::http::header::HeaderName::from_bytes(key.as_bytes()),
@@ -101,7 +112,7 @@ pub async fn page_handler(
     // Collect custom headers to add to the response
     let custom_headers = collect_headers(path, &hot.project_config);
 
-    let mut response = page_handler_inner(&state, &hot, path, &uri, &headers).await;
+    let mut response = page_handler_inner(&state, &hot, path, &uri, &headers, &method, &body).await;
 
     // Apply custom headers + middleware response headers
     for (key, value) in custom_headers.into_iter().chain(mw_response_headers) {
@@ -122,10 +133,119 @@ pub(super) async fn page_handler_inner(
     path: &str,
     uri: &Uri,
     headers: &HeaderMap,
+    method: &Method,
+    body: &axum::body::Bytes,
 ) -> Response {
     // Check app/ routes first (RSC)
     if let Some(ref app_trie) = hot.app_route_trie {
         if let Some(app_match) = app_trie.match_path(path) {
+            // Progressive enhancement: handle POST form submissions with $ACTION_ID_*
+            if *method == Method::POST {
+                if let Some(fields) = parse_form_action_fields(headers, body) {
+                    if fields.iter().any(|(k, _)| k.starts_with("$ACTION_ID_")) {
+                        // CSRF protection: validate Origin header against Host
+                        if let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok()) {
+                            if let Some(host) = headers.get("host").and_then(|v| v.to_str().ok()) {
+                                let origin_host = origin
+                                    .trim_start_matches("https://")
+                                    .trim_start_matches("http://");
+                                if origin_host != host {
+                                    return Response::builder()
+                                        .status(StatusCode::FORBIDDEN)
+                                        .body(Body::from("CSRF validation failed"))
+                                        .expect("response build");
+                                }
+                            }
+                        }
+
+                        // Build request context for V8
+                        let header_map: HashMap<String, String> = headers
+                            .iter()
+                            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+                            .collect();
+                        let headers_json =
+                            serde_json::to_string(&header_map).unwrap_or_else(|_| "{}".to_string());
+                        let cookies: HashMap<String, String> = headers
+                            .get("cookie")
+                            .and_then(|v| v.to_str().ok())
+                            .map(|cookie_str| {
+                                cookie_str
+                                    .split(';')
+                                    .filter_map(|pair| {
+                                        let mut parts = pair.splitn(2, '=');
+                                        Some((
+                                            parts.next()?.trim().to_string(),
+                                            parts.next()?.trim().to_string(),
+                                        ))
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let cookies_json =
+                            serde_json::to_string(&cookies).unwrap_or_else(|_| "{}".to_string());
+
+                        let fields_json =
+                            serde_json::to_string(&fields).unwrap_or_else(|_| "[]".to_string());
+                        match state
+                            .isolate_pool
+                            .execute(move |iso| {
+                                let _ = iso.set_request_context(&headers_json, &cookies_json);
+                                let r = iso.call_form_action("", &fields_json);
+                                let _ = iso.clear_request_context();
+                                r
+                            })
+                            .await
+                        {
+                            Ok(Ok(json_result)) => {
+                                if let Ok(parsed) =
+                                    serde_json::from_str::<serde_json::Value>(&json_result)
+                                {
+                                    if let Some(redirect_url) =
+                                        parsed.get("redirect").and_then(|v| v.as_str())
+                                    {
+                                        let status = parsed
+                                            .get("redirectStatus")
+                                            .and_then(|v| v.as_u64())
+                                            .unwrap_or(303)
+                                            as u16;
+                                        return Response::builder()
+                                            .status(
+                                                StatusCode::from_u16(status)
+                                                    .unwrap_or(StatusCode::SEE_OTHER),
+                                            )
+                                            .header("Location", redirect_url)
+                                            .body(Body::empty())
+                                            .expect("response build");
+                                    }
+                                    if parsed
+                                        .get("notFound")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false)
+                                    {
+                                        return Response::builder()
+                                            .status(StatusCode::NOT_FOUND)
+                                            .body(Body::from("404 - Not Found"))
+                                            .expect("response build");
+                                    }
+                                    if parsed.get("error").is_some() {
+                                        error!("Form action error: {json_result}");
+                                        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                                    }
+                                }
+                                // Success — fall through to render the page with updated state
+                            }
+                            Ok(Err(e)) => {
+                                error!("Form action error: {e}");
+                                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                            }
+                            Err(e) => {
+                                error!("Form action pool error: {e}");
+                                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                            }
+                        }
+                    }
+                }
+            }
             return render_app_route(state, hot, &app_match, path, uri).await;
         }
     }

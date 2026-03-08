@@ -12,7 +12,7 @@ pub const FS_ERROR_PREFIX: &str = "__REX_FS_ERR__";
 /// - Relative paths resolve against project_root
 /// - Absolute paths are allowed only if they're within project_root
 /// - Canonicalization defeats `../` traversal and symlink escapes
-fn resolve_sandboxed_path(
+pub fn resolve_sandboxed_path(
     project_root: &Path,
     requested: &str,
 ) -> std::result::Result<PathBuf, String> {
@@ -68,7 +68,7 @@ fn resolve_sandboxed_path(
 }
 
 /// Map `std::io::ErrorKind` to Node.js-style error codes.
-fn io_error_to_node_code(e: &std::io::Error) -> &'static str {
+pub fn io_error_to_node_code(e: &std::io::Error) -> &'static str {
     match e.kind() {
         std::io::ErrorKind::NotFound => "ENOENT",
         std::io::ErrorKind::PermissionDenied => "EACCES",
@@ -688,85 +688,4 @@ pub fn register_fs_callbacks(
 
     debug!("Registered fs callbacks on globalThis");
     Ok(())
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-    use std::os::unix::fs::symlink;
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_sandbox_relative_stays_inside() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path().canonicalize().unwrap();
-        std::fs::write(root.join("file.txt"), "hello").unwrap();
-
-        let result = resolve_sandboxed_path(&root, "file.txt");
-        assert!(result.is_ok());
-        assert!(result.unwrap().starts_with(&root));
-    }
-
-    #[test]
-    fn test_sandbox_traversal_blocked() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path().canonicalize().unwrap();
-
-        let result = resolve_sandboxed_path(&root, "../../etc/passwd");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("EACCES"));
-    }
-
-    #[test]
-    fn test_sandbox_absolute_outside_blocked() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path().canonicalize().unwrap();
-
-        let result = resolve_sandboxed_path(&root, "/etc/passwd");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("EACCES"));
-    }
-
-    #[test]
-    fn test_sandbox_symlink_outside_blocked() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path().canonicalize().unwrap();
-
-        let link_path = root.join("escape");
-        symlink("/tmp", &link_path).unwrap();
-
-        let result = resolve_sandboxed_path(&root, "escape");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("EACCES"));
-    }
-
-    #[test]
-    fn test_sandbox_nonexistent_write_target() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path().canonicalize().unwrap();
-
-        let result = resolve_sandboxed_path(&root, "subdir/newfile.txt");
-        assert!(result.is_ok());
-        assert!(result.unwrap().starts_with(&root));
-    }
-
-    #[test]
-    fn test_error_code_mapping() {
-        assert_eq!(
-            io_error_to_node_code(&std::io::Error::new(std::io::ErrorKind::NotFound, "")),
-            "ENOENT"
-        );
-        assert_eq!(
-            io_error_to_node_code(&std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                ""
-            )),
-            "EACCES"
-        );
-        assert_eq!(
-            io_error_to_node_code(&std::io::Error::new(std::io::ErrorKind::AlreadyExists, "")),
-            "EEXIST"
-        );
-    }
 }

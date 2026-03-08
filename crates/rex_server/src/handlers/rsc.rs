@@ -18,6 +18,26 @@ pub async fn rsc_handler(
     Path((build_id, page_path)): Path<(String, String)>,
     uri: Uri,
 ) -> Response {
+    rsc_flight_response(state, &build_id, &page_path, uri).await
+}
+
+/// Handler for root RSC flight requests: GET /_rex/rsc/{buildId}
+/// Axum's `{*path}` catch-all doesn't match when the path segment is empty,
+/// so we need a separate route for the root page.
+pub async fn rsc_handler_root(
+    State(state): State<Arc<AppState>>,
+    Path(build_id): Path<String>,
+    uri: Uri,
+) -> Response {
+    rsc_flight_response(state, &build_id, "", uri).await
+}
+
+async fn rsc_flight_response(
+    state: Arc<AppState>,
+    build_id: &str,
+    page_path: &str,
+    uri: Uri,
+) -> Response {
     let hot = snapshot(&state);
 
     // Build ID mismatch = stale client
@@ -30,7 +50,11 @@ pub async fn rsc_handler(
         None => return StatusCode::NOT_FOUND.into_response(),
     };
 
-    let path = format!("/{page_path}");
+    let path = if page_path.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{page_path}")
+    };
     let route_match = match app_route_trie.match_path(&path) {
         Some(m) => m,
         None => return StatusCode::NOT_FOUND.into_response(),

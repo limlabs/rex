@@ -27,6 +27,7 @@ const V8_POLYFILL_MODULES: &[&str] = &[
     "abort",
     "buffer",
     "crypto",
+    "formdata",
 ];
 
 fn strip_typescript(source: &str) -> String {
