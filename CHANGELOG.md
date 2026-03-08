@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.11.0](https://github.com/limlabs/rex/compare/v0.10.0...v0.11.0) (2026-03-08)
+
+
+### Features
+
+* add automatic static optimization for app router ([#92](https://github.com/limlabs/rex/issues/92)) ([bf3b787](https://github.com/limlabs/rex/commit/bf3b78712c051de3746aa42770ea87893048dc29))
+* add automatic static optimization for pages router ([#88](https://github.com/limlabs/rex/issues/88)) ([aaa6d1a](https://github.com/limlabs/rex/commit/aaa6d1a6413e990e5e086b23d9d2f4d0ae527fb2))
+* add next/font Google Fonts support with automatic optimization ([#83](https://github.com/limlabs/rex/issues/83)) ([b92874b](https://github.com/limlabs/rex/commit/b92874bd4c87bd8d49fccdea98a943e0bfd8e84c))
+* add rex-py Python native extension via PyO3 ([#63](https://github.com/limlabs/rex/issues/63)) ([64bf67d](https://github.com/limlabs/rex/commit/64bf67d29949b8b117d679c5f7bf824feabb925a))
+* **benchmarks:** add Vinext (Cloudflare) to benchmark suite ([#87](https://github.com/limlabs/rex/issues/87)) ([1cda419](https://github.com/limlabs/rex/commit/1cda419ab8c2f87fd7f4edc2a643497dc4c116d8))
+* **build:** add MDX page support ([#69](https://github.com/limlabs/rex/issues/69)) ([ff0e6a0](https://github.com/limlabs/rex/commit/ff0e6a08ff3d92e4acb52e4544ea4c6bef7f817b))
+* **rsc:** add generateMetadata / Metadata API for app router ([#84](https://github.com/limlabs/rex/issues/84)) ([764b325](https://github.com/limlabs/rex/commit/764b325aba33786cbe02b44deb8c658abfadd65e))
+* **server:** add form server action support with encodeReply/decodeReply ([#64](https://github.com/limlabs/rex/issues/64)) ([87ca132](https://github.com/limlabs/rex/commit/87ca132d7fbde2272bb3553ce0b5201f9b2b6501))
+* **v8:** add URLSearchParams polyfill and enhance URL ([#81](https://github.com/limlabs/rex/issues/81)) ([ada45c4](https://github.com/limlabs/rex/commit/ada45c4c30e7bcbabb7127c442fe2171e61f50b6))
+
+
+### Bug Fixes
+
+* address open CodeQL security alerts ([#91](https://github.com/limlabs/rex/issues/91)) ([36fc774](https://github.com/limlabs/rex/commit/36fc7741e3076b5c6f7fb46e2f0566a16cf4555b))
+* **ci:** add merge_group trigger to unblock merge queue ([#89](https://github.com/limlabs/rex/issues/89)) ([6509ecd](https://github.com/limlabs/rex/commit/6509ecd39978948c02ec144ceef513193c233e0b))
+* **dev:** include app/ directory in HMR file watcher ([#90](https://github.com/limlabs/rex/issues/90)) ([b9c470b](https://github.com/limlabs/rex/commit/b9c470bd507b8d16d964f1cfacc8a11308e2c8bb))
+* **docker:** add rex_python to Dockerfile, exclude from coverage ([#80](https://github.com/limlabs/rex/issues/80)) ([c32b2ff](https://github.com/limlabs/rex/commit/c32b2ff1c4d12f97d59ac45754f0b43bc7d5bdf1))
+* install fixtures/app-router deps in worktree setup ([#85](https://github.com/limlabs/rex/issues/85)) ([15d8725](https://github.com/limlabs/rex/commit/15d8725a65728c6abca808e1089e6db718ea5276))
+* **rsc:** streaming head shell, __rex div, server action discovery ([#62](https://github.com/limlabs/rex/issues/62)) ([1c64906](https://github.com/limlabs/rex/commit/1c6490611a8b4206a0754b0a15ebccc3b028ce78))
+
 ## [0.10.0](https://github.com/limlabs/rex/compare/v0.9.0...v0.10.0) (2026-03-07)
 
 
