@@ -28,42 +28,54 @@ pub(crate) fn generate_server_entry(
     entry.push_str("var __rex_createElement = createElement;\n");
     entry.push_str("var __rex_renderToReadableStream = renderToReadableStream;\n\n");
 
-    // Register layouts
+    // Import layouts as namespace imports to capture metadata/generateMetadata
     entry.push_str("globalThis.__rex_app_layouts = {};\n");
     for (i, route) in app_scan.routes.iter().enumerate() {
         for (j, layout) in route.layout_chain.iter().enumerate() {
             let layout_path = layout.to_string_lossy().replace('\\', "/");
-            let layout_key = format!("layout_{i}_{j}");
-            entry.push_str(&format!(
-                "import {{ default as {layout_key} }} from '{layout_path}';\n"
-            ));
+            let mod_var = format!("__layout_mod_{i}_{j}");
+            entry.push_str(&format!("import * as {mod_var} from '{layout_path}';\n"));
         }
     }
 
-    // Register pages
+    // Import pages as namespace imports to capture metadata/generateMetadata
     entry.push_str("\nglobalThis.__rex_app_pages = {};\n");
     for (i, route) in app_scan.routes.iter().enumerate() {
         let page_path = route.page_path.to_string_lossy().replace('\\', "/");
-        let page_var = format!("__app_page_{i}");
-        entry.push_str(&format!(
-            "import {{ default as {page_var} }} from '{page_path}';\n"
-        ));
+        let mod_var = format!("__page_mod_{i}");
+        entry.push_str(&format!("import * as {mod_var} from '{page_path}';\n"));
         let pattern = &route.pattern;
         entry.push_str(&format!(
-            "globalThis.__rex_app_pages[\"{pattern}\"] = {page_var};\n"
+            "globalThis.__rex_app_pages[\"{pattern}\"] = {mod_var}.default;\n"
         ));
     }
 
-    // Register layout chains per route
+    // Register layout chains per route (using .default from namespace imports)
     entry.push_str("\nglobalThis.__rex_app_layout_chains = {};\n");
     for (i, route) in app_scan.routes.iter().enumerate() {
         let layout_vars: Vec<String> = (0..route.layout_chain.len())
-            .map(|j| format!("layout_{i}_{j}"))
+            .map(|j| format!("__layout_mod_{i}_{j}.default"))
             .collect();
         let array = format!("[{}]", layout_vars.join(", "));
         let pattern = &route.pattern;
         entry.push_str(&format!(
             "globalThis.__rex_app_layout_chains[\"{pattern}\"] = {array};\n"
+        ));
+    }
+
+    // Register metadata sources per route for the Metadata API.
+    // Each route gets an array of module references (layouts + page) that may
+    // export `metadata` (static object) or `generateMetadata` (async function).
+    entry.push_str("\nglobalThis.__rex_app_metadata_sources = {};\n");
+    for (i, route) in app_scan.routes.iter().enumerate() {
+        let mut source_vars: Vec<String> = (0..route.layout_chain.len())
+            .map(|j| format!("__layout_mod_{i}_{j}"))
+            .collect();
+        source_vars.push(format!("__page_mod_{i}"));
+        let array = format!("[{}]", source_vars.join(", "));
+        let pattern = &route.pattern;
+        entry.push_str(&format!(
+            "globalThis.__rex_app_metadata_sources[\"{pattern}\"] = {array};\n"
         ));
     }
 
@@ -119,6 +131,11 @@ pub(crate) fn generate_server_entry(
             "globalThis.__rex_server_action_manifest = globalThis.__rex_server_actions;\n",
         );
     }
+
+    // Metadata runtime: resolveMetadata + metadataToHtml
+    let metadata_runtime = include_str!("../../../runtime/server/metadata.ts");
+    entry.push_str("\n// --- Metadata Runtime ---\n");
+    entry.push_str(metadata_runtime);
 
     // RSC runtime: flight protocol using React's renderToReadableStream
     let flight_runtime = include_str!("../../../runtime/rsc/flight.ts");
@@ -285,6 +302,33 @@ mod tests {
         let entry = generate_server_entry(&scan, &manifest, &sa_manifest, Path::new("/project"));
 
         assert!(entry.contains("// --- RSC Flight Runtime ---"));
+    }
+
+    #[test]
+    fn server_entry_includes_metadata_runtime() {
+        let scan = make_basic_app_scan();
+        let manifest = ClientReferenceManifest::new();
+        let sa_manifest = ServerActionManifest::new();
+
+        let entry = generate_server_entry(&scan, &manifest, &sa_manifest, Path::new("/project"));
+
+        assert!(entry.contains("// --- Metadata Runtime ---"));
+        assert!(entry.contains("metadataToHtml"));
+    }
+
+    #[test]
+    fn server_entry_registers_metadata_sources() {
+        let scan = make_basic_app_scan();
+        let manifest = ClientReferenceManifest::new();
+        let sa_manifest = ServerActionManifest::new();
+
+        let entry = generate_server_entry(&scan, &manifest, &sa_manifest, Path::new("/project"));
+
+        assert!(entry.contains("globalThis.__rex_app_metadata_sources"));
+        assert!(entry.contains("globalThis.__rex_app_metadata_sources[\"/\"]"));
+        // Should contain both the layout module and the page module
+        assert!(entry.contains("__layout_mod_0_0"));
+        assert!(entry.contains("__page_mod_0"));
     }
 
     #[test]

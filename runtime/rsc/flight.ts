@@ -23,6 +23,66 @@ let _wantHtml = false;
 let _htmlDone = false;
 let _htmlResult: string | null = null;
 
+// --- Metadata State ---
+let _metadataHeadHtml = '';
+let _metadataDone = true;
+
+// --- Metadata Resolution ---
+
+// Resolve metadata from the layout chain + page for a route.
+// Sources are module namespaces that may have `metadata` or `generateMetadata` exports.
+// generateMetadata receives { params, searchParams } like the page component.
+function _resolveMetadata(routeKey: string, propsJson: string): void {
+    const sources = globalThis.__rex_app_metadata_sources?.[routeKey];
+    if (!sources || sources.length === 0) {
+        _metadataHeadHtml = '';
+        _metadataDone = true;
+        return;
+    }
+
+    const props = JSON.parse(propsJson);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const chain: any[] = [];
+    let hasAsync = false;
+
+    // Collect metadata from each source (layouts first, then page)
+    for (let i = 0; i < sources.length; i++) {
+        const mod = sources[i];
+        if (typeof mod.generateMetadata === 'function') {
+            const result = mod.generateMetadata(props);
+            if (result && typeof result.then === 'function') {
+                hasAsync = true;
+                chain.push(result);
+            } else {
+                chain.push(result);
+            }
+        } else if (mod.metadata) {
+            chain.push(mod.metadata);
+        } else {
+            chain.push(null);
+        }
+    }
+
+    if (!hasAsync) {
+        // All synchronous — resolve immediately
+        const resolved = chain.filter(Boolean);
+        _metadataHeadHtml = resolved.length > 0 ? metadataToHtml(resolved) : '';
+        _metadataDone = true;
+        return;
+    }
+
+    // Some async generateMetadata — use Promise.all
+    _metadataDone = false;
+    Promise.all(chain).then(function(results) {
+        const resolved = results.filter(Boolean);
+        _metadataHeadHtml = resolved.length > 0 ? metadataToHtml(resolved) : '';
+        _metadataDone = true;
+    }, function() {
+        _metadataHeadHtml = '';
+        _metadataDone = true;
+    });
+}
+
 // --- Helpers ---
 
 function _buildElement(routeKey: string, propsJson: string): React.ReactElement | null {
@@ -141,6 +201,9 @@ globalThis.__rex_render_rsc_to_html = function(routeKey: string, propsJson: stri
     _htmlDone = false;
     _htmlResult = null;
 
+    // Resolve metadata concurrently with RSC rendering
+    _resolveMetadata(routeKey, propsJson);
+
     const bundlerConfig = globalThis.__rex_webpack_bundler_config || {};
     const renderOptions: Record<string, unknown> = {};
     if (globalThis.__rex_server_actions) {
@@ -149,7 +212,11 @@ globalThis.__rex_render_rsc_to_html = function(routeKey: string, propsJson: stri
     const stream = __rex_renderToReadableStream(element, bundlerConfig, renderOptions);
     _startReading(stream.getReader());
 
-    if (_htmlDone) {
+    if (_htmlDone && _metadataDone) {
+        // Inject metadata head into the result
+        if (_metadataHeadHtml && _htmlResult) {
+            _injectMetadataHead();
+        }
         return _htmlResult!;
     }
 
@@ -162,7 +229,10 @@ globalThis.__rex_resolve_rsc_pending = function(): "pending" | "done" {
     // Phase 1: Stream still reading
     if (!_streamDone) return 'pending';
 
-    // Phase 2: HTML pass pending (two-pass mode)
+    // Phase 2: Metadata still resolving (async generateMetadata)
+    if (!_metadataDone) return 'pending';
+
+    // Phase 3: HTML pass pending (two-pass mode)
     if (_wantHtml) {
         if (!_htmlDone) {
             // Check if SSR resolved
@@ -173,6 +243,10 @@ globalThis.__rex_resolve_rsc_pending = function(): "pending" | "done" {
                         _htmlResult = globalThis.__rex_finalize_ssr();
                     }
                     _htmlDone = true;
+                    // Inject metadata head into the finalized HTML result
+                    if (_metadataHeadHtml) {
+                        _injectMetadataHead();
+                    }
                     return 'done';
                 }
                 return 'pending';
@@ -191,10 +265,28 @@ globalThis.__rex_finalize_rsc_flight = function(): string {
     return result;
 };
 
+// Inject resolved metadata head HTML into the _htmlResult JSON.
+// The SSR pass returns { body, head, flight } — we set `head` to the metadata HTML.
+function _injectMetadataHead(): void {
+    if (!_htmlResult || !_metadataHeadHtml) return;
+    try {
+        const parsed = JSON.parse(_htmlResult);
+        parsed.head = _metadataHeadHtml;
+        _htmlResult = JSON.stringify(parsed);
+    } catch {
+        // If parsing fails, leave _htmlResult as-is
+    }
+}
+
 globalThis.__rex_finalize_rsc_to_html = function(): string {
+    // Inject metadata before returning
+    if (_metadataHeadHtml) {
+        _injectMetadataHead();
+    }
     const result = _htmlResult || JSON.stringify({ body: '', head: '', flight: _flightString || '' });
     _flightString = null;
     _htmlResult = null;
+    _metadataHeadHtml = '';
     return result;
 };
 

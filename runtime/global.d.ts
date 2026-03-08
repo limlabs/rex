@@ -116,6 +116,8 @@ declare global {
   // eslint-disable-next-line no-var
   var __rex_app_pages: Record<string, React.ComponentType>;
   var __rex_app_layout_chains: Record<string, React.ComponentType[]>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  var __rex_app_metadata_sources: Record<string, Record<string, any>[]>;
   var __rex_webpack_bundler_config: Record<string, unknown>;
   var __rex_webpack_ssr_manifest: Record<string, unknown>;
   var __rex_client_modules__: Record<string, unknown>;
