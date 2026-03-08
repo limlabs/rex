@@ -303,7 +303,7 @@ jobs:
 
   deploy-railway:
     name: Deploy to Railway (beta)
-    needs: [check-release-pr, docker, smoke-test]
+    needs: [check-release-pr, docker]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -325,6 +325,35 @@ jobs:
         working-directory: fixtures/railway
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+  smoke-test-railway:
+    name: Smoke Test (Railway)
+    needs: deploy-railway
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for deployment to be ready
+        run: |
+          echo "Waiting for Railway deployment..."
+          for i in $(seq 1 60); do
+            if curl -sf "${{ secrets.RAILWAY_URL }}" > /dev/null 2>&1; then
+              echo "Deployment is ready"
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "::error::Railway deployment failed to become ready within 60s"
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Verify HTTP 200
+        run: |
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${{ secrets.RAILWAY_URL }}")
+          echo "GET / → HTTP $STATUS"
+          if [ "$STATUS" -ne 200 ]; then
+            echo "::error::Expected HTTP 200, got $STATUS"
+            exit 1
+          fi
 
   create-beta-release:
     name: GitHub Pre-Release
