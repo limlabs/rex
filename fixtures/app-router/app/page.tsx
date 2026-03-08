@@ -1,6 +1,11 @@
 import React from 'react';
 import ActionCounter from '../components/ActionCounter';
 
+export const metadata = {
+  title: 'Home',
+  description: 'Welcome to Rex App Router',
+};
+
 // Server component (default) — no "use client" directive
 export default function Home() {
   const message = "Hello from Rex RSC!";
