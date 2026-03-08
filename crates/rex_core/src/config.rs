@@ -13,8 +13,29 @@ pub struct RexConfig {
 
 impl RexConfig {
     pub fn new(project_root: PathBuf) -> Self {
-        let pages_dir = project_root.join("pages");
-        let app_dir = project_root.join("app");
+        // Check root-level first, then src/ subdirectory (Next.js convention)
+        let pages_dir = if project_root.join("pages").exists() {
+            project_root.join("pages")
+        } else {
+            let src_pages = project_root.join("src").join("pages");
+            if src_pages.exists() {
+                src_pages
+            } else {
+                project_root.join("pages")
+            }
+        };
+
+        let app_dir = if project_root.join("app").exists() {
+            project_root.join("app")
+        } else {
+            let src_app = project_root.join("src").join("app");
+            if src_app.exists() {
+                src_app
+            } else {
+                project_root.join("app")
+            }
+        };
+
         let output_dir = project_root.join(".rex");
         Self {
             project_root,
@@ -66,7 +87,7 @@ impl RexConfig {
     pub fn validate(&self) -> Result<(), crate::RexError> {
         if !self.pages_dir.exists() && !self.app_dir.exists() {
             return Err(crate::RexError::Config(format!(
-                "Neither pages/ nor app/ directory found in {}",
+                "Neither pages/ nor app/ directory found (checked root and src/) in {}",
                 self.project_root.display()
             )));
         }
@@ -88,6 +109,7 @@ mod tests {
 
     #[test]
     fn test_new_sets_defaults() {
+        // Non-existent root falls back to root-level paths
         let cfg = RexConfig::new(PathBuf::from("/app"));
         assert_eq!(cfg.project_root, PathBuf::from("/app"));
         assert_eq!(cfg.pages_dir, PathBuf::from("/app/pages"));
@@ -95,6 +117,35 @@ mod tests {
         assert_eq!(cfg.output_dir, PathBuf::from("/app/.rex"));
         assert_eq!(cfg.port, 3000);
         assert!(!cfg.dev);
+    }
+
+    #[test]
+    fn test_src_dir_fallback() {
+        let tmp = std::env::temp_dir().join("rex_test_src_dir_fallback");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("src/app")).unwrap();
+        std::fs::create_dir_all(tmp.join("src/pages")).unwrap();
+
+        let cfg = RexConfig::new(tmp.clone());
+        assert_eq!(cfg.app_dir, tmp.join("src/app"));
+        assert_eq!(cfg.pages_dir, tmp.join("src/pages"));
+        assert!(cfg.has_app_dir());
+        assert!(cfg.has_pages_dir());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_root_dirs_take_precedence_over_src() {
+        let tmp = std::env::temp_dir().join("rex_test_root_precedence");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("app")).unwrap();
+        std::fs::create_dir_all(tmp.join("src/app")).unwrap();
+
+        let cfg = RexConfig::new(tmp.clone());
+        assert_eq!(cfg.app_dir, tmp.join("app"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

@@ -104,8 +104,10 @@ pub(crate) fn process_mdx_app_pages(
 
     // Collect all unique MDX paths from routes and root layout
     let mut mdx_paths: Vec<PathBuf> = Vec::new();
-    if is_mdx(&app_scan.root_layout) {
-        mdx_paths.push(app_scan.root_layout.clone());
+    if let Some(root_layout) = &app_scan.root_layout {
+        if is_mdx(root_layout) {
+            mdx_paths.push(root_layout.clone());
+        }
     }
     for route in &app_scan.routes {
         if is_mdx(&route.page_path) {
@@ -154,8 +156,10 @@ pub(crate) fn process_mdx_app_pages(
 
     // Clone and patch the scan result
     let mut result = app_scan.clone();
-    if let Some(replacement) = overrides.get(&result.root_layout) {
-        result.root_layout = replacement.clone();
+    if let Some(root_layout) = &result.root_layout {
+        if let Some(replacement) = overrides.get(root_layout) {
+            result.root_layout = Some(replacement.clone());
+        }
     }
     for route in &mut result.routes {
         if let Some(replacement) = overrides.get(&route.page_path) {
@@ -268,7 +272,7 @@ mod tests {
                 dynamic_segments: vec![],
                 specificity: 1,
             }],
-            root_layout: layout_path,
+            root_layout: Some(layout_path),
         };
 
         let result = process_mdx_app_pages(&app_scan, &tmp, &tmp).unwrap();
@@ -312,13 +316,13 @@ mod tests {
                 dynamic_segments: vec![],
                 specificity: 1,
             }],
-            root_layout: layout_path.clone(),
+            root_layout: Some(layout_path.clone()),
         };
 
         let result = process_mdx_app_pages(&app_scan, &tmp, &tmp).unwrap();
         assert_ne!(result.routes[0].page_path, page_path);
         assert!(result.routes[0].page_path.extension().unwrap() == "jsx");
-        assert_eq!(result.root_layout, layout_path);
+        assert_eq!(result.root_layout.as_ref().unwrap(), &layout_path);
         assert_ne!(result.root.page.as_ref().unwrap(), &page_path);
         let compiled = fs::read_to_string(&result.routes[0].page_path).unwrap();
         assert!(compiled.contains("createElement(_components.h1"));

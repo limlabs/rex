@@ -240,7 +240,7 @@ mod tests {
                 dynamic_segments: vec![],
                 specificity: 10,
             }],
-            root_layout: layout_path,
+            root_layout: Some(layout_path),
         }
     }
 
@@ -405,7 +405,7 @@ mod tests {
                     specificity: 10,
                 },
             ],
-            root_layout: layout_path,
+            root_layout: Some(layout_path),
         };
 
         let manifest = ClientReferenceManifest::new();

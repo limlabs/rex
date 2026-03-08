@@ -248,7 +248,7 @@ export default function RootLayout({ children }) {
             dynamic_segments: vec![],
             specificity: 10,
         }],
-        root_layout: layout_path,
+        root_layout: Some(layout_path),
     };
 
     // Use the pages router scan as empty, and app_scan for the app router

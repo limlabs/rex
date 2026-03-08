@@ -192,7 +192,9 @@ pub(crate) async fn process_font_app_pages(
 
     // Collect all unique source paths from layouts and pages
     let mut all_paths: Vec<PathBuf> = Vec::new();
-    all_paths.push(app_scan.root_layout.clone());
+    if let Some(root_layout) = &app_scan.root_layout {
+        all_paths.push(root_layout.clone());
+    }
     for route in &app_scan.routes {
         all_paths.push(route.page_path.clone());
         all_paths.extend(route.layout_chain.iter().cloned());
@@ -248,8 +250,10 @@ pub(crate) async fn process_font_app_pages(
 
     // Clone and patch the scan result (same pattern as MDX)
     let mut result = app_scan.clone();
-    if let Some(replacement) = overrides.get(&result.root_layout) {
-        result.root_layout = replacement.clone();
+    if let Some(root_layout) = &result.root_layout {
+        if let Some(replacement) = overrides.get(root_layout) {
+            result.root_layout = Some(replacement.clone());
+        }
     }
     for route in &mut result.routes {
         if let Some(replacement) = overrides.get(&route.page_path) {
