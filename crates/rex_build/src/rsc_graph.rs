@@ -15,6 +15,9 @@ pub struct ModuleInfo {
     pub is_client: bool,
     /// Whether this module has `"use server"` directive (module-level).
     pub is_server: bool,
+    /// Whether this module imports dynamic request functions (`cookies`, `headers`)
+    /// from `rex/actions`, which forces the route to be server-rendered.
+    pub uses_dynamic_functions: bool,
     /// Resolved import paths from this module.
     pub imports: Vec<PathBuf>,
     /// Export names from this module.
@@ -53,6 +56,34 @@ impl ModuleGraph {
             .values()
             .filter(|m| !m.is_server && !m.server_functions.is_empty())
             .collect()
+    }
+
+    /// Check whether any server component reachable from the given entry points
+    /// uses dynamic functions (`cookies()`, `headers()` from `rex/actions`).
+    ///
+    /// This is used for automatic static optimization: if any module in a route's
+    /// component tree uses dynamic functions, the route must be server-rendered.
+    pub fn has_dynamic_functions(&self, entry_paths: &[PathBuf]) -> bool {
+        let mut visited = HashSet::new();
+        let mut queue: VecDeque<&PathBuf> = entry_paths.iter().collect();
+
+        while let Some(path) = queue.pop_front() {
+            if !visited.insert(path) {
+                continue;
+            }
+            if let Some(info) = self.modules.get(path) {
+                if info.uses_dynamic_functions {
+                    return true;
+                }
+                // Only traverse server modules (stop at client boundaries)
+                if !info.is_client {
+                    for import in &info.imports {
+                        queue.push_back(import);
+                    }
+                }
+            }
+        }
+        false
     }
 }
 
@@ -141,11 +172,27 @@ fn analyze_module(path: &Path, root: &Path) -> Result<ModuleInfo> {
     let mut imports = Vec::new();
     let mut exports = Vec::new();
     let mut server_functions = Vec::new();
+    let mut uses_dynamic_functions = false;
 
     for stmt in &parsed.program.body {
-        // Collect imports
+        // Collect imports and detect dynamic function usage
         if let oxc_ast::ast::Statement::ImportDeclaration(import) = stmt {
             let specifier = import.source.value.as_str();
+
+            // Detect dynamic function imports from rex/actions (cookies, headers)
+            if specifier == "rex/actions" || specifier == "next/headers" {
+                if let Some(specifiers) = &import.specifiers {
+                    for spec in specifiers {
+                        if let oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(s) = spec {
+                            let name = s.imported.name();
+                            if name == "cookies" || name == "headers" {
+                                uses_dynamic_functions = true;
+                            }
+                        }
+                    }
+                }
+            }
+
             if let Some(resolved) = resolve_import(path, specifier, root) {
                 imports.push(resolved);
             }
@@ -217,6 +264,7 @@ fn analyze_module(path: &Path, root: &Path) -> Result<ModuleInfo> {
         path: path.to_path_buf(),
         is_client,
         is_server,
+        uses_dynamic_functions,
         imports,
         exports,
         server_functions,
@@ -925,5 +973,182 @@ export async function dec() { return -1; }
         let info = graph.modules.get(&canonical).unwrap();
         assert!(info.is_server);
         assert!(info.server_functions.is_empty()); // not populated when module-level
+    }
+
+    #[test]
+    fn detects_dynamic_function_cookies_import() {
+        let dir = setup_temp_dir();
+        let root = dir.path();
+
+        fs::write(
+            root.join("page.tsx"),
+            r#"
+import { cookies } from 'rex/actions';
+export default function Page() { return null; }
+"#,
+        )
+        .unwrap();
+
+        let entries = vec![root.join("page.tsx")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+
+        let canonical = root.join("page.tsx").canonicalize().unwrap();
+        let info = graph.modules.get(&canonical).unwrap();
+        assert!(info.uses_dynamic_functions);
+    }
+
+    #[test]
+    fn detects_dynamic_function_headers_import() {
+        let dir = setup_temp_dir();
+        let root = dir.path();
+
+        fs::write(
+            root.join("page.tsx"),
+            r#"
+import { headers } from 'rex/actions';
+export default function Page() { return null; }
+"#,
+        )
+        .unwrap();
+
+        let entries = vec![root.join("page.tsx")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+
+        let canonical = root.join("page.tsx").canonicalize().unwrap();
+        let info = graph.modules.get(&canonical).unwrap();
+        assert!(info.uses_dynamic_functions);
+    }
+
+    #[test]
+    fn no_dynamic_functions_for_static_page() {
+        let dir = setup_temp_dir();
+        let root = dir.path();
+
+        fs::write(
+            root.join("page.tsx"),
+            r#"
+export default function Page() { return <div>Hello</div>; }
+"#,
+        )
+        .unwrap();
+
+        let entries = vec![root.join("page.tsx")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+
+        let canonical = root.join("page.tsx").canonicalize().unwrap();
+        let info = graph.modules.get(&canonical).unwrap();
+        assert!(!info.uses_dynamic_functions);
+    }
+
+    #[test]
+    fn has_dynamic_functions_traverses_imports() {
+        let dir = setup_temp_dir();
+        let root = dir.path();
+
+        // Page imports a layout that uses cookies
+        fs::write(
+            root.join("page.tsx"),
+            r#"
+import Layout from './layout';
+export default function Page() { return null; }
+"#,
+        )
+        .unwrap();
+
+        fs::write(
+            root.join("layout.tsx"),
+            r#"
+import { cookies } from 'rex/actions';
+export default function Layout({ children }) { return <div>{children}</div>; }
+"#,
+        )
+        .unwrap();
+
+        let entries = vec![root.join("page.tsx")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+
+        let page_canonical = root.join("page.tsx").canonicalize().unwrap();
+        let layout_canonical = root.join("layout.tsx").canonicalize().unwrap();
+
+        // Page itself doesn't use dynamic functions
+        assert!(
+            !graph
+                .modules
+                .get(&page_canonical)
+                .unwrap()
+                .uses_dynamic_functions
+        );
+        // Layout does
+        assert!(
+            graph
+                .modules
+                .get(&layout_canonical)
+                .unwrap()
+                .uses_dynamic_functions
+        );
+
+        // has_dynamic_functions should detect it through the dependency tree
+        assert!(graph.has_dynamic_functions(&[page_canonical]));
+    }
+
+    #[test]
+    fn has_dynamic_functions_stops_at_client_boundary() {
+        let dir = setup_temp_dir();
+        let root = dir.path();
+
+        // Server page imports a client component
+        fs::write(
+            root.join("page.tsx"),
+            r#"
+import Counter from './Counter';
+export default function Page() { return null; }
+"#,
+        )
+        .unwrap();
+
+        // Client component (would use cookies, but shouldn't affect server detection)
+        fs::write(
+            root.join("Counter.tsx"),
+            r#"
+"use client";
+export default function Counter() { return <button>0</button>; }
+"#,
+        )
+        .unwrap();
+
+        let entries = vec![root.join("page.tsx")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+
+        let page_canonical = root.join("page.tsx").canonicalize().unwrap();
+        assert!(!graph.has_dynamic_functions(&[page_canonical]));
+    }
+
+    #[test]
+    fn has_dynamic_functions_empty_entries() {
+        let graph = ModuleGraph::default();
+        assert!(!graph.has_dynamic_functions(&[]));
+    }
+
+    #[test]
+    fn other_rex_actions_imports_not_dynamic() {
+        let dir = setup_temp_dir();
+        let root = dir.path();
+
+        // Import redirect from rex/actions — not a dynamic function
+        fs::write(
+            root.join("page.tsx"),
+            r#"
+import { redirect } from 'rex/actions';
+export default function Page() { return null; }
+"#,
+        )
+        .unwrap();
+
+        let entries = vec![root.join("page.tsx")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+
+        let canonical = root.join("page.tsx").canonicalize().unwrap();
+        let info = graph.modules.get(&canonical).unwrap();
+        assert!(!info.uses_dynamic_functions);
     }
 }

@@ -31,7 +31,7 @@ def test_init(rex):
 def test_render_by_module_name(rex):
     html = rex.render("index", props={"message": "Hello from Python!", "timestamp": 0})
     assert "<!DOCTYPE html>" in html
-    assert "<h1>Rex!!</h1>" in html
+    assert "<h1>Rex!</h1>" in html
     assert "Hello from Python!" in html
 
 

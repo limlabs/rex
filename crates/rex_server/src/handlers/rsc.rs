@@ -60,6 +60,16 @@ async fn rsc_flight_response(
         None => return StatusCode::NOT_FOUND.into_response(),
     };
 
+    // Automatic static optimization: serve pre-rendered flight data
+    if let Some(cached) = hot.prerendered_app.get(&route_match.route.pattern) {
+        return Response::builder()
+            .header("Content-Type", "text/x-component")
+            .header("Cache-Control", "public, max-age=31536000, immutable")
+            .header("x-rex-render-mode", "static")
+            .body(Body::from(cached.flight.clone()))
+            .expect("response build");
+    }
+
     let route_key = &route_match.route.pattern;
     let params = route_match.params.clone();
 

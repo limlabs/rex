@@ -424,6 +424,7 @@ mod tests {
                 path: PathBuf::from("/project/components/Counter.tsx"),
                 is_client: true,
                 is_server: false,
+                uses_dynamic_functions: false,
                 imports: vec![],
                 exports: vec!["default".to_string()],
                 server_functions: vec![],

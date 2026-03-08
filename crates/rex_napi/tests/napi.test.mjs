@@ -106,7 +106,7 @@ describe('getServerSideProps', () => {
     assert.strictEqual(result.props.title, 'Blog Post: test-post');
   });
 
-  it('returns props from getStaticProps page', async () => {
+  it('returns props from getServerSideProps page', async () => {
     const result = await rex.getServerSideProps('/about');
     assert.ok(result.props, 'should have props');
     assert.strictEqual(

@@ -31,6 +31,9 @@ pub struct HotState {
     /// Pre-rendered HTML for statically optimized pages (route pattern → full HTML).
     /// Populated at startup for production builds; empty in dev mode.
     pub prerendered: HashMap<String, String>,
+    /// Pre-rendered app routes (route pattern → HTML + flight data).
+    /// Populated at startup for production builds; empty in dev mode.
+    pub prerendered_app: HashMap<String, crate::prerender::PrerenderedAppRoute>,
 }
 
 impl HotState {

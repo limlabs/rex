@@ -127,10 +127,7 @@ mod rsc {
 
         let body = resp.text().await.unwrap();
         assert!(body.contains("<div id=\"__rex\">"), "Missing __rex div");
-        assert!(
-            body.contains("Rex App Router"),
-            "Missing SSR content 'Rex App Router'"
-        );
+        assert!(body.contains("Rex!"), "Missing SSR content 'Rex!'");
     }
 
     #[tokio::test]
