@@ -105,7 +105,7 @@ impl Rex {
 
         // Scan pages + middleware
         debug!("Scanning routes...");
-        let scan = scan_project(&config.project_root, &config.pages_dir)?;
+        let scan = scan_project(&config.project_root, &config.pages_dir, &config.app_dir)?;
         debug!(
             routes = scan.routes.len(),
             has_app = scan.app.is_some(),
@@ -179,7 +179,7 @@ impl Rex {
         let manifest = AssetManifest::load(&config.manifest_path())?;
 
         // Scan routes + middleware (for trie)
-        let scan = scan_project(&config.project_root, &config.pages_dir)?;
+        let scan = scan_project(&config.project_root, &config.pages_dir, &config.app_dir)?;
 
         // Initialize V8
         init_v8();

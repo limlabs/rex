@@ -114,7 +114,11 @@ pub fn scan_mcp_tools(project_root: &Path) -> Vec<McpToolRoute> {
 /// Scan pages and detect middleware. Convenience wrapper for callers that have the project root.
 ///
 /// Also scans app/ directory if present for RSC/App Router support.
-pub fn scan_project(project_root: &Path, pages_dir: &Path) -> anyhow::Result<ScanResult> {
+pub fn scan_project(
+    project_root: &Path,
+    pages_dir: &Path,
+    app_dir: &Path,
+) -> anyhow::Result<ScanResult> {
     let mut scan = if pages_dir.exists() {
         scan_pages(pages_dir)?
     } else {
@@ -134,8 +138,7 @@ pub fn scan_project(project_root: &Path, pages_dir: &Path) -> anyhow::Result<Sca
     scan.middleware = find_middleware(project_root);
 
     // Scan app/ directory for RSC routes
-    let app_dir = project_root.join("app");
-    if let Some(app_scan) = crate::app_scanner::scan_app(&app_dir)? {
+    if let Some(app_scan) = crate::app_scanner::scan_app(app_dir)? {
         debug!(routes = app_scan.routes.len(), "App router routes scanned");
         scan.app_scan = Some(app_scan);
     }
@@ -466,7 +469,8 @@ mod tests {
         std::fs::create_dir_all(&mcp).unwrap();
         std::fs::write(mcp.join("search.ts"), "export default function(){}").unwrap();
 
-        let scan = scan_project(&tmp, &pages).unwrap();
+        let app = tmp.join("app");
+        let scan = scan_project(&tmp, &pages, &app).unwrap();
         assert_eq!(scan.routes.len(), 1);
         assert!(scan.middleware.is_some());
         assert_eq!(scan.mcp_tools.len(), 1);
@@ -481,10 +485,52 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         let pages = tmp.join("pages"); // doesn't exist
+        let app = tmp.join("app"); // doesn't exist
 
-        let scan = scan_project(&tmp, &pages).unwrap();
+        let scan = scan_project(&tmp, &pages, &app).unwrap();
         assert!(scan.routes.is_empty());
         assert!(scan.api_routes.is_empty());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_scan_project_src_app_dir() {
+        let tmp = std::env::temp_dir().join("rex_test_scan_src_app");
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        // Simulate a src/app/ project with route groups (no root layout)
+        let app_dir = tmp.join("src/app");
+        let frontend = app_dir.join("(frontend)");
+        std::fs::create_dir_all(frontend.join("about")).unwrap();
+        std::fs::write(
+            frontend.join("layout.tsx"),
+            "export default function Layout({children}) { return children }",
+        )
+        .unwrap();
+        std::fs::write(
+            frontend.join("page.tsx"),
+            "export default function Home() { return 'home' }",
+        )
+        .unwrap();
+        std::fs::write(
+            frontend.join("about/page.tsx"),
+            "export default function About() { return 'about' }",
+        )
+        .unwrap();
+
+        let pages = tmp.join("src/pages"); // doesn't exist
+        let scan = scan_project(&tmp, &pages, &app_dir).unwrap();
+
+        // Should find app routes via the app_dir parameter
+        assert!(scan.app_scan.is_some());
+        let app_scan = scan.app_scan.unwrap();
+        assert_eq!(app_scan.routes.len(), 2);
+        assert!(app_scan.root_layout.is_none()); // route-group-only
+
+        let patterns: Vec<&str> = app_scan.routes.iter().map(|r| r.pattern.as_str()).collect();
+        assert!(patterns.contains(&"/"));
+        assert!(patterns.contains(&"/about"));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

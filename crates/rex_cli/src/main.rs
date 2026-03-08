@@ -388,7 +388,7 @@ async fn cmd_build(root: PathBuf) -> Result<()> {
     let start = std::time::Instant::now();
     debug!("Building for production...");
 
-    let scan = scan_project(&config.project_root, &config.pages_dir)?;
+    let scan = scan_project(&config.project_root, &config.pages_dir, &config.app_dir)?;
     debug!(routes = scan.routes.len(), "Routes scanned");
 
     let project_config = ProjectConfig::load(&config.project_root)?;
