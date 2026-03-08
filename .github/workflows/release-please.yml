@@ -374,6 +374,7 @@ jobs:
     needs: [release-please, docker]
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
     runs-on: ubuntu-latest
+    environment: railway-production
     steps:
       - uses: actions/checkout@v4
 
@@ -402,6 +403,7 @@ jobs:
     needs: [release-please, deploy-railway]
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
     runs-on: ubuntu-latest
+    environment: railway-production
     steps:
       - name: Wait for deployment to be ready
         run: |

@@ -305,6 +305,7 @@ jobs:
     name: Deploy to Railway (beta)
     needs: [check-release-pr, docker]
     runs-on: ubuntu-latest
+    environment: railway-staging
     steps:
       - uses: actions/checkout@v4
 
@@ -330,6 +331,7 @@ jobs:
     name: Smoke Test (Railway)
     needs: deploy-railway
     runs-on: ubuntu-latest
+    environment: railway-staging
     steps:
       - name: Wait for deployment to be ready
         run: |
