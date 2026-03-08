@@ -128,6 +128,30 @@ def section(fw: str, suite: str):
 # ── Helpers ─────────────────────────────────────────────────────
 
 
+def measure_download_speed() -> str:
+    """Measure network download speed by fetching a known file from npm registry.
+
+    Uses typescript tarball (~10MB) for a representative throughput measurement.
+    Returns a human-readable string like '85.3 Mbps'.
+    """
+    url = "https://registry.npmjs.org/typescript/-/typescript-5.8.3.tgz"
+    try:
+        import urllib.request
+
+        # Warm connection (DNS + TLS), discard result
+        urllib.request.urlopen(url, timeout=15).read()
+        # Timed download
+        t0 = time.monotonic()
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            data = resp.read()
+        elapsed = time.monotonic() - t0
+        size_bits = len(data) * 8
+        mbps = round(size_bits / elapsed / 1_000_000, 1)
+        return f"{mbps} Mbps"
+    except Exception:
+        return "unknown"
+
+
 def find_free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -579,8 +603,14 @@ def dx_framework(
             shutil.move(str(nm), str(backup / "node_modules"))
 
         t0 = time.monotonic()
+        # Clear npm cache so we measure a true cold-network install
         subprocess.run(
-            ["npm", "install", "--prefer-offline", "--no-audit", "--no-fund"],
+            ["npm", "cache", "clean", "--force"],
+            capture_output=True,
+            timeout=60,
+        )
+        subprocess.run(
+            ["npm", "install", "--no-audit", "--no-fund"],
             cwd=project_dir,
             capture_output=True,
             timeout=120,
@@ -1408,6 +1438,9 @@ def main():
     global _total_steps
     _total_steps = len(suites) * len(frameworks)
 
+    # Measure network speed for install-time context
+    net_speed = measure_download_speed()
+
     # Banner
     print(f"\n  {bold('Rex Benchmark Suite')}\n")
     print(f"  {dim('Suites:')}      {', '.join(suites)}")
@@ -1415,7 +1448,11 @@ def main():
     print(f"  {dim('Frameworks:')}  {' '.join(fw_strs)}")
     if args.iterations > 1:
         print(f"  {dim('Iterations:')}  {args.iterations} (noisy metrics report median ± stddev)")
+    print(f"  {dim('Network:')}     {net_speed} (npm registry download)")
     print()
+
+    # Record network speed in results for reproducibility
+    results.append({"suite": "meta", "metric": "network_speed", "value": net_speed})
 
     # Run
     if "dx" in suites:

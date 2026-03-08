@@ -22,10 +22,10 @@ Benchmarked against Next.js 15 on the same pages with Apache Bench (10k requests
 | **Production build** | 126 ms | 7,979 ms |
 | **Dev cold start** | 188 ms | 2,989 ms |
 | **Install size** | 118 MB | 342 MB |
-| **Install time** | 302 ms | 5,001 ms |
+| **Install time** | 842 ms | 5,508 ms |
 | **Lint** | 23 ms (oxlint) | 1,015 ms (eslint) |
 
-Reproduce: `cd benchmarks && uv run python bench.py --suite dx,server --framework rex,nextjs --iterations 1`
+Reproduce: `cd benchmarks && uv run python bench.py --suite dx,server --framework rex,nextjs --iterations 1` — install times measured with cold npm cache at 126.8 Mbps (speed auto-detected from npm registry).
 
 ## Quick Start
 
