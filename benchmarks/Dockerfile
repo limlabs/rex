@@ -1,4 +1,4 @@
-# Reproducible benchmark environment for Rex vs Next.js vs TanStack Start
+# Reproducible benchmark environment for Rex vs Next.js vs TanStack Start vs Vinext
 #
 # Build:  docker build -t rex-bench -f benchmarks/Dockerfile .
 # Run:    docker run --rm rex-bench
@@ -63,6 +63,7 @@ RUN cd benchmarks/next-basic && npm install
 RUN cd benchmarks/next-app-basic && npm install
 RUN cd benchmarks/tanstack-basic && npm install
 RUN cd benchmarks/next-tailwind && npm install
+RUN cd benchmarks/vinext-basic && npm install
 RUN cd benchmarks/tanstack-tailwind && npm install
 
 # Install Python benchmark deps

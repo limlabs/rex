@@ -1,4 +1,9 @@
-import React from 'react';
+export const dynamic = 'force-dynamic';
+
+export const metadata = {
+  title: 'About - Rex',
+  description: 'Learn about Rex, a Next.js Pages Router in Rust.',
+};
 
 export default function About() {
   const description = "Rex is a Next.js Pages Router reimplemented in Rust.";
