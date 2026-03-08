@@ -1,11 +1,10 @@
 use crate::document::{assemble_body_tail, assemble_head_shell, DocumentDescriptor};
+use rex_build::manifest::PageAssets;
 use rex_build::AssetManifest;
-use rex_core::RenderMode;
+use rex_core::{RenderMode, Route};
 use rex_v8::IsolatePool;
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
-
-use rex_build::manifest::PageAssets;
 
 /// Pre-render all statically optimized pages and return a map of route pattern -> full HTML.
 ///
@@ -16,15 +15,28 @@ use rex_build::manifest::PageAssets;
 pub async fn prerender_static_pages(
     pool: &IsolatePool,
     manifest: &AssetManifest,
+    routes: &[Route],
     manifest_json: &str,
     doc_descriptor: Option<&DocumentDescriptor>,
 ) -> HashMap<String, String> {
     let mut prerendered = HashMap::new();
 
+    // Build a lookup from route pattern -> Route so we can use module_name()
+    let route_by_pattern: HashMap<&str, &Route> =
+        routes.iter().map(|r| (r.pattern.as_str(), r)).collect();
+
     let static_pages = collect_static_pages(manifest);
 
     for (pattern, assets) in &static_pages {
-        let route_key = pattern_to_module_name(pattern);
+        // Use Route::module_name() for the V8 registry key, which correctly
+        // handles nested index pages (e.g., pages/blog/index.tsx -> "blog/index").
+        let route_key = match route_by_pattern.get(pattern.as_str()) {
+            Some(route) => route.module_name(),
+            None => {
+                warn!(pattern, "No route found for static page, skipping");
+                continue;
+            }
+        };
 
         // Get props: either empty or from getStaticProps
         let props_json = match &assets.data_strategy {
@@ -35,7 +47,24 @@ pub async fn prerender_static_pages(
                     .execute(move |iso| iso.get_static_props(&key, &ctx))
                     .await
                 {
-                    Ok(Ok(json)) => extract_props_from_gsp(&json),
+                    Ok(Ok(json)) => match parse_gsp_result(&json) {
+                        GspOutcome::Props(props) => props,
+                        GspOutcome::Redirect { destination } => {
+                            debug!(
+                                pattern,
+                                destination,
+                                "getStaticProps returned redirect, skipping pre-render"
+                            );
+                            continue;
+                        }
+                        GspOutcome::NotFound => {
+                            debug!(
+                                pattern,
+                                "getStaticProps returned notFound, skipping pre-render"
+                            );
+                            continue;
+                        }
+                    },
                     Ok(Err(e)) => {
                         warn!(pattern, error = %e, "getStaticProps failed, skipping pre-render");
                         continue;
@@ -96,17 +125,48 @@ fn collect_static_pages(manifest: &AssetManifest) -> Vec<(String, PageAssets)> {
         .collect()
 }
 
-/// Extract just the `props` value from a getStaticProps result JSON like `{ "props": {...} }`.
-fn extract_props_from_gsp(json: &str) -> String {
-    match serde_json::from_str::<serde_json::Value>(json) {
-        Ok(val) => {
-            if let Some(props) = val.get("props") {
-                serde_json::to_string(props).unwrap_or_else(|_| "{}".into())
-            } else {
-                "{}".to_string()
-            }
-        }
-        Err(_) => "{}".to_string(),
+/// Outcome of parsing a getStaticProps result.
+#[derive(Debug, PartialEq)]
+enum GspOutcome {
+    /// Normal props to render with
+    Props(String),
+    /// GSP returned `{ redirect: { destination: "..." } }`
+    Redirect { destination: String },
+    /// GSP returned `{ notFound: true }`
+    NotFound,
+}
+
+/// Parse a getStaticProps result JSON, handling `props`, `redirect`, and `notFound`.
+fn parse_gsp_result(json: &str) -> GspOutcome {
+    let val = match serde_json::from_str::<serde_json::Value>(json) {
+        Ok(v) => v,
+        Err(_) => return GspOutcome::Props("{}".to_string()),
+    };
+
+    // Check for redirect
+    if let Some(redirect) = val.get("redirect") {
+        let destination = redirect
+            .get("destination")
+            .and_then(|d| d.as_str())
+            .unwrap_or("/")
+            .to_string();
+        return GspOutcome::Redirect { destination };
+    }
+
+    // Check for notFound
+    if val
+        .get("notFound")
+        .and_then(|n| n.as_bool())
+        .unwrap_or(false)
+    {
+        return GspOutcome::NotFound;
+    }
+
+    // Extract props
+    if let Some(props) = val.get("props") {
+        GspOutcome::Props(serde_json::to_string(props).unwrap_or_else(|_| "{}".into()))
+    } else {
+        GspOutcome::Props("{}".to_string())
     }
 }
 
@@ -146,18 +206,6 @@ fn assemble_static_html(
     format!("{shell}{tail}")
 }
 
-/// Convert a route pattern like "/" or "/about" to a module name like "index" or "about".
-///
-/// Module names are how pages are registered in the V8 `__rex_pages` object.
-fn pattern_to_module_name(pattern: &str) -> String {
-    let trimmed = pattern.trim_start_matches('/');
-    if trimmed.is_empty() {
-        "index".to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -165,44 +213,74 @@ mod tests {
     use rex_core::DataStrategy;
 
     #[test]
-    fn pattern_to_module_name_root() {
-        assert_eq!(pattern_to_module_name("/"), "index");
-    }
-
-    #[test]
-    fn pattern_to_module_name_path() {
-        assert_eq!(pattern_to_module_name("/about"), "about");
-    }
-
-    #[test]
-    fn pattern_to_module_name_nested() {
-        assert_eq!(pattern_to_module_name("/blog/posts"), "blog/posts");
-    }
-
-    #[test]
-    fn extract_props_with_props_key() {
+    fn parse_gsp_result_with_props() {
         let json = r#"{"props":{"title":"Hello","count":42}}"#;
-        let result = extract_props_from_gsp(json);
-        let val: serde_json::Value = serde_json::from_str(&result).unwrap();
-        assert_eq!(val["title"], "Hello");
-        assert_eq!(val["count"], 42);
+        match parse_gsp_result(json) {
+            GspOutcome::Props(props) => {
+                let val: serde_json::Value = serde_json::from_str(&props).unwrap();
+                assert_eq!(val["title"], "Hello");
+                assert_eq!(val["count"], 42);
+            }
+            other => panic!("Expected Props, got {other:?}"),
+        }
     }
 
     #[test]
-    fn extract_props_missing_props_key() {
-        let json = r#"{"data":"something"}"#;
-        assert_eq!(extract_props_from_gsp(json), "{}");
+    fn parse_gsp_result_missing_props_key() {
+        assert_eq!(
+            parse_gsp_result(r#"{"data":"something"}"#),
+            GspOutcome::Props("{}".to_string())
+        );
     }
 
     #[test]
-    fn extract_props_invalid_json() {
-        assert_eq!(extract_props_from_gsp("not json"), "{}");
+    fn parse_gsp_result_invalid_json() {
+        assert_eq!(
+            parse_gsp_result("not json"),
+            GspOutcome::Props("{}".to_string())
+        );
     }
 
     #[test]
-    fn extract_props_empty_props() {
-        let json = r#"{"props":{}}"#;
-        assert_eq!(extract_props_from_gsp(json), "{}");
+    fn parse_gsp_result_empty_props() {
+        assert_eq!(
+            parse_gsp_result(r#"{"props":{}}"#),
+            GspOutcome::Props("{}".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_gsp_result_redirect() {
+        let json = r#"{"redirect":{"destination":"/login","permanent":false}}"#;
+        assert_eq!(
+            parse_gsp_result(json),
+            GspOutcome::Redirect {
+                destination: "/login".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn parse_gsp_result_redirect_default_destination() {
+        let json = r#"{"redirect":{}}"#;
+        assert_eq!(
+            parse_gsp_result(json),
+            GspOutcome::Redirect {
+                destination: "/".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn parse_gsp_result_not_found() {
+        let json = r#"{"notFound":true}"#;
+        assert_eq!(parse_gsp_result(json), GspOutcome::NotFound);
+    }
+
+    #[test]
+    fn parse_gsp_result_not_found_false_returns_empty_props() {
+        let json = r#"{"notFound":false}"#;
+        assert_eq!(parse_gsp_result(json), GspOutcome::Props("{}".to_string()));
     }
 
     #[test]

@@ -258,6 +258,7 @@ impl Rex {
             crate::prerender::prerender_static_pages(
                 &pool,
                 &manifest,
+                &scan.routes,
                 &manifest_json,
                 document_descriptor.as_ref(),
             )
