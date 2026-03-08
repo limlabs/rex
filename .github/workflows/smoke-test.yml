@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        fixture: [basic, tailwind, mcp, app-router, custom-server, railway]
+        fixture: [basic, tailwind, mcp, app-router, custom-server]
     steps:
       - uses: actions/checkout@v4
 

@@ -371,7 +371,7 @@ jobs:
 
   deploy-railway:
     name: Deploy to Railway
-    needs: [release-please, smoke-test]
+    needs: [release-please, docker, smoke-test]
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
     runs-on: ubuntu-latest
     steps:
@@ -380,22 +380,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
 
-      - name: Rewrite Rex version for deployment
+      - name: Pin Rex version in Dockerfile
         run: |
           VERSION="${TAG#v}"
-          cd fixtures/railway
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            for (const section of ['dependencies', 'devDependencies']) {
-              if (pkg[section] && pkg[section]['@limlabs/rex']) {
-                pkg[section]['@limlabs/rex'] = '${VERSION}';
-              }
-            }
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
+          sed -i "s|ARG REX_VERSION=latest|ARG REX_VERSION=$VERSION|" fixtures/railway/Dockerfile
         env:
           TAG: ${{ needs.release-please.outputs.tag_name }}
 

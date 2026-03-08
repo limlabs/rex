@@ -1,16 +1,16 @@
 import React from "react";
 
 interface Props {
+  message: string;
   timestamp: number;
-  region: string;
 }
 
-export default function Home({ timestamp, region }: Props) {
+export default function Home({ message, timestamp }: Props) {
   return (
     <div>
       <h1>Rex on Railway</h1>
-      <p>Server-rendered at: {new Date(timestamp).toISOString()}</p>
-      <p>Region: {region}</p>
+      <p>{message}</p>
+      <p>Rendered at: {new Date(timestamp).toISOString()}</p>
     </div>
   );
 }
@@ -18,8 +18,8 @@ export default function Home({ timestamp, region }: Props) {
 export async function getServerSideProps() {
   return {
     props: {
+      message: "Zero-config Rex — no package.json needed!",
       timestamp: Date.now(),
-      region: process.env.RAILWAY_REGION || "local",
     },
   };
 }

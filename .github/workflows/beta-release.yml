@@ -303,7 +303,7 @@ jobs:
 
   deploy-railway:
     name: Deploy to Railway (beta)
-    needs: [check-release-pr, smoke-test]
+    needs: [check-release-pr, docker, smoke-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -311,22 +311,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
 
-      - name: Rewrite Rex version for deployment
+      - name: Pin Rex version in Dockerfile
         run: |
           BETA_VERSION="${{ needs.check-release-pr.outputs.beta_version }}"
-          cd fixtures/railway
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            for (const section of ['dependencies', 'devDependencies']) {
-              if (pkg[section] && pkg[section]['@limlabs/rex']) {
-                pkg[section]['@limlabs/rex'] = '${BETA_VERSION}';
-              }
-            }
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
+          sed -i "s|ARG REX_VERSION=latest|ARG REX_VERSION=$BETA_VERSION|" fixtures/railway/Dockerfile
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli
