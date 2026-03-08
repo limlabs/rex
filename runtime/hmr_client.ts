@@ -164,10 +164,14 @@
       .then(function () {
         window.__REX_NAVIGATING__ = false;
 
-        // Fetch fresh GSSP data
+        // Fetch fresh GSSP data — validate build_id to prevent request forgery
+        const buildId = newManifest.build_id;
+        if (typeof buildId !== "string" || !/^[a-zA-Z0-9_-]+$/.test(buildId)) {
+          throw new Error("Invalid build_id in manifest");
+        }
         const dataUrl =
           "/_rex/data/" +
-          newManifest.build_id +
+          buildId +
           window.location.pathname +
           ".json";
         return fetch(dataUrl).then(function (res) {
