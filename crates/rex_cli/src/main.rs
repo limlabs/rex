@@ -1,9 +1,9 @@
 #[cfg(feature = "dev")]
 mod tui;
 
-use anyhow::Result;
 #[cfg(feature = "dev")]
 use anyhow::Context;
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 #[cfg(feature = "lint")]
 use rayon::prelude::*;
