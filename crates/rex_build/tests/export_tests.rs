@@ -39,6 +39,7 @@ async fn test_export_static_pages_creates_html_files() {
     let export_config = ExportConfig {
         output_dir: output_dir.clone(),
         force: false,
+        base_path: String::new(),
     };
 
     let ctx = ExportContext {
@@ -104,6 +105,7 @@ async fn test_export_creates_static_asset_dir() {
     let export_config = ExportConfig {
         output_dir: output_dir.clone(),
         force: false,
+        base_path: String::new(),
     };
 
     let ctx = ExportContext {
@@ -153,6 +155,7 @@ async fn test_export_cleans_output_on_rerun() {
     let export_config = ExportConfig {
         output_dir: output_dir.clone(),
         force: false,
+        base_path: String::new(),
     };
 
     let ctx = ExportContext {
@@ -238,6 +241,7 @@ fn test_export_config_output_dir() {
     let config = ExportConfig {
         output_dir: Path::new("/tmp/export").to_path_buf(),
         force: true,
+        base_path: String::new(),
     };
     assert!(config.force);
     assert_eq!(config.output_dir, Path::new("/tmp/export"));

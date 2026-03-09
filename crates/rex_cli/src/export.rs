@@ -10,7 +10,12 @@ use std::sync::Arc;
 use tracing::debug;
 
 /// Run the `rex export` command: build + pre-render all static pages to disk.
-pub async fn cmd_export(root: PathBuf, output: Option<PathBuf>, force: bool) -> Result<()> {
+pub async fn cmd_export(
+    root: PathBuf,
+    output: Option<PathBuf>,
+    force: bool,
+    base_path: String,
+) -> Result<()> {
     let root = std::fs::canonicalize(&root)?;
     let config = RexConfig::new(root);
     config.validate()?;
@@ -79,9 +84,22 @@ pub async fn cmd_export(root: PathBuf, output: Option<PathBuf>, force: bool) -> 
         std::fs::remove_dir_all(&output_dir)?;
     }
 
+    // Normalize base_path: strip trailing slash, ensure leading slash if non-empty
+    let base_path = if base_path.is_empty() {
+        String::new()
+    } else {
+        let bp = base_path.trim_end_matches('/');
+        if bp.starts_with('/') {
+            bp.to_string()
+        } else {
+            format!("/{bp}")
+        }
+    };
+
     let export_config = ExportConfig {
         output_dir: output_dir.clone(),
         force,
+        base_path,
     };
 
     let ctx = ExportContext {
