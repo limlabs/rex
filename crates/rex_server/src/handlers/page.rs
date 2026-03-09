@@ -536,7 +536,7 @@ pub(super) async fn page_handler_inner(
 ///
 /// Dispatches to the V8 runtime which calls the correct HTTP method export
 /// (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS) on the route module.
-async fn handle_app_route_handler(
+pub(super) async fn handle_app_route_handler(
     state: &Arc<AppState>,
     route_match: &rex_core::RouteMatch,
     method: &Method,

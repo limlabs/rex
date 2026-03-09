@@ -125,3 +125,50 @@ impl AppScanResult {
         self.api_routes.iter().map(|r| r.to_route()).collect()
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_api_route_to_route() {
+        let api = AppApiRoute {
+            pattern: "/api/hello".to_string(),
+            handler_path: PathBuf::from("/app/api/hello/route.ts"),
+            dynamic_segments: vec![],
+            specificity: 100,
+        };
+        let route = api.to_route();
+        assert_eq!(route.pattern, "/api/hello");
+        assert_eq!(route.page_type, crate::PageType::AppApi);
+        assert_eq!(route.file_path, PathBuf::from("route.ts"));
+    }
+
+    #[test]
+    fn to_api_routes_converts() {
+        let result = AppScanResult {
+            root: AppSegment {
+                segment: String::new(),
+                layout: None,
+                page: None,
+                route: None,
+                loading: None,
+                error_boundary: None,
+                not_found: None,
+                children: vec![],
+            },
+            routes: vec![],
+            api_routes: vec![AppApiRoute {
+                pattern: "/api/test".to_string(),
+                handler_path: PathBuf::from("/app/api/test/route.ts"),
+                dynamic_segments: vec![],
+                specificity: 100,
+            }],
+            root_layout: None,
+        };
+        let routes = result.to_api_routes();
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].pattern, "/api/test");
+    }
+}

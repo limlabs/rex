@@ -12,6 +12,62 @@ use std::fs;
 use std::path::Path;
 use tracing::{debug, info, info_span, Instrument};
 
+/// App route handler runtime for minimal server bundles (app-only projects).
+/// This is the JS equivalent of the relevant section in ssr-runtime.ts.
+const APP_ROUTE_HANDLER_RUNTIME: &str = r#"
+globalThis.__rex_call_app_route_handler = function(routePattern, reqJson) {
+    var handlers = globalThis.__rex_app_route_handlers;
+    if (!handlers) throw new Error('No app route handlers registered');
+    var routeModule = handlers[routePattern];
+    if (!routeModule) throw new Error('App route handler not found: ' + routePattern);
+    var reqData = JSON.parse(reqJson);
+    var method = (reqData.method || 'GET').toUpperCase();
+    var handlerFn = routeModule[method];
+    if (!handlerFn) {
+        var allowed = ['GET','HEAD','POST','PUT','DELETE','PATCH','OPTIONS'].filter(function(m) { return typeof routeModule[m] === 'function'; });
+        return JSON.stringify({ statusCode: 405, headers: { allow: allowed.join(', ') }, body: 'Method Not Allowed' });
+    }
+    var request = { method: method, url: reqData.url || '/', headers: reqData.headers || {},
+        json: function() { return typeof reqData.body === 'string' ? JSON.parse(reqData.body) : reqData.body; },
+        text: function() { return typeof reqData.body === 'string' ? reqData.body : JSON.stringify(reqData.body); },
+        nextUrl: { pathname: reqData.url || '/', searchParams: reqData.query || {} }
+    };
+    var context = { params: reqData.params || {} };
+    function serializeResponse(resp) {
+        if (resp && typeof resp === 'object') {
+            var sc = resp.status || resp.statusCode || 200;
+            var h = resp.headers || {};
+            var b = '';
+            if (resp.body !== undefined && resp.body !== null) b = typeof resp.body === 'string' ? resp.body : JSON.stringify(resp.body);
+            else if (resp._body !== undefined) b = resp._body;
+            return JSON.stringify({ statusCode: sc, headers: h, body: b });
+        }
+        return JSON.stringify({ statusCode: 200, headers: {}, body: String(resp || '') });
+    }
+    var result = handlerFn(request, context);
+    if (result && typeof result.then === 'function') {
+        globalThis.__rex_app_route_resolved = null;
+        globalThis.__rex_app_route_rejected = null;
+        result.then(function(v) { globalThis.__rex_app_route_resolved = v; }, function(e) { globalThis.__rex_app_route_rejected = e; });
+        return '__REX_APP_ROUTE_ASYNC__';
+    }
+    return serializeResponse(result);
+};
+globalThis.__rex_resolve_app_route = function() {
+    if (globalThis.__rex_app_route_rejected) throw globalThis.__rex_app_route_rejected;
+    if (globalThis.__rex_app_route_resolved !== null) {
+        var r = globalThis.__rex_app_route_resolved;
+        var sc = r.status || r.statusCode || 200;
+        var h = r.headers || {};
+        var b = '';
+        if (r.body !== undefined && r.body !== null) b = typeof r.body === 'string' ? r.body : JSON.stringify(r.body);
+        else if (r._body !== undefined) b = r._body;
+        return JSON.stringify({ statusCode: sc, headers: h, body: b });
+    }
+    throw new Error('App route handler promise did not resolve');
+};
+"#;
+
 // Re-exports for crate::rsc_bundler compatibility
 pub(crate) use crate::build_utils::runtime_client_dir;
 pub use crate::server_bundle::V8_POLYFILLS;
@@ -371,6 +427,8 @@ globalThis.__rex_resolve_api = function() {
                     "globalThis.__rex_app_route_handlers['{pattern}'] = __app_route{i};\n"
                 ));
             }
+            // Add the app route handler runtime (method dispatch, async support)
+            entry.push_str(APP_ROUTE_HANDLER_RUNTIME);
         }
     }
 

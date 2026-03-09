@@ -5,6 +5,12 @@
 // Prerequisites:
 //   - `cargo build` (debug) or `cargo build --release`
 //   - `cd fixtures/basic && npm install`
+//   - `cd fixtures/app-router && npm install`
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[path = "app_router_tests.rs"]
+mod app_router_tests;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]

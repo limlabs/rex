@@ -1,5 +1,5 @@
-export function GET(req: { url: string; query: Record<string, string> }) {
-  const name = req.query?.name || 'world';
+export function GET(req: { url: string; nextUrl: { searchParams: Record<string, string> } }) {
+  const name = req.nextUrl?.searchParams?.name || 'world';
   return {
     statusCode: 200,
     headers: { 'content-type': 'application/json' },
