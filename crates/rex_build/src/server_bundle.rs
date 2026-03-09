@@ -520,12 +520,41 @@ pub async fn build_server_bundle(
                     .to_string(),
             )],
         ),
+        // Node.js stream/web polyfill (re-exports Web Streams from globalThis)
+        (
+            "stream/web".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("stream-web.ts")
+                    .to_string_lossy()
+                    .to_string(),
+            )],
+        ),
+        (
+            "node:stream/web".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("stream-web.ts")
+                    .to_string_lossy()
+                    .to_string(),
+            )],
+        ),
         // Cloudflare sockets polyfill (TCP via Rust callbacks, used by pg-cloudflare)
         (
             "cloudflare:sockets".to_string(),
             vec![Some(
                 runtime_dir
                     .join("cloudflare-sockets.ts")
+                    .to_string_lossy()
+                    .to_string(),
+            )],
+        ),
+        // file-type stub (Node.js-only APIs not available in V8)
+        (
+            "file-type".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("file-type.ts")
                     .to_string_lossy()
                     .to_string(),
             )],

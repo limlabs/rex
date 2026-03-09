@@ -36,7 +36,11 @@ pub(crate) async fn build_rsc_ssr_bundle(
     fs::write(&entry_path, &entry_source)?;
 
     // Rex built-in aliases for SSR bundle (rex/link → client runtime, etc.)
-    let ssr_aliases = build_rex_aliases()?;
+    // Plus Node.js polyfill aliases for database drivers, crypto, etc.
+    let mut ssr_aliases = build_rex_aliases()?;
+    let runtime_dir = crate::build_utils::runtime_server_dir()?;
+    ssr_aliases.extend(crate::build_utils::node_polyfill_aliases(&runtime_dir));
+    ssr_aliases.extend(ctx.mdx_aliases.clone());
 
     let options = rolldown::BundlerOptions {
         input: Some(vec![rolldown::InputItem {
@@ -59,6 +63,7 @@ pub(crate) async fn build_rsc_ssr_bundle(
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(ssr_aliases),
             condition_names: Some(vec![
+                "workerd".to_string(),
                 "browser".to_string(),
                 "import".to_string(),
                 "default".to_string(),

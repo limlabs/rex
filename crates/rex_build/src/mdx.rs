@@ -197,6 +197,86 @@ fn patch_segment_mdx(
     }
 }
 
+/// Compile all `.mdx` files found anywhere in the project source directories.
+///
+/// This handles `.mdx` files imported by pages (e.g. `import Content from './markdown.mdx'`)
+/// that aren't themselves pages or layouts. Returns rolldown-compatible aliases
+/// mapping each `.mdx` file's absolute path to the compiled `.jsx` output.
+pub(crate) fn compile_all_mdx_files(
+    project_root: &Path,
+    output_dir: &Path,
+) -> Result<Vec<(String, Vec<Option<String>>)>> {
+    let temp_dir = output_dir.join("_mdx");
+    let options = mdx_options_for_project(project_root);
+    let mut aliases = Vec::new();
+
+    // Scan common source directories for .mdx files
+    let search_dirs = [
+        project_root.join("src"),
+        project_root.join("app"),
+        project_root.join("pages"),
+    ];
+
+    let mut mdx_files: Vec<PathBuf> = Vec::new();
+    for dir in &search_dirs {
+        if dir.exists() {
+            collect_mdx_files(dir, &mut mdx_files);
+        }
+    }
+
+    if mdx_files.is_empty() {
+        return Ok(aliases);
+    }
+
+    fs::create_dir_all(&temp_dir)?;
+
+    for source_path in &mdx_files {
+        let source = fs::read_to_string(source_path)?;
+        let compiled = compile_mdx_with_options(&source, &options)?;
+
+        let source_dir = source_path.parent().unwrap_or(Path::new("."));
+        let compiled = crate::css_modules::absolutize_relative_imports(&compiled, source_dir);
+
+        let hash = path_hash(source_path);
+        let stem = source_path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy();
+        let compiled_path = temp_dir.join(format!("{hash}_{stem}.jsx"));
+        fs::write(&compiled_path, &compiled)?;
+
+        debug!(
+            source = %source_path.display(),
+            compiled = %compiled_path.display(),
+            "Compiled MDX content file"
+        );
+
+        // Alias the original .mdx path → compiled .jsx path
+        aliases.push((
+            source_path.to_string_lossy().to_string(),
+            vec![Some(compiled_path.to_string_lossy().to_string())],
+        ));
+    }
+
+    Ok(aliases)
+}
+
+/// Recursively collect all `.mdx` files in a directory.
+fn collect_mdx_files(dir: &Path, results: &mut Vec<PathBuf>) {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_mdx_files(&path, results);
+        } else if is_mdx(&path) {
+            results.push(path);
+        }
+    }
+}
+
 fn is_mdx(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()) == Some("mdx")
 }

@@ -213,6 +213,60 @@ pub(crate) fn runtime_client_dir() -> Result<PathBuf> {
     crate::embedded_runtime::client_dir()
 }
 
+/// Node.js polyfill resolve aliases for server-side bundles.
+///
+/// Maps Node.js built-in modules (events, net, tls, dns, os, stream, etc.)
+/// and `cloudflare:sockets` to their server-side polyfill/stub implementations.
+/// Used by both the pages-router server bundle and RSC server/SSR bundles.
+pub(crate) fn node_polyfill_aliases(runtime_dir: &Path) -> Vec<(String, Vec<Option<String>>)> {
+    let modules: &[(&str, &str)] = &[
+        ("fs", "fs.ts"),
+        ("node:fs", "fs.ts"),
+        ("fs/promises", "fs-promises.ts"),
+        ("node:fs/promises", "fs-promises.ts"),
+        ("path", "path.ts"),
+        ("node:path", "path.ts"),
+        ("buffer", "buffer.ts"),
+        ("node:buffer", "buffer.ts"),
+        ("crypto", "crypto.ts"),
+        ("node:crypto", "crypto.ts"),
+        ("events", "events.ts"),
+        ("node:events", "events.ts"),
+        ("net", "net.ts"),
+        ("node:net", "net.ts"),
+        ("tls", "tls.ts"),
+        ("node:tls", "tls.ts"),
+        ("dns", "dns.ts"),
+        ("node:dns", "dns.ts"),
+        ("os", "os.ts"),
+        ("node:os", "os.ts"),
+        ("stream", "stream.ts"),
+        ("node:stream", "stream.ts"),
+        ("string_decoder", "string_decoder.ts"),
+        ("node:string_decoder", "string_decoder.ts"),
+        ("util", "util.ts"),
+        ("node:util", "util.ts"),
+        ("url", "url-module.ts"),
+        ("node:url", "url-module.ts"),
+        ("stream/web", "stream-web.ts"),
+        ("node:stream/web", "stream-web.ts"),
+        ("cloudflare:sockets", "cloudflare-sockets.ts"),
+        // file-type stub — Node.js condition entry has fileTypeFromFile but
+        // causes issues with other packages. Provide stub for server bundles.
+        ("file-type", "file-type.ts"),
+    ];
+
+    modules
+        .iter()
+        .map(|(specifier, file)| {
+            (
+                specifier.to_string(),
+                vec![Some(runtime_dir.join(file).to_string_lossy().to_string())],
+            )
+        })
+        .collect()
+}
+
 /// Get the path to the server runtime files.
 /// These are embedded in the source tree at runtime/server/.
 pub fn runtime_server_dir() -> Result<PathBuf> {

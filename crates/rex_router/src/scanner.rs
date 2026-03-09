@@ -138,8 +138,13 @@ pub fn scan_project(
     };
     scan.middleware = find_middleware(project_root);
 
-    // Scan app/ directory for RSC routes
-    if let Some(app_scan) = crate::app_scanner::scan_app(app_dir)? {
+    // Scan app/ directory for RSC routes (check root then src/)
+    let app_dir = if project_root.join("app").exists() {
+        project_root.join("app")
+    } else {
+        project_root.join("src").join("app")
+    };
+    if let Some(app_scan) = crate::app_scanner::scan_app(&app_dir)? {
         debug!(routes = app_scan.routes.len(), "App router routes scanned");
         scan.app_scan = Some(app_scan);
     }

@@ -43,12 +43,15 @@ pub(crate) async fn build_rsc_server_bundle(
     let entry_path = entries_dir.join("rsc-server-entry.ts");
     fs::write(&entry_path, &entry_source)?;
 
-    // Build aliases: rex/* built-ins + "use client" module stubs.
+    // Build aliases: rex/* built-ins + Node.js polyfills + "use client" module stubs.
     // Client reference stubs must take priority over rex server aliases.
     // e.g. rex/link has "use client" — its stub (a reference object) must win
     // over the server alias (plain <a>) so the flight data contains a client
     // reference and the client can hydrate with the interactive Link component.
     let mut aliases = build_rex_server_aliases()?;
+    let runtime_dir = crate::build_utils::runtime_server_dir()?;
+    aliases.extend(crate::build_utils::node_polyfill_aliases(&runtime_dir));
+    aliases.extend(ctx.mdx_aliases.clone());
     let stub_keys: std::collections::HashSet<String> = stub_aliases
         .iter()
         .map(|(p, _)| p.to_string_lossy().to_string())
@@ -87,6 +90,7 @@ pub(crate) async fn build_rsc_server_bundle(
             alias: Some(aliases),
             condition_names: Some(vec![
                 "react-server".to_string(),
+                "workerd".to_string(),
                 "browser".to_string(),
                 "import".to_string(),
                 "default".to_string(),
