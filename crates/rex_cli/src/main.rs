@@ -1,3 +1,5 @@
+#[cfg(feature = "build")]
+mod export;
 #[cfg(feature = "dev")]
 mod tui;
 
@@ -63,6 +65,22 @@ enum Commands {
         /// Project root directory
         #[arg(long, default_value = ".")]
         root: PathBuf,
+    },
+
+    /// Export a static site (pre-render all pages to HTML)
+    #[cfg(feature = "build")]
+    Export {
+        /// Project root directory
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+
+        /// Output directory (default: .rex/export)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Continue even if some pages can't be statically exported
+        #[arg(long)]
+        force: bool,
     },
 
     /// Start the production server
@@ -195,6 +213,15 @@ async fn main() -> Result<()> {
         Commands::Build { root } => {
             init_plain_tracing();
             cmd_build(root).await
+        }
+        #[cfg(feature = "build")]
+        Commands::Export {
+            root,
+            output,
+            force,
+        } => {
+            init_plain_tracing();
+            export::cmd_export(root, output, force).await
         }
         Commands::Start { port, host, root } => {
             init_plain_tracing();

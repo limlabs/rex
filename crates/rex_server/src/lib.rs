@@ -1,6 +1,7 @@
 pub mod core;
 mod core_handlers;
 pub mod document;
+pub mod export;
 pub mod handlers;
 pub mod mcp;
 pub mod prerender;

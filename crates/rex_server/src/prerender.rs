@@ -154,38 +154,18 @@ pub async fn prerender_static_app_routes(
         // Static app routes have no params and no searchParams
         let props_json = serde_json::json!({ "params": {}, "searchParams": {} }).to_string();
 
-        // Render flight data for client-side navigation
-        let flight_key = route_key.clone();
-        let flight_props = props_json.clone();
-        let flight_data = match pool
-            .execute(move |iso| iso.render_rsc_flight(&flight_key, &flight_props))
-            .await
-        {
-            Ok(Ok(data)) => data,
-            Ok(Err(e)) => {
-                warn!(pattern, error = %e, "RSC flight render failed, skipping pre-render");
-                continue;
-            }
-            Err(e) => {
-                warn!(pattern, error = %e, "Pool error during RSC flight render");
-                continue;
-            }
-        };
-
-        // Render full HTML via two-pass RSC render (flight -> HTML)
-        let html_key = route_key.clone();
-        let html_props = props_json.clone();
+        // Single render pass: render_rsc_to_html returns HTML + flight data together
         let rsc_result = match pool
-            .execute(move |iso| iso.render_rsc_to_html(&html_key, &html_props))
+            .execute(move |iso| iso.render_rsc_to_html(&route_key, &props_json))
             .await
         {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {
-                warn!(pattern, error = %e, "RSC HTML render failed, skipping pre-render");
+                warn!(pattern, error = %e, "RSC render failed, skipping pre-render");
                 continue;
             }
             Err(e) => {
-                warn!(pattern, error = %e, "Pool error during RSC HTML render");
+                warn!(pattern, error = %e, "Pool error during RSC render");
                 continue;
             }
         };
@@ -203,14 +183,14 @@ pub async fn prerender_static_app_routes(
         debug!(
             pattern,
             html_bytes = html.len(),
-            flight_bytes = flight_data.len(),
+            flight_bytes = rsc_result.flight.len(),
             "Pre-rendered static app route"
         );
         prerendered.insert(
             pattern.clone(),
             PrerenderedAppRoute {
                 html,
-                flight: flight_data,
+                flight: rsc_result.flight,
             },
         );
     }

@@ -37,6 +37,7 @@ impl IsolatePool {
 
             let handle = thread::Builder::new()
                 .name(format!("rex-v8-isolate-{i}"))
+                .stack_size(16 * 1024 * 1024) // 16 MB — needed for deeply nested React trees (e.g. large MDX pages)
                 .spawn(move || {
                     // Initialize V8 on this thread (safe to call multiple times)
                     crate::init_v8();
