@@ -83,6 +83,10 @@ enum Commands {
         /// Continue even if some pages can't be statically exported
         #[arg(long)]
         force: bool,
+
+        /// Base path prefix for asset URLs (e.g. "/rex" for GitHub Pages)
+        #[arg(long, default_value = "")]
+        base_path: String,
     },
 
     /// Start the production server
@@ -221,9 +225,10 @@ async fn main() -> Result<()> {
             root,
             output,
             force,
+            base_path,
         } => {
             init_plain_tracing();
-            export::cmd_export(root, output, force).await
+            export::cmd_export(root, output, force, base_path).await
         }
         Commands::Start { port, host, root } => {
             init_plain_tracing();

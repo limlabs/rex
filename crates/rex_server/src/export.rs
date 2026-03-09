@@ -11,6 +11,8 @@ pub struct ExportConfig {
     pub output_dir: PathBuf,
     /// Continue exporting even if some pages can't be statically rendered.
     pub force: bool,
+    /// Base path prefix for asset URLs (e.g. "/rex" for GitHub Pages at user.github.io/rex/).
+    pub base_path: String,
 }
 
 /// Result of a static export.
@@ -124,7 +126,8 @@ pub async fn export_site(
 
     for (pattern, html) in &prerendered_pages {
         let file_path = route_to_file_path(output, pattern);
-        write_html_file(&file_path, html)?;
+        let html = rewrite_asset_paths(html, &config.base_path);
+        write_html_file(&file_path, &html)?;
         debug!(pattern, path = %file_path.display(), "Exported page");
         result.pages_exported += 1;
     }
@@ -150,7 +153,8 @@ pub async fn export_site(
 
     for (pattern, rendered) in &prerendered_app {
         let file_path = route_to_file_path(output, pattern);
-        write_html_file(&file_path, &rendered.html)?;
+        let html = rewrite_asset_paths(&rendered.html, &config.base_path);
+        write_html_file(&file_path, &html)?;
         debug!(pattern, path = %file_path.display(), "Exported app route");
         result.pages_exported += 1;
     }
@@ -166,22 +170,14 @@ pub async fn export_site(
     }
 
     // 3. Export custom 404 page if it exists
-    export_404_page(
-        ctx.pool,
-        ctx.manifest,
-        ctx.routes,
-        ctx.manifest_json,
-        ctx.doc_descriptor,
-        output,
-        &mut result,
-    )
-    .await;
+    export_404_page(ctx, config, &mut result).await;
 
     // 4. Copy client assets from .rex/build/client/ → output/_rex/static/
     copy_client_assets(ctx.client_build_dir, &static_dir)?;
 
-    // 5. Write router.js
+    // 5. Write router.js (with base_path rewritten)
     let router_js = include_str!(concat!(env!("OUT_DIR"), "/router.js"));
+    let router_js = rewrite_asset_paths(router_js, &config.base_path);
     std::fs::write(output.join("_rex").join("router.js"), router_js)?;
     debug!("Wrote _rex/router.js");
 
@@ -205,23 +201,19 @@ pub async fn export_site(
 ///
 /// GitHub Pages and most static hosts serve `404.html` for missing routes.
 async fn export_404_page(
-    pool: &IsolatePool,
-    manifest: &AssetManifest,
-    routes: &[Route],
-    manifest_json: &str,
-    doc_descriptor: Option<&DocumentDescriptor>,
-    output: &Path,
+    ctx: &ExportContext<'_>,
+    config: &ExportConfig,
     result: &mut ExportResult,
 ) {
     // Check if a 404 page exists in the manifest
-    let not_found_pattern = routes.iter().find(|r| r.pattern == "/404");
+    let not_found_pattern = ctx.routes.iter().find(|r| r.pattern == "/404");
     if not_found_pattern.is_none() {
         return;
     }
 
     // The 404 page is typically already in prerendered pages (it's static).
     // If not, try to render it directly.
-    let assets = match manifest.pages.get("/404") {
+    let assets = match ctx.manifest.pages.get("/404") {
         Some(a) if a.render_mode == RenderMode::Static => a,
         _ => return,
     };
@@ -236,7 +228,11 @@ async fn export_404_page(
 
     let key = route_key.clone();
     let props = props_json.clone();
-    let render_result = match pool.execute(move |iso| iso.render_page(&key, &props)).await {
+    let render_result = match ctx
+        .pool
+        .execute(move |iso| iso.render_page(&key, &props))
+        .await
+    {
         Ok(Ok(r)) => r,
         Ok(Err(e)) => {
             warn!(error = %e, "Failed to render 404 page for export");
@@ -249,30 +245,30 @@ async fn export_404_page(
     };
 
     let client_scripts: Vec<String> = vec![assets.js.clone()];
-    let mut css_files = manifest.global_css.clone();
+    let mut css_files = ctx.manifest.global_css.clone();
     css_files.extend(assets.css.iter().cloned());
 
     let shell = crate::document::assemble_head_shell(
         &css_files,
-        &manifest.css_contents,
-        &manifest.shared_chunks,
-        manifest.app_script.as_deref(),
+        &ctx.manifest.css_contents,
+        &ctx.manifest.shared_chunks,
+        ctx.manifest.app_script.as_deref(),
         &client_scripts,
-        doc_descriptor,
-        &manifest.font_preloads,
+        ctx.doc_descriptor,
+        &ctx.manifest.font_preloads,
     );
     let tail = crate::document::assemble_body_tail(
         &render_result.body,
         &render_result.head,
         &props_json,
         &client_scripts,
-        manifest.app_script.as_deref(),
+        ctx.manifest.app_script.as_deref(),
         false,
-        Some(manifest_json),
+        Some(ctx.manifest_json),
     );
-    let html = format!("{shell}{tail}");
+    let html = rewrite_asset_paths(&format!("{shell}{tail}"), &config.base_path);
 
-    let path = output.join("404.html");
+    let path = config.output_dir.join("404.html");
     if let Err(e) = std::fs::write(&path, &html) {
         warn!(error = %e, "Failed to write 404.html");
     } else {
@@ -313,6 +309,17 @@ fn copy_client_assets(client_build_dir: &Path, static_dir: &Path) -> anyhow::Res
         "Copied client assets"
     );
     Ok(())
+}
+
+/// Rewrite `/_rex/` asset paths in HTML/JS content to include the base path prefix.
+///
+/// When `base_path` is empty, returns the input unchanged.
+/// When `base_path` is e.g. "/rex", rewrites `/_rex/` → `/rex/_rex/`.
+fn rewrite_asset_paths(content: &str, base_path: &str) -> String {
+    if base_path.is_empty() {
+        return content.to_string();
+    }
+    content.replace("/_rex/", &format!("{base_path}/_rex/"))
 }
 
 /// Recursively copy a directory's contents into a destination directory.
@@ -412,5 +419,30 @@ mod tests {
         assert!(path.exists());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "<html></html>");
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn rewrite_asset_paths_empty_base() {
+        let html = r#"<script src="/_rex/static/app.js"></script>"#;
+        assert_eq!(rewrite_asset_paths(html, ""), html);
+    }
+
+    #[test]
+    fn rewrite_asset_paths_with_base() {
+        let html =
+            r#"<link href="/_rex/static/style.css" /><script src="/_rex/router.js"></script>"#;
+        let result = rewrite_asset_paths(html, "/rex");
+        assert!(result.contains(r#"href="/rex/_rex/static/style.css""#));
+        assert!(result.contains(r#"src="/rex/_rex/router.js""#));
+    }
+
+    #[test]
+    fn rewrite_asset_paths_multiple_occurrences() {
+        let html = "/_rex/static/a.js /_rex/static/b.js /_rex/data/c.json";
+        let result = rewrite_asset_paths(html, "/docs");
+        assert_eq!(
+            result,
+            "/docs/_rex/static/a.js /docs/_rex/static/b.js /docs/_rex/data/c.json"
+        );
     }
 }

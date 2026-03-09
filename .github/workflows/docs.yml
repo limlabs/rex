@@ -34,7 +34,7 @@ jobs:
         run: cargo build -p rex_cli --no-default-features --features build --release
 
       - name: Export docs site
-        run: ../target/release/rex export --force
+        run: ../target/release/rex export --force --base-path /rex
         working-directory: docs
 
       - name: Upload artifact
