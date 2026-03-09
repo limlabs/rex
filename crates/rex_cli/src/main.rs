@@ -21,8 +21,10 @@ use std::path::PathBuf;
 use std::process::Command;
 #[cfg(feature = "lint")]
 use std::sync::atomic::{AtomicUsize, Ordering};
-#[cfg(any(feature = "build", feature = "dev"))]
-use tracing::{debug, info};
+#[cfg(feature = "build")]
+use tracing::debug;
+#[cfg(feature = "dev")]
+use tracing::info;
 #[cfg(feature = "dev")]
 use tracing_subscriber::layer::SubscriberExt;
 #[cfg(feature = "dev")]
