@@ -22,13 +22,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
-          node-version: "20"
-
-      - name: Install Rex
-        run: npm install
-        working-directory: packages/rex
+          save-cache: "true"
 
       - name: Install docs dependencies
         run: npm install

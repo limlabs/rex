@@ -51,11 +51,11 @@ export default function Home() {
         />
         <Card
           title="Batteries Included"
-          description="Built-in auth, linting, formatting, and MCP server support out of the box."
+          description="Built-in linting, formatting, type checking, and MCP server support out of the box."
         />
         <Card
           title="Light Footprint"
-          description="Single binary deployment. No node_modules on the server. Docker images under 50MB."
+          description="Single binary deployment. No node_modules on the server. Compact Docker images."
         />
       </div>
     </div>

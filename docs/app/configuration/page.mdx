@@ -1,6 +1,8 @@
 # Configuration
 
-Rex is configured via `rex.config.toml` in your project root. All fields are optional.
+Rex is configured via `rex.config.toml` or `rex.config.json` in your project root. Both formats are supported — use whichever you prefer. All fields are optional.
+
+> If both `rex.config.toml` and `rex.config.json` exist, Rex will report an error. Use one or the other.
 
 ## Redirects
 
@@ -76,9 +78,46 @@ source = "/api/:path*"
 | `source` | string | URL pattern to match |
 | `headers` | array | List of `{ key, value }` pairs |
 
+## Build
+
+Configure the build pipeline:
+
+```toml
+[build]
+sourcemap = true
+
+[build.alias]
+"@components" = "./src/components"
+"@lib" = "./src/lib"
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `build.sourcemap` | boolean | `true` | Generate source maps |
+| `build.alias` | object | `{}` | Module path aliases for import resolution |
+
+## Dev
+
+Configure development mode:
+
+```toml
+[dev]
+no_tui = false
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `dev.no_tui` | boolean | `false` | Disable TUI, use plain log output |
+
 ## Full example
 
 ```toml
+[build]
+sourcemap = true
+
+[build.alias]
+"@components" = "./src/components"
+
 [[redirects]]
 source = "/legacy"
 destination = "/"

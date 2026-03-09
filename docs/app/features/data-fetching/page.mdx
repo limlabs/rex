@@ -12,6 +12,9 @@ import React from "react";
 export async function getServerSideProps(context: {
   params: Record<string, string>;
   query: Record<string, string>;
+  resolvedUrl: string;
+  headers: Record<string, string>;
+  cookies: Record<string, string>;
 }) {
   const res = await fetch("https://api.example.com/data");
   const data = await res.json();
@@ -32,6 +35,9 @@ export default function Page({ data }: { data: any }) {
 |-------|------|-------------|
 | `params` | `Record<string, string>` | Dynamic route parameters |
 | `query` | `Record<string, string>` | URL query string parameters |
+| `resolvedUrl` | `string` | The resolved URL after rewrites |
+| `headers` | `Record<string, string>` | Request headers |
+| `cookies` | `Record<string, string>` | Request cookies |
 
 ### Return values
 
@@ -48,7 +54,7 @@ return { notFound: true };
 
 ## getStaticProps
 
-Runs at **build time**. The page is pre-rendered to static HTML and served from cache.
+Runs at **server startup**. The page is pre-rendered to static HTML and served from cache.
 
 ```tsx
 import React from "react";

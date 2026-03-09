@@ -22,7 +22,7 @@ Rex aims for API compatibility with Next.js while making different architectural
 | Edge Runtime | Rex uses V8 isolates, not edge workers |
 | i18n routing | Not yet implemented |
 | ISR (Incremental Static Regeneration) | Static pages are built once at build time |
-| Image Optimization API | Use standard `<img>` or a CDN |
+| Image Optimization API | Partial — `rex/image` provides `<Image>` with srcSet and blur placeholders, but not all `next/image` options are supported |
 | Built-in caching layer | No opaque fetch cache — data fetching is explicit |
 | `next/font` local loading | Use `rex/font/google` for Google Fonts |
 

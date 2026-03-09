@@ -7,27 +7,29 @@ Middleware runs before every request, letting you modify the request or response
 Create a `middleware.ts` file in your project root:
 
 ```tsx
-import type { RexRequest, RexResponse } from "@limlabs/rex";
+import { NextResponse } from "@limlabs/rex/middleware";
+import type { NextRequest } from "@limlabs/rex/middleware";
 
-export function middleware(request: RexRequest) {
+export function middleware(request: NextRequest) {
   // Add a custom header to every response
-  const response = RexResponse.next();
-  response.headers.set("x-powered-by", "rex");
-  return response;
+  return NextResponse.next({
+    headers: { "x-powered-by": "rex" },
+  });
 }
 ```
 
 ## Redirects
 
 ```tsx
-export function middleware(request: RexRequest) {
-  const url = new URL(request.url);
+import { NextResponse } from "@limlabs/rex/middleware";
+import type { NextRequest } from "@limlabs/rex/middleware";
 
-  if (url.pathname === "/old-page") {
-    return RexResponse.redirect(new URL("/new-page", request.url));
+export function middleware(request: NextRequest) {
+  if (request.nextUrl.pathname === "/old-page") {
+    return NextResponse.redirect(new URL("/new-page", request.url));
   }
 
-  return RexResponse.next();
+  return NextResponse.next();
 }
 ```
 
@@ -36,17 +38,20 @@ export function middleware(request: RexRequest) {
 By default, middleware runs on every route. Use the `config` export to limit which routes it applies to:
 
 ```tsx
+import { NextResponse } from "@limlabs/rex/middleware";
+import type { NextRequest } from "@limlabs/rex/middleware";
+
 export const config = {
   matcher: ["/dashboard/:path*", "/api/:path*"],
 };
 
-export function middleware(request: RexRequest) {
+export function middleware(request: NextRequest) {
   // Only runs for /dashboard/* and /api/* routes
-  const token = request.headers.get("authorization");
+  const token = request.headers["authorization"];
   if (!token) {
-    return RexResponse.redirect(new URL("/login", request.url));
+    return NextResponse.redirect(new URL("/login", request.url));
   }
-  return RexResponse.next();
+  return NextResponse.next();
 }
 ```
 

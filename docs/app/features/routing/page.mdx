@@ -2,9 +2,11 @@
 
 Rex supports two routing modes: the **Pages Router** and the **App Router**. Both use file-system conventions to define routes.
 
+Both routers support a `src/` directory prefix — you can use `src/pages/` instead of `pages/`, or `src/app/` instead of `app/`. Rex auto-detects which layout your project uses.
+
 ## Pages Router
 
-Place files in the `pages/` directory. Each file becomes a route:
+Place files in the `pages/` (or `src/pages/`) directory. Each file becomes a route:
 
 ```
 pages/
@@ -55,7 +57,7 @@ The `path` param is an array of strings: `["a", "b", "c"]`.
 
 ## App Router
 
-Place files in the `app/` directory using the nested layout convention:
+Place files in the `app/` (or `src/app/`) directory using the nested layout convention:
 
 ```
 app/

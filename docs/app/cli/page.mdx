@@ -2,6 +2,23 @@
 
 Rex provides a command-line interface for development, building, and running your application.
 
+## rex init
+
+Create a new Rex project.
+
+```bash
+rex init <name>
+```
+
+Scaffolds a new project directory with a basic page, `package.json`, and `tsconfig.json`.
+
+```bash
+rex init my-app
+cd my-app
+npm install
+rex dev
+```
+
 ## rex dev
 
 Start the development server with hot module replacement (HMR).
@@ -12,13 +29,15 @@ rex dev [options]
 
 | Option | Description |
 |--------|-------------|
-| `--port <port>` | Port to listen on (default: 3000) |
+| `--port <port>`, `-p` | Port to listen on (default: 3000) |
+| `--host <addr>`, `-H` | Host to bind to (default: 127.0.0.1) |
 | `--root <path>` | Project root directory (default: current directory) |
+| `--no-tui` | Disable TUI, use plain log output |
 
 The dev server watches your files and automatically rebuilds when you make changes. HMR updates are pushed to the browser over a WebSocket connection — no full page reload needed for most changes.
 
 ```bash
-rex dev --port 8080
+rex dev --port 8080 --host 0.0.0.0
 ```
 
 ## rex build
@@ -54,38 +73,56 @@ rex start [options]
 
 | Option | Description |
 |--------|-------------|
-| `--port <port>` | Port to listen on (default: 3000) |
+| `--port <port>`, `-p` | Port to listen on (default: 3000) |
+| `--host <addr>`, `-H` | Host to bind to (default: 0.0.0.0) |
 | `--root <path>` | Project root directory |
 
 Requires `rex build` to have been run first. Static pages are pre-rendered at startup for zero-latency serving.
+
+> Note: `rex start` defaults to `0.0.0.0` (all interfaces) while `rex dev` defaults to `127.0.0.1` (localhost only).
 
 ## rex typecheck
 
 Run the TypeScript compiler to check for type errors.
 
 ```bash
-rex typecheck
+rex typecheck [options] [-- <tsc args>]
 ```
 
-Runs `tsc --noEmit` against your project. No TypeScript configuration needed beyond `tsconfig.json`.
+| Option | Description |
+|--------|-------------|
+| `--root <path>` | Project root directory |
+
+Runs `tsc --noEmit` against your project. Additional arguments are passed through to `tsc`.
 
 ## rex lint
 
 Run the linter on your TypeScript and JavaScript files.
 
 ```bash
-rex lint
+rex lint [options] [paths...]
 ```
 
-Uses [OxLint](https://oxc.rs/docs/guide/usage/linter) for fast, zero-config linting. No ESLint setup required.
+| Option | Description |
+|--------|-------------|
+| `--root <path>` | Project root directory |
+| `--fix` | Auto-fix fixable problems |
+| `--deny-warnings` | Treat warnings as errors |
+
+Uses [OxLint](https://oxc.rs/docs/guide/usage/linter) for fast, zero-config linting. No ESLint setup required. Optionally pass specific paths to lint.
 
 ## rex fmt
 
 Format your source files.
 
 ```bash
-rex fmt
+rex fmt [options]
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--root <path>` | Project root directory |
+| `--check` | Check formatting without writing (exits with error if unformatted) |
 
 Formats TypeScript, JavaScript, CSS, and JSON files.
 
@@ -94,4 +131,5 @@ Formats TypeScript, JavaScript, CSS, and JSON files.
 | Variable | Description |
 |----------|-------------|
 | `PORT` | Override the default port (same as `--port`) |
+| `HOST` | Override the default host (same as `--host`) |
 | `RUST_LOG` | Set log level — e.g., `RUST_LOG=rex=debug` for verbose output |
