@@ -1,0 +1,65 @@
+# Installation
+
+## npm
+
+The recommended way to install Rex:
+
+```bash
+npm install @limlabs/rex
+```
+
+This installs the Rex CLI and runtime. The CLI binary is platform-specific and downloaded automatically for your OS and architecture.
+
+### Supported platforms
+
+| OS | Architecture | Status |
+|----|-------------|--------|
+| macOS | x86_64 (Intel) | Supported |
+| macOS | aarch64 (Apple Silicon) | Supported |
+| Linux | x86_64 | Supported |
+| Linux | aarch64 | Supported |
+
+### Prerequisites
+
+- **Node.js 18+** — required for `npm install` and fixture setup
+- **React 18 or 19** — React 19 is recommended for Server Components support; React 18 works for Pages Router
+
+## Docker
+
+Rex provides an official Docker image for containerized deployments:
+
+```bash
+docker pull ghcr.io/limlabs/rex:latest
+```
+
+Or use the Dockerfile included in your project:
+
+```dockerfile
+FROM ghcr.io/limlabs/rex:latest
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+RUN rex build
+CMD ["rex", "start"]
+```
+
+See [Deployment](/deployment) for full Docker and cloud deployment guides.
+
+## From source
+
+For development or custom builds:
+
+```bash
+git clone https://github.com/limlabs/rex.git
+cd rex
+cargo build --release
+```
+
+The binary is built to `target/release/rex`. You'll need Rust 1.75+ and a C++ compiler for the V8 build.
+
+## Verify installation
+
+```bash
+npx rex --version
+```

@@ -112,23 +112,34 @@ function _assembleChunks(): string {
 }
 
 function _startReading(reader: ReadableStreamDefaultReader<Uint8Array>): void {
+    // Trampoline pattern: avoids stack overflow when promises resolve synchronously
+    // (which happens in bare V8 where queueMicrotask/setTimeout call fn() immediately).
     function drain(): void {
-        reader.read().then(function(result: ReadableStreamReadResult<Uint8Array>) {
-            if (result.done) {
-                _streamDone = true;
-                _flightString = _assembleChunks();
-                if (_wantHtml) {
-                    _startHtmlPass();
+        let sync = true;
+        let loop = true;
+        while (loop) {
+            loop = false;
+            reader.read().then(function(result: ReadableStreamReadResult<Uint8Array>) {
+                if (result.done) {
+                    _streamDone = true;
+                    _flightString = _assembleChunks();
+                    if (_wantHtml) {
+                        _startHtmlPass();
+                    }
+                } else {
+                    _chunks.push(result.value);
+                    if (sync) {
+                        loop = true; // continue the while loop instead of recursing
+                    } else {
+                        drain(); // truly async — safe to recurse
+                    }
                 }
-            } else {
-                _chunks.push(result.value);
-                drain();
-            }
-        }, function(err: unknown) {
-            _streamDone = true;
-            // Encode error as flight data
-            _flightString = '0:{"error":' + JSON.stringify(String(err)) + '}\n';
-        });
+            }, function(err: unknown) {
+                _streamDone = true;
+                _flightString = '0:{"error":' + JSON.stringify(String(err)) + '}\n';
+            });
+        }
+        sync = false;
     }
     drain();
 }
@@ -323,25 +334,36 @@ function _storeActionResult(val: unknown): void {
         const reader = stream.getReader();
         const chunks: (string | Uint8Array)[] = [];
 
+        // Trampoline pattern: avoids stack overflow with sync promise resolution
         function drain(): void {
-            reader.read().then(function(result: ReadableStreamReadResult<Uint8Array>) {
-                if (result.done) {
-                    const decoder = new TextDecoder();
-                    const parts: string[] = [];
-                    for (let i = 0; i < chunks.length; i++) {
-                        const c = chunks[i];
-                        parts.push(typeof c === 'string' ? c : decoder.decode(c));
+            let sync = true;
+            let loop = true;
+            while (loop) {
+                loop = false;
+                reader.read().then(function(result: ReadableStreamReadResult<Uint8Array>) {
+                    if (result.done) {
+                        const decoder = new TextDecoder();
+                        const parts: string[] = [];
+                        for (let i = 0; i < chunks.length; i++) {
+                            const c = chunks[i];
+                            parts.push(typeof c === 'string' ? c : decoder.decode(c));
+                        }
+                        _actionResult = JSON.stringify({ flight: parts.join('') });
+                        _actionDone = true;
+                    } else {
+                        chunks.push(result.value);
+                        if (sync) {
+                            loop = true;
+                        } else {
+                            drain();
+                        }
                     }
-                    _actionResult = JSON.stringify({ flight: parts.join('') });
+                }, function(err: unknown) {
+                    _actionResult = JSON.stringify({ error: 'Flight serialization failed: ' + String(err) });
                     _actionDone = true;
-                } else {
-                    chunks.push(result.value);
-                    drain();
-                }
-            }, function(err: unknown) {
-                _actionResult = JSON.stringify({ error: 'Flight serialization failed: ' + String(err) });
-                _actionDone = true;
-            });
+                });
+            }
+            sync = false;
         }
         drain();
     } catch {

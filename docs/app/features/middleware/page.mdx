@@ -1,0 +1,66 @@
+# Middleware
+
+Middleware runs before every request, letting you modify the request or response, redirect users, or add headers.
+
+## Basic usage
+
+Create a `middleware.ts` file in your project root:
+
+```tsx
+import { NextResponse } from "@limlabs/rex/middleware";
+import type { NextRequest } from "@limlabs/rex/middleware";
+
+export function middleware(request: NextRequest) {
+  // Add a custom header to every response
+  return NextResponse.next({
+    headers: { "x-powered-by": "rex" },
+  });
+}
+```
+
+## Redirects
+
+```tsx
+import { NextResponse } from "@limlabs/rex/middleware";
+import type { NextRequest } from "@limlabs/rex/middleware";
+
+export function middleware(request: NextRequest) {
+  if (request.nextUrl.pathname === "/old-page") {
+    return NextResponse.redirect(new URL("/new-page", request.url));
+  }
+
+  return NextResponse.next();
+}
+```
+
+## Matchers
+
+By default, middleware runs on every route. Use the `config` export to limit which routes it applies to:
+
+```tsx
+import { NextResponse } from "@limlabs/rex/middleware";
+import type { NextRequest } from "@limlabs/rex/middleware";
+
+export const config = {
+  matcher: ["/dashboard/:path*", "/api/:path*"],
+};
+
+export function middleware(request: NextRequest) {
+  // Only runs for /dashboard/* and /api/* routes
+  const token = request.headers["authorization"];
+  if (!token) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+  return NextResponse.next();
+}
+```
+
+## Execution order
+
+Middleware runs after static file resolution but before page rendering:
+
+1. Static file check (public/ directory)
+2. **Middleware** executes
+3. Route matching
+4. Data fetching (getServerSideProps / getStaticProps)
+5. Page rendering (SSR)

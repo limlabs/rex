@@ -1,0 +1,68 @@
+# Custom Server
+
+Rex can be embedded into your own server, giving you full control over the HTTP layer while Rex handles routing, bundling, and SSR.
+
+## Node.js / Bun (NAPI)
+
+Rex provides NAPI bindings so you can use it from Node.js or Bun. The request handler uses the Web Fetch API (`Request`/`Response`):
+
+```ts
+import { createRex } from "@limlabs/rex/server";
+
+const rex = await createRex({ root: import.meta.dirname });
+const handle = rex.getRequestHandler();
+
+const server = Bun.serve({
+  port: 3000,
+  async fetch(req) {
+    const url = new URL(req.url);
+
+    // Add your own routes or middleware here
+    if (url.pathname === "/healthz") {
+      return new Response("ok");
+    }
+
+    // Let Rex handle everything else
+    return handle(req);
+  },
+});
+
+console.log(`Custom server listening on http://localhost:${server.port}`);
+```
+
+The `getRequestHandler()` returns a function with signature `(req: Request) => Promise<Response>`, using the standard Web Fetch API. This works natively with Bun and can be adapted for Node.js using a Fetch-compatible server.
+
+## Rust
+
+Embed Rex directly in your own Axum server for maximum performance:
+
+```rust
+use axum::{Router, routing::get};
+use rex_server::{Rex, RexOptions};
+
+#[tokio::main]
+async fn main() {
+    let rex = Rex::new(RexOptions {
+        root: "./my-app".into(),
+        ..Default::default()
+    }).await.unwrap();
+
+    let app = Router::new()
+        .route("/healthz", get(|| async { "ok" }))
+        .merge(rex.router());
+
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+        .await
+        .unwrap();
+    axum::serve(listener, app).await.unwrap();
+}
+```
+
+## When to use a custom server
+
+- Adding custom API endpoints alongside Rex pages
+- Integrating with existing services or middleware
+- Custom authentication or rate limiting at the HTTP layer
+- Health checks and observability endpoints for your infrastructure
+
+For most applications, `rex start` is sufficient. Use a custom server only when you need control that Rex's built-in server doesn't provide.

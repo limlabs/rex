@@ -1,0 +1,140 @@
+# Configuration
+
+Rex is configured via `rex.config.toml` or `rex.config.json` in your project root. Both formats are supported — use whichever you prefer. All fields are optional.
+
+> If both `rex.config.toml` and `rex.config.json` exist, Rex will report an error. Use one or the other.
+
+## Redirects
+
+Redirect one URL to another:
+
+```toml
+[[redirects]]
+source = "/old-page"
+destination = "/new-page"
+permanent = true
+
+[[redirects]]
+source = "/blog/:slug"
+destination = "/posts/:slug"
+permanent = false
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source` | string | URL pattern to match (supports `:param` segments) |
+| `destination` | string | URL to redirect to (can reference `:param` segments) |
+| `permanent` | boolean | `true` for 308, `false` for 307 |
+
+Redirects are evaluated before route matching.
+
+## Rewrites
+
+Serve content from a different path without changing the URL:
+
+```toml
+[[rewrites]]
+source = "/docs"
+destination = "/docs/getting-started"
+
+[[rewrites]]
+source = "/api/:path*"
+destination = "https://api.example.com/:path*"
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source` | string | URL pattern to match |
+| `destination` | string | Internal or external URL to serve |
+
+Rewrites are transparent to the user — the browser URL stays the same.
+
+## Headers
+
+Add custom HTTP headers to responses:
+
+```toml
+[[headers]]
+source = "/:path*"
+
+  [[headers.headers]]
+  key = "X-Frame-Options"
+  value = "DENY"
+
+  [[headers.headers]]
+  key = "X-Content-Type-Options"
+  value = "nosniff"
+
+[[headers]]
+source = "/api/:path*"
+
+  [[headers.headers]]
+  key = "Cache-Control"
+  value = "no-store"
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source` | string | URL pattern to match |
+| `headers` | array | List of `{ key, value }` pairs |
+
+## Build
+
+Configure the build pipeline:
+
+```toml
+[build]
+sourcemap = true
+
+[build.alias]
+"@components" = "./src/components"
+"@lib" = "./src/lib"
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `build.sourcemap` | boolean | `true` | Generate source maps |
+| `build.alias` | object | `{}` | Module path aliases for import resolution |
+
+## Dev
+
+Configure development mode:
+
+```toml
+[dev]
+no_tui = false
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `dev.no_tui` | boolean | `false` | Disable TUI, use plain log output |
+
+## Full example
+
+```toml
+[build]
+sourcemap = true
+
+[build.alias]
+"@components" = "./src/components"
+
+[[redirects]]
+source = "/legacy"
+destination = "/"
+permanent = true
+
+[[rewrites]]
+source = "/docs"
+destination = "/docs/getting-started"
+
+[[headers]]
+source = "/:path*"
+
+  [[headers.headers]]
+  key = "X-Powered-By"
+  value = "Rex"
+
+  [[headers.headers]]
+  key = "Strict-Transport-Security"
+  value = "max-age=63072000; includeSubDomains"
+```

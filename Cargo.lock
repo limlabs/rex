@@ -4262,6 +4262,7 @@ dependencies = [
  "rex_core",
  "rex_mdx",
  "rex_router",
+ "rex_server",
  "rex_v8",
  "rolldown",
  "rolldown_common",
