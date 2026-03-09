@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.0](https://github.com/limlabs/rex/compare/v0.12.0...v0.13.0) (2026-03-09)
+
+
+### Features
+
+* cargo feature flags for compile-time tree-shaking ([#127](https://github.com/limlabs/rex/issues/127)) ([f31013d](https://github.com/limlabs/rex/commit/f31013d0a45f7cd7e06cb2faa20dc372a62e5d6e))
+* **router:** support src/ directory and route-group-only layouts ([#132](https://github.com/limlabs/rex/issues/132)) ([fb1e6d4](https://github.com/limlabs/rex/commit/fb1e6d4d349a4b6abdcfd75130d1d2246b6f3180))
+
+
+### Bug Fixes
+
+* **build:** handle non-JS asset imports and wire app_dir correctly ([#134](https://github.com/limlabs/rex/issues/134)) ([191c240](https://github.com/limlabs/rex/commit/191c2407a26d11237e2a19bf8e4286defa88771a))
+* **router:** pass app_dir to scan_project instead of hardcoding ([#133](https://github.com/limlabs/rex/issues/133)) ([644574c](https://github.com/limlabs/rex/commit/644574c3a04bd03852fccd6eb1fbac00f45edf6b))
+
 ## [0.12.0](https://github.com/limlabs/rex/compare/v0.11.0...v0.12.0) (2026-03-08)
 
 
