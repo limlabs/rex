@@ -93,6 +93,19 @@ pub async fn handle_file_event(
                 .map(|app| RouteTrie::from_routes(&app.to_routes()))
                 .or_else(|| old_hot.app_route_trie.clone());
 
+            // Build app API route trie if route.ts files exist
+            let app_api_route_trie = scan
+                .app_scan
+                .as_ref()
+                .and_then(|app| {
+                    if app.api_routes.is_empty() {
+                        None
+                    } else {
+                        Some(RouteTrie::from_routes(&app.to_api_routes()))
+                    }
+                })
+                .or_else(|| old_hot.app_api_route_trie.clone());
+
             // Recompute document descriptor after reload
             let document_descriptor = if old_hot.has_custom_document {
                 handlers::compute_document_descriptor(&state.isolate_pool).await
@@ -126,6 +139,7 @@ pub async fn handle_file_event(
                 has_custom_document: old_hot.has_custom_document,
                 project_config: old_hot.project_config.clone(),
                 app_route_trie,
+                app_api_route_trie,
             });
 
             // Notify HMR clients with the new manifest
@@ -185,6 +199,15 @@ pub async fn handle_file_event(
                 .as_ref()
                 .map(|app| RouteTrie::from_routes(&app.to_routes()));
 
+            // Build app API route trie if route.ts files exist
+            let app_api_route_trie = scan.app_scan.as_ref().and_then(|app| {
+                if app.api_routes.is_empty() {
+                    None
+                } else {
+                    Some(RouteTrie::from_routes(&app.to_api_routes()))
+                }
+            });
+
             let has_custom_document = scan.document.is_some();
             let document_descriptor = if has_custom_document {
                 handlers::compute_document_descriptor(&state.isolate_pool).await
@@ -214,6 +237,7 @@ pub async fn handle_file_event(
                 manifest_json,
                 document_descriptor,
                 app_route_trie,
+                app_api_route_trie,
                 has_mcp_tools: !scan.mcp_tools.is_empty(),
                 // Dev mode: no pre-rendering
                 prerendered: std::collections::HashMap::new(),

@@ -21,6 +21,18 @@ pub(super) struct ApiResponse {
     body: String,
 }
 
+impl ApiResponse {
+    pub(super) fn status_code(&self) -> u16 {
+        self.status_code
+    }
+    pub(super) fn headers(&self) -> &HashMap<String, String> {
+        &self.headers
+    }
+    pub(super) fn body(&self) -> &str {
+        &self.body
+    }
+}
+
 /// API route handler - handles all HTTP methods for /api/* routes
 pub async fn api_handler(
     State(state): State<Arc<AppState>>,

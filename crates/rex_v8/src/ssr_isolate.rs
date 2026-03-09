@@ -42,6 +42,8 @@ pub struct SsrIsolate {
     pub(crate) server_action_encoded_fn: Option<v8::Global<v8::Function>>,
     /// Form action dispatch (uses decodeAction)
     pub(crate) form_action_fn: Option<v8::Global<v8::Function>>,
+    /// App router route handler dispatch (route.ts)
+    pub(crate) app_route_handler_fn: Option<v8::Global<v8::Function>>,
     /// Last successfully loaded bundle, used to restore state on failed reload.
     /// Uses `Arc<String>` to share memory across pool isolates instead of cloning.
     pub(crate) last_bundle: std::sync::Arc<String>,
@@ -73,6 +75,7 @@ impl SsrIsolate {
             server_action_fn,
             server_action_encoded_fn,
             form_action_fn,
+            app_route_handler_fn,
         ) = {
             v8::scope!(scope, &mut isolate);
 
@@ -190,6 +193,10 @@ impl SsrIsolate {
                 v8_get_optional_fn!(scope, global, "__rex_call_server_action_encoded");
             let form_action_fn = v8_get_optional_fn!(scope, global, "__rex_call_form_action");
 
+            // App router route handlers — only present when app/**/route.ts files exist
+            let app_route_handler_fn =
+                v8_get_optional_fn!(scope, global, "__rex_call_app_route_handler");
+
             (
                 v8::Global::new(scope, context),
                 v8::Global::new(scope, render_fn),
@@ -205,6 +212,7 @@ impl SsrIsolate {
                 server_action_fn,
                 server_action_encoded_fn,
                 form_action_fn,
+                app_route_handler_fn,
             )
         };
 
@@ -224,6 +232,7 @@ impl SsrIsolate {
             server_action_fn,
             server_action_encoded_fn,
             form_action_fn,
+            app_route_handler_fn,
             last_bundle: std::sync::Arc::new(server_bundle_js.to_string()),
         })
     }
@@ -347,6 +356,51 @@ impl SsrIsolate {
         }
     }
 
+    /// Call __rex_call_app_route_handler(routePattern, reqJson) for app router route.ts handlers.
+    /// Dispatches to the correct HTTP method export (GET, POST, etc.).
+    /// Handles async handlers by pumping V8's microtask queue.
+    pub fn call_app_route_handler(
+        &mut self,
+        route_pattern: &str,
+        req_json: &str,
+    ) -> Result<String> {
+        let handler_fn = self
+            .app_route_handler_fn
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("App route handlers not loaded"))?;
+
+        let result_str = {
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+            let func = v8::Local::new(scope, handler_fn);
+            let undef = v8::undefined(scope);
+            let arg0 = v8::String::new(scope, route_pattern)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+            let arg1 = v8::String::new(scope, req_json)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+
+            let result = v8_call!(scope, func, undef.into(), &[arg0.into(), arg1.into()])
+                .map_err(|e| anyhow::anyhow!("App route handler error: {e}"))?;
+
+            result.to_rust_string_lossy(scope)
+        };
+
+        if result_str == "__REX_APP_ROUTE_ASYNC__" {
+            crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
+
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+            let resolve_result = v8_eval!(
+                scope,
+                "globalThis.__rex_resolve_app_route()",
+                "<app-route-resolve>"
+            )
+            .map_err(|e| anyhow::anyhow!("App route handler error: {e}"))?;
+            Ok(resolve_result.to_rust_string_lossy(scope))
+        } else {
+            Ok(result_str)
+        }
+    }
+
     /// Call __rex_render_document() to get document descriptor JSON.
     /// Returns None if no custom _document is loaded.
     pub fn render_document(&mut self) -> Result<Option<String>> {
@@ -453,6 +507,10 @@ impl SsrIsolate {
         self.server_action_encoded_fn =
             v8_get_optional_fn!(scope, global, "__rex_call_server_action_encoded");
         self.form_action_fn = v8_get_optional_fn!(scope, global, "__rex_call_form_action");
+
+        // Re-lookup app route handler dispatch (may be added/removed on reload)
+        self.app_route_handler_fn =
+            v8_get_optional_fn!(scope, global, "__rex_call_app_route_handler");
 
         self.last_bundle = std::sync::Arc::new(server_bundle_js.to_string());
         debug!("SSR isolate reloaded");

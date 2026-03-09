@@ -238,6 +238,7 @@ async fn test_integration_mdx_app_router_build() {
             segment: String::new(),
             layout: Some(layout_path.clone()),
             page: Some(page_path.clone()),
+            route: None,
             loading: None,
             error_boundary: None,
             not_found: None,
@@ -252,6 +253,7 @@ async fn test_integration_mdx_app_router_build() {
             dynamic_segments: vec![],
             specificity: 1,
         }],
+        api_routes: vec![],
         root_layout: Some(layout_path),
     };
 

@@ -254,6 +254,17 @@ impl Rex {
             RouteTrie::from_routes(&routes)
         });
 
+        // Build app API route trie from app scan if route.ts files exist
+        let app_api_route_trie = scan.app_scan.as_ref().and_then(|app| {
+            if app.api_routes.is_empty() {
+                None
+            } else {
+                let routes = app.to_api_routes();
+                debug!(app_api_routes = routes.len(), "Building app API route trie");
+                Some(RouteTrie::from_routes(&routes))
+            }
+        });
+
         // Compute document descriptor if custom _document exists
         let document_descriptor = if scan.document.is_some() {
             crate::handlers::compute_document_descriptor(&pool).await
@@ -307,6 +318,7 @@ impl Rex {
                 manifest_json,
                 document_descriptor,
                 app_route_trie,
+                app_api_route_trie,
                 has_mcp_tools: !scan.mcp_tools.is_empty(),
                 prerendered,
                 prerendered_app,

@@ -234,6 +234,7 @@ export default function RootLayout({ children }) {
             segment: String::new(),
             layout: Some(layout_path.clone()),
             page: Some(page_path.clone()),
+            route: None,
             loading: None,
             error_boundary: None,
             not_found: None,
@@ -248,6 +249,7 @@ export default function RootLayout({ children }) {
             dynamic_segments: vec![],
             specificity: 10,
         }],
+        api_routes: vec![],
         root_layout: Some(layout_path),
     };
 

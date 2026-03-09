@@ -40,6 +40,7 @@ pub fn scan_pages(pages_dir: &Path) -> anyhow::Result<ScanResult> {
             PageType::NotFound => not_found = Some(route),
             PageType::Api => api_routes.push(route),
             PageType::Regular => routes.push(route),
+            PageType::AppApi => {} // app router route handlers are handled by app_scanner
         }
     })?;
 

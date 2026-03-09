@@ -182,6 +182,7 @@ pub(super) struct TestAppBuilder {
     project_root: Option<PathBuf>,
     middleware_js: Option<String>,
     middleware_matchers: Option<Vec<String>>,
+    app_api_routes: Vec<Route>,
     extra_bundle: Option<String>,
     custom_router: Option<Box<dyn FnOnce(Arc<AppState>) -> Router>>,
     is_dev: bool,
@@ -196,6 +197,7 @@ impl TestAppBuilder {
             pages: Vec::new(),
             api_routes: Vec::new(),
             app_routes: Vec::new(),
+            app_api_routes: Vec::new(),
             project_config: rex_core::ProjectConfig::default(),
             project_root: None,
             middleware_js: None,
@@ -230,6 +232,11 @@ impl TestAppBuilder {
 
     pub fn app_routes(mut self, routes: Vec<Route>) -> Self {
         self.app_routes = routes;
+        self
+    }
+
+    pub fn app_api_routes(mut self, routes: Vec<Route>) -> Self {
+        self.app_api_routes = routes;
         self
     }
 
@@ -341,6 +348,11 @@ impl TestAppBuilder {
                 has_middleware,
                 middleware_matchers,
                 app_route_trie,
+                app_api_route_trie: if self.app_api_routes.is_empty() {
+                    None
+                } else {
+                    Some(RouteTrie::from_routes(&self.app_api_routes))
+                },
                 has_mcp_tools: false,
                 prerendered: std::collections::HashMap::new(),
                 prerendered_app: std::collections::HashMap::new(),
@@ -438,6 +450,49 @@ pub(super) const TEST_RSC_FLIGHT_RUNTIME: &str = r#"
             params: props.params || {},
             searchParams: props.searchParams || {}
         });
+    };
+"#;
+
+/// App route handler runtime for tests (route.ts).
+pub(super) const TEST_APP_ROUTE_HANDLER_RUNTIME: &str = r#"
+    globalThis.__rex_app_route_handlers = globalThis.__rex_app_route_handlers || {};
+    globalThis.__rex_app_route_handlers['/api/hello'] = {
+        GET: function(req) {
+            return { statusCode: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: 'hello from route handler' }) };
+        },
+        POST: function(req) {
+            return { statusCode: 201, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ created: true }) };
+        }
+    };
+
+    globalThis.__rex_call_app_route_handler = function(routePattern, reqJson) {
+        var handlers = globalThis.__rex_app_route_handlers;
+        if (!handlers) throw new Error('No app route handlers registered');
+        var routeModule = handlers[routePattern];
+        if (!routeModule) throw new Error('App route handler not found: ' + routePattern);
+        var reqData = JSON.parse(reqJson);
+        var method = (reqData.method || 'GET').toUpperCase();
+        var handlerFn = routeModule[method];
+        if (!handlerFn) {
+            var allowed = ['GET','HEAD','POST','PUT','DELETE','PATCH','OPTIONS'].filter(function(m) { return typeof routeModule[m] === 'function'; });
+            return JSON.stringify({ statusCode: 405, headers: { allow: allowed.join(', ') }, body: 'Method Not Allowed' });
+        }
+        var result = handlerFn(reqData);
+        return JSON.stringify(result);
+    };
+"#;
+
+/// App route handler that throws (for testing V8 error path).
+pub(super) const TEST_APP_ROUTE_HANDLER_THROWS: &str = r#"
+    globalThis.__rex_call_app_route_handler = function(routePattern, reqJson) {
+        throw new Error('handler exploded');
+    };
+"#;
+
+/// App route handler that returns invalid JSON (for testing parse error path).
+pub(super) const TEST_APP_ROUTE_HANDLER_BAD_JSON: &str = r#"
+    globalThis.__rex_call_app_route_handler = function(routePattern, reqJson) {
+        return 'not valid json {{{';
     };
 "#;
 

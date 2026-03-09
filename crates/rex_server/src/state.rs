@@ -24,8 +24,10 @@ pub struct HotState {
     pub has_middleware: bool,
     /// Middleware matcher patterns (None = no middleware, Some(empty) = run on all).
     pub middleware_matchers: Option<Vec<String>>,
-    /// App route trie for app/ router (RSC). None if no app/ directory.
+    /// App page route trie for app/ router (RSC). None if no app/ directory.
     pub app_route_trie: Option<RouteTrie>,
+    /// App API route trie for app/ route handlers (route.ts). None if no route.ts files.
+    pub app_api_route_trie: Option<RouteTrie>,
     /// Whether mcp/ directory has tool files.
     pub has_mcp_tools: bool,
     /// Pre-rendered HTML for statically optimized pages (route pattern → full HTML).

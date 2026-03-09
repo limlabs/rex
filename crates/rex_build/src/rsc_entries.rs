@@ -226,6 +226,7 @@ mod tests {
                 segment: String::new(),
                 layout: Some(layout_path.clone()),
                 page: Some(page_path.clone()),
+                route: None,
                 loading: None,
                 error_boundary: None,
                 not_found: None,
@@ -240,6 +241,7 @@ mod tests {
                 dynamic_segments: vec![],
                 specificity: 10,
             }],
+            api_routes: vec![],
             root_layout: Some(layout_path),
         }
     }
@@ -380,6 +382,7 @@ mod tests {
                 segment: String::new(),
                 layout: Some(layout_path.clone()),
                 page: Some(page1.clone()),
+                route: None,
                 loading: None,
                 error_boundary: None,
                 not_found: None,
@@ -405,6 +408,7 @@ mod tests {
                     specificity: 10,
                 },
             ],
+            api_routes: vec![],
             root_layout: Some(layout_path),
         };
 

@@ -98,6 +98,23 @@ pub(crate) async fn build_server_bundle(
         }
     }
 
+    // App router route handlers (app/**/route.ts)
+    if let Some(app_scan) = &scan.app_scan {
+        if !app_scan.api_routes.is_empty() {
+            entry.push_str("\nglobalThis.__rex_app_route_handlers = {};\n");
+            for (i, route) in app_scan.api_routes.iter().enumerate() {
+                let handler_path = route.handler_path.to_string_lossy().replace('\\', "/");
+                let pattern = &route.pattern;
+                entry.push_str(&format!(
+                    "import * as __app_route{i} from '{handler_path}';\n"
+                ));
+                entry.push_str(&format!(
+                    "globalThis.__rex_app_route_handlers['{pattern}'] = __app_route{i};\n"
+                ));
+            }
+        }
+    }
+
     // _app
     if let Some(app) = &scan.app {
         let effective_app = page_overrides.get(&app.abs_path).unwrap_or(&app.abs_path);
