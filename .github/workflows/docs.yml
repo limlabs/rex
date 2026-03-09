@@ -31,10 +31,10 @@ jobs:
         working-directory: docs
 
       - name: Build Rex (export-only, skips dev/lint)
-        run: cargo build --bin rex --no-default-features --features build --release
+        run: cargo build -p rex_cli --no-default-features --features build --release
 
       - name: Export docs site
-        run: ./target/release/rex export --force
+        run: ../target/release/rex export --force
         working-directory: docs
 
       - name: Upload artifact
