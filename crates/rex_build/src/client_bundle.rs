@@ -146,9 +146,16 @@ if (!window.__REX_NAVIGATING__) {{
         });
     }
 
-    // CSS imports → empty modules (rolldown removed CSS bundling support)
+    // Non-JS assets → empty/binary modules
     let mut module_types = rustc_hash::FxHashMap::default();
-    module_types.insert(".css".to_string(), rolldown::ModuleType::Empty);
+    for ext in &[".css", ".scss", ".sass", ".less", ".mdx", ".svg"] {
+        module_types.insert((*ext).to_string(), rolldown::ModuleType::Empty);
+    }
+    for ext in &[
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2", ".ttf", ".eot",
+    ] {
+        module_types.insert((*ext).to_string(), rolldown::ModuleType::Binary);
+    }
 
     // Enable minification for production builds
     let minify = if !config.dev {

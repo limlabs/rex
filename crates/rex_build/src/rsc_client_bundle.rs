@@ -124,7 +124,7 @@ pub(crate) async fn build_rsc_client_bundles(
         entry_filenames: Some(format!("[name]-{hash}.js").into()),
         chunk_filenames: Some(format!("chunk-[name]-{hash}.js").into()),
         platform: Some(rolldown::Platform::Browser),
-        module_types: Some(ctx.css_empty_module_types()),
+        module_types: Some(ctx.non_js_empty_module_types()),
         define: Some(ctx.define.iter().cloned().collect()),
         tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
         minify: ctx.minify_options(),

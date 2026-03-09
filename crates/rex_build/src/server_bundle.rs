@@ -151,9 +151,16 @@ pub(crate) async fn build_server_bundle(
     let entry_path = entries_dir.join("server-entry.js");
     fs::write(&entry_path, &entry)?;
 
-    // CSS → empty module (server doesn't need CSS)
+    // Non-JS assets → empty/binary modules (server doesn't need these)
     let mut module_types = rustc_hash::FxHashMap::default();
-    module_types.insert(".css".to_string(), rolldown::ModuleType::Empty);
+    for ext in &[".css", ".scss", ".sass", ".less", ".mdx", ".svg"] {
+        module_types.insert((*ext).to_string(), rolldown::ModuleType::Empty);
+    }
+    for ext in &[
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2", ".ttf", ".eot",
+    ] {
+        module_types.insert((*ext).to_string(), rolldown::ModuleType::Binary);
+    }
 
     // Enable minification for production builds
     let minify = if !config.dev {

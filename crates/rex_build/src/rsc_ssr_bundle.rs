@@ -48,7 +48,7 @@ pub(crate) async fn build_rsc_ssr_bundle(
         dir: Some(output_dir.to_string_lossy().to_string()),
         entry_filenames: Some("rsc-ssr-bundle.js".to_string().into()),
         platform: Some(rolldown::Platform::Browser),
-        module_types: Some(ctx.css_empty_module_types()),
+        module_types: Some(ctx.non_js_empty_module_types()),
         define: Some(ctx.define.iter().cloned().collect()),
         banner: Some(rolldown::AddonOutputOption::String(Some(
             ctx.server_banner(),

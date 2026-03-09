@@ -137,6 +137,21 @@ fn has_expression_use_server(expr: &oxc_ast::ast::Expression) -> bool {
 
 /// Detect `"use client"` directive and extract exports from a source file.
 fn analyze_module(path: &Path, root: &Path) -> Result<ModuleInfo> {
+    // MDX files cannot have "use client"/"use server" directives.
+    // They always export a single default component. Skip OXC parsing
+    // since MDX syntax is not valid JavaScript.
+    if path.extension().and_then(|e| e.to_str()) == Some("mdx") {
+        return Ok(ModuleInfo {
+            path: path.to_path_buf(),
+            is_client: false,
+            is_server: false,
+            uses_dynamic_functions: false,
+            imports: Vec::new(),
+            exports: vec!["default".to_string()],
+            server_functions: Vec::new(),
+        });
+    }
+
     let source = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read {}", path.display()))?;
 
@@ -305,8 +320,8 @@ fn resolve_import(from: &Path, specifier: &str, root: &Path) -> Option<PathBuf> 
         return candidate.canonicalize().ok();
     }
 
-    // Try standard extensions
-    let extensions = ["tsx", "ts", "jsx", "js"];
+    // Try standard extensions (includes .mdx for MDX content imports)
+    let extensions = ["tsx", "ts", "jsx", "js", "mdx"];
     for ext in &extensions {
         let with_ext = candidate.with_extension(ext);
         if with_ext.exists() && with_ext.is_file() {
@@ -1150,5 +1165,42 @@ export default function Page() { return null; }
         let canonical = root.join("page.tsx").canonicalize().unwrap();
         let info = graph.modules.get(&canonical).unwrap();
         assert!(!info.uses_dynamic_functions);
+    }
+
+    #[test]
+    fn mdx_import_does_not_crash() {
+        let dir = setup_temp_dir();
+        let root = dir.path();
+
+        // Page that imports an MDX file
+        fs::write(
+            root.join("page.tsx"),
+            r#"
+import Content from './content.mdx';
+export default function Page() { return <Content />; }
+"#,
+        )
+        .unwrap();
+
+        // MDX file with markdown content (not valid JS)
+        fs::write(
+            root.join("content.mdx"),
+            "# Hello World\n\nThis is **markdown** content.\n",
+        )
+        .unwrap();
+
+        let entries = vec![root.join("page.tsx")];
+        let graph = analyze_module_graph(&entries, root).unwrap();
+
+        // Both modules should be in the graph
+        assert_eq!(graph.modules.len(), 2);
+
+        // MDX module should have sensible defaults
+        let mdx_canonical = root.join("content.mdx").canonicalize().unwrap();
+        let mdx_info = graph.modules.get(&mdx_canonical).unwrap();
+        assert!(!mdx_info.is_client);
+        assert!(!mdx_info.is_server);
+        assert!(mdx_info.exports.contains(&"default".to_string()));
+        assert!(mdx_info.imports.is_empty());
     }
 }
