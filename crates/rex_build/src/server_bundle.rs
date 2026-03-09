@@ -26,6 +26,10 @@ const MCP_RUNTIME: &str = include_str!(concat!(env!("OUT_DIR"), "/mcp-runtime.js
 /// Defines __rex_run_middleware(reqJson) and __rex_resolve_middleware().
 const MIDDLEWARE_RUNTIME: &str = include_str!(concat!(env!("OUT_DIR"), "/middleware-runtime.js"));
 
+/// App route handler runtime for route.ts dispatch.
+/// Defines __rex_call_app_route_handler(routePattern, reqJson) and __rex_resolve_app_route().
+const APP_ROUTE_RUNTIME: &str = include_str!(concat!(env!("OUT_DIR"), "/app-route-runtime.js"));
+
 /// Build the server bundle using rolldown.
 ///
 /// Produces a self-contained IIFE that includes React, all pages, and SSR
@@ -154,6 +158,15 @@ pub(crate) async fn build_server_bundle(
 
     // SSR runtime functions
     entry.push_str(SSR_RUNTIME);
+
+    // App route handler runtime (only when app route.ts files exist)
+    if scan
+        .app_scan
+        .as_ref()
+        .is_some_and(|a| !a.api_routes.is_empty())
+    {
+        entry.push_str(APP_ROUTE_RUNTIME);
+    }
 
     // Middleware runtime (only when middleware exists)
     if scan.middleware.is_some() {
