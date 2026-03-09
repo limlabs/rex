@@ -372,19 +372,6 @@ pub async fn build_server_bundle(
                 runtime_dir.join("https.ts").to_string_lossy().to_string(),
             )],
         ),
-        // Node.js url module polyfill (wraps WHATWG URL)
-        (
-            "url".to_string(),
-            vec![Some(
-                runtime_dir.join("url.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "node:url".to_string(),
-            vec![Some(
-                runtime_dir.join("url.ts").to_string_lossy().to_string(),
-            )],
-        ),
         // Node.js querystring module polyfill
         (
             "querystring".to_string(),
@@ -415,6 +402,132 @@ pub async fn build_server_bundle(
             "node:events".to_string(),
             vec![Some(
                 runtime_dir.join("events.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        // Node.js net module stub (empty — triggers pg-cloudflare fallback)
+        (
+            "net".to_string(),
+            vec![Some(
+                runtime_dir.join("net.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "node:net".to_string(),
+            vec![Some(
+                runtime_dir.join("net.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        // Node.js tls module stub
+        (
+            "tls".to_string(),
+            vec![Some(
+                runtime_dir.join("tls.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "node:tls".to_string(),
+            vec![Some(
+                runtime_dir.join("tls.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        // Node.js dns module stub (hostname passthrough)
+        (
+            "dns".to_string(),
+            vec![Some(
+                runtime_dir.join("dns.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "node:dns".to_string(),
+            vec![Some(
+                runtime_dir.join("dns.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        // Node.js os module stub
+        (
+            "os".to_string(),
+            vec![Some(
+                runtime_dir.join("os.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "node:os".to_string(),
+            vec![Some(
+                runtime_dir.join("os.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        // Node.js stream module polyfill (EventEmitter-based)
+        (
+            "stream".to_string(),
+            vec![Some(
+                runtime_dir.join("stream.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "node:stream".to_string(),
+            vec![Some(
+                runtime_dir.join("stream.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        // Node.js string_decoder module stub
+        (
+            "string_decoder".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("string_decoder.ts")
+                    .to_string_lossy()
+                    .to_string(),
+            )],
+        ),
+        (
+            "node:string_decoder".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("string_decoder.ts")
+                    .to_string_lossy()
+                    .to_string(),
+            )],
+        ),
+        // Node.js util module stub
+        (
+            "util".to_string(),
+            vec![Some(
+                runtime_dir.join("util.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "node:util".to_string(),
+            vec![Some(
+                runtime_dir.join("util.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        // Node.js url module polyfill (fileURLToPath, pathToFileURL)
+        (
+            "url".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("url-module.ts")
+                    .to_string_lossy()
+                    .to_string(),
+            )],
+        ),
+        (
+            "node:url".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("url-module.ts")
+                    .to_string_lossy()
+                    .to_string(),
+            )],
+        ),
+        // Cloudflare sockets polyfill (TCP via Rust callbacks, used by pg-cloudflare)
+        (
+            "cloudflare:sockets".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("cloudflare-sockets.ts")
+                    .to_string_lossy()
+                    .to_string(),
             )],
         ),
     ];

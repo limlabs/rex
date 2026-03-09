@@ -140,6 +140,9 @@ impl SsrIsolate {
                 // Register fs polyfill callbacks
                 crate::fs::register_fs_callbacks(scope, global)?;
 
+                // Register TCP socket callbacks (for cloudflare:sockets polyfill)
+                crate::tcp::register_tcp_callbacks(scope, global)?;
+
                 // Set project root for fs sandboxing
                 if let Some(root) = project_root {
                     let k = v8::String::new(scope, "__rex_project_root")

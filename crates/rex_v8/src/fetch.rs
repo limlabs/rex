@@ -469,22 +469,23 @@ const FETCH_LOOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3
 
 /// Run the batch-and-resolve loop until all async work is settled.
 ///
-/// This is the core pattern that enables `fetch()` in bare V8:
+/// This is the core IO loop that enables `fetch()` and TCP sockets in bare V8:
 /// 1. Run microtask checkpoint (resolves pending .then chains)
-/// 2. Drain the fetch queue
-/// 3. If queue is empty, break
-/// 4. Fire all queued requests concurrently via join_all
-/// 5. Resolve/reject promises
-/// 6. Repeat
+/// 2. Drain the fetch queue and TCP read queue
+/// 3. If both queues are empty, break
+/// 4. Fire all queued HTTP requests concurrently via join_all
+/// 5. Read from TCP sockets
+/// 6. Resolve/reject promises
+/// 7. Repeat
 ///
-/// Times out after 30 seconds to prevent runaway fetch chains.
+/// Times out after 30 seconds to prevent runaway fetch/IO chains.
 pub fn run_fetch_loop(isolate: &mut v8::OwnedIsolate, context: &v8::Global<v8::Context>) {
     let deadline = std::time::Instant::now() + FETCH_LOOP_TIMEOUT;
 
     loop {
         if std::time::Instant::now() > deadline {
             tracing::error!(
-                "fetch loop timed out after {}s — possible infinite fetch chain",
+                "IO loop timed out after {}s — possible infinite fetch/IO chain",
                 FETCH_LOOP_TIMEOUT.as_secs()
             );
             // Reject all remaining queued fetches
@@ -493,7 +494,7 @@ pub fn run_fetch_loop(isolate: &mut v8::OwnedIsolate, context: &v8::Global<v8::C
                 v8::scope_with_context!(scope, isolate, context);
                 for req in remaining {
                     let resolver = v8::Local::new(scope, &req.resolver);
-                    if let Some(msg) = v8::String::new(scope, "fetch loop timed out") {
+                    if let Some(msg) = v8::String::new(scope, "IO loop timed out") {
                         let err = v8::Exception::error(scope, msg);
                         resolver.reject(scope, err);
                     }
@@ -504,26 +505,35 @@ pub fn run_fetch_loop(isolate: &mut v8::OwnedIsolate, context: &v8::Global<v8::C
 
         isolate.perform_microtask_checkpoint();
 
-        let pending = drain_fetch_queue();
-        if pending.is_empty() {
+        let pending_fetch = drain_fetch_queue();
+        let has_tcp = crate::tcp::TCP_READ_QUEUE.with(|q| !q.borrow().is_empty());
+
+        if pending_fetch.is_empty() && !has_tcp {
             break;
         }
 
-        let results = execute_fetch_batch(&pending);
+        // Process HTTP fetch requests
+        if !pending_fetch.is_empty() {
+            let results = execute_fetch_batch(&pending_fetch);
 
-        // Resolve/reject each promise
-        v8::scope_with_context!(scope, isolate, context);
+            v8::scope_with_context!(scope, isolate, context);
 
-        for (req, result) in pending.into_iter().zip(results) {
-            let resolver = v8::Local::new(scope, &req.resolver);
-            match result {
-                Ok(ref resp) => {
-                    resolve_fetch_promise!(scope, resolver, resp);
-                }
-                Err(ref e) => {
-                    reject_fetch_promise!(scope, resolver, e);
+            for (req, result) in pending_fetch.into_iter().zip(results) {
+                let resolver = v8::Local::new(scope, &req.resolver);
+                match result {
+                    Ok(ref resp) => {
+                        resolve_fetch_promise!(scope, resolver, resp);
+                    }
+                    Err(ref e) => {
+                        reject_fetch_promise!(scope, resolver, e);
+                    }
                 }
             }
+        }
+
+        // Process TCP read requests
+        if has_tcp {
+            crate::tcp::drain_tcp_reads(isolate, context);
         }
     }
 }
