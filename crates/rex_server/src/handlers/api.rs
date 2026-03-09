@@ -21,6 +21,18 @@ pub(super) struct ApiResponse {
     body: String,
 }
 
+impl ApiResponse {
+    pub(super) fn status_code(&self) -> u16 {
+        self.status_code
+    }
+    pub(super) fn headers(&self) -> &HashMap<String, String> {
+        &self.headers
+    }
+    pub(super) fn body(&self) -> &str {
+        &self.body
+    }
+}
+
 /// API route handler - handles all HTTP methods for /api/* routes
 pub async fn api_handler(
     State(state): State<Arc<AppState>>,
@@ -70,7 +82,18 @@ pub async fn api_handler(
 
     let route_match = match hot.api_route_trie.match_path(path) {
         Some(m) => m,
-        None => return StatusCode::NOT_FOUND.into_response(),
+        None => {
+            // Fall through to app router route handlers (route.ts) if available
+            if let Some(ref app_api_trie) = hot.app_api_route_trie {
+                if let Some(api_match) = app_api_trie.match_path(path) {
+                    return super::page::handle_app_route_handler(
+                        &state, &api_match, &method, &uri, &headers, &body,
+                    )
+                    .await;
+                }
+            }
+            return StatusCode::NOT_FOUND.into_response();
+        }
     };
 
     let route_key = route_match.route.module_name();

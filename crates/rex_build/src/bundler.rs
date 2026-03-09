@@ -12,6 +12,10 @@ use std::fs;
 use std::path::Path;
 use tracing::{debug, info, info_span, Instrument};
 
+/// App route handler runtime — compiled from `runtime/server/app-route-runtime.ts` at build time.
+/// Used in both full server bundles (via server_bundle.rs) and minimal bundles (app-only projects).
+const APP_ROUTE_RUNTIME: &str = include_str!(concat!(env!("OUT_DIR"), "/app-route-runtime.js"));
+
 // Re-exports for crate::rsc_bundler compatibility
 pub(crate) use crate::build_utils::runtime_client_dir;
 pub use crate::server_bundle::V8_POLYFILLS;
@@ -356,6 +360,26 @@ globalThis.__rex_resolve_api = function() {
 "#,
         );
     }
+
+    // App router route handlers (app/**/route.ts)
+    if let Some(app_scan) = &scan.app_scan {
+        if !app_scan.api_routes.is_empty() {
+            entry.push_str("\nglobalThis.__rex_app_route_handlers = {};\n");
+            for (i, route) in app_scan.api_routes.iter().enumerate() {
+                let handler_path = route.handler_path.to_string_lossy().replace('\\', "/");
+                let pattern = &route.pattern;
+                entry.push_str(&format!(
+                    "import * as __app_route{i} from '{handler_path}';\n"
+                ));
+                entry.push_str(&format!(
+                    "globalThis.__rex_app_route_handlers['{pattern}'] = __app_route{i};\n"
+                ));
+            }
+            // Add the app route handler runtime (method dispatch, async support)
+            entry.push_str(APP_ROUTE_RUNTIME);
+        }
+    }
+
     let entry_path = entry_dir.join("server-entry.js");
     fs::write(&entry_path, entry)?;
 

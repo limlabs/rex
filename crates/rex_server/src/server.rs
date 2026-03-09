@@ -31,8 +31,10 @@ pub struct ServerConfig {
     pub project_config: ProjectConfig,
     pub has_middleware: bool,
     pub middleware_matchers: Option<Vec<String>>,
-    /// App route trie for RSC app/ routes. None if no app/ directory.
+    /// App page route trie for RSC app/ routes. None if no app/ directory.
     pub app_route_trie: Option<RouteTrie>,
+    /// App API route trie for app/ route handlers (route.ts). None if no route.ts files.
+    pub app_api_route_trie: Option<RouteTrie>,
     pub has_mcp_tools: bool,
     pub host: IpAddr,
 }
@@ -83,6 +85,7 @@ impl RexServer {
                 manifest_json,
                 document_descriptor,
                 app_route_trie: config.app_route_trie,
+                app_api_route_trie: config.app_api_route_trie,
                 has_mcp_tools: config.has_mcp_tools,
                 prerendered: std::collections::HashMap::new(),
                 prerendered_app: std::collections::HashMap::new(),

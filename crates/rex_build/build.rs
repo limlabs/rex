@@ -12,7 +12,12 @@ const PACKAGES: &[(&str, &str)] = &[
 ];
 
 /// Server runtime TypeScript files to compile to JavaScript at build time.
-const SERVER_RUNTIME_TS: &[&str] = &["ssr-runtime", "mcp-runtime", "middleware-runtime"];
+const SERVER_RUNTIME_TS: &[&str] = &[
+    "ssr-runtime",
+    "mcp-runtime",
+    "middleware-runtime",
+    "app-route-runtime",
+];
 
 /// Individual polyfill modules, concatenated in order to produce v8-polyfills.js.
 /// Order matters: text-encoding before buffer, buffer before crypto.

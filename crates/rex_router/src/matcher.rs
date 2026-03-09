@@ -213,6 +213,26 @@ mod tests {
     }
 
     #[test]
+    fn test_catch_all_empty_match() {
+        let trie = RouteTrie::from_routes(&[make_route("/docs/*path")]);
+        let m = trie.match_path("/docs").unwrap();
+        assert_eq!(m.params.get("path").unwrap(), "");
+    }
+
+    #[test]
+    fn test_static_match_fails_falls_to_dynamic() {
+        let trie =
+            RouteTrie::from_routes(&[make_route("/blog/featured"), make_route("/blog/:slug")]);
+        // Static match for "featured" should succeed
+        let m = trie.match_path("/blog/featured").unwrap();
+        assert_eq!(m.route.pattern, "/blog/featured");
+        // Non-matching static falls through to dynamic
+        let m = trie.match_path("/blog/other").unwrap();
+        assert_eq!(m.route.pattern, "/blog/:slug");
+        assert_eq!(m.params.get("slug").unwrap(), "other");
+    }
+
+    #[test]
     fn test_root_index() {
         let trie = RouteTrie::from_routes(&[make_route("/")]);
         let m = trie.match_path("/").unwrap();

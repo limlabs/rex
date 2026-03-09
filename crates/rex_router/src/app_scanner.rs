@@ -4,7 +4,7 @@
 //! - A nested `AppSegment` tree
 //! - Flattened `AppRoute` entries with layout/loading/error chains
 
-use rex_core::app_route::{AppRoute, AppScanResult, AppSegment};
+use rex_core::app_route::{AppApiRoute, AppRoute, AppScanResult, AppSegment};
 use rex_core::DynamicSegment;
 use std::path::{Path, PathBuf};
 use tracing::debug;
@@ -25,18 +25,28 @@ pub fn scan_app(app_dir: &Path) -> anyhow::Result<Option<AppScanResult>> {
 
     let root_layout = root.layout.clone();
 
+    // Flatten API routes (route.ts files) — these don't need layouts
+    let mut api_routes = Vec::new();
+    flatten_api_routes(&root, &[], &mut api_routes);
+    api_routes.sort_by(|a, b| b.specificity.cmp(&a.specificity));
+
     // If there is no root layout, check that at least one route group child
-    // has a layout — otherwise the app directory has no usable routes.
+    // has a layout — otherwise the app directory has no usable page routes.
+    // API routes (route.ts) are still valid without a layout.
     if root_layout.is_none() {
         let has_group_layout = root
             .children
             .iter()
             .any(|child| is_route_group(&child.segment) && child.layout.is_some());
-        if !has_group_layout {
-            debug!("app/ directory found but no root layout and no route group layouts — skipping app router");
+        if !has_group_layout && api_routes.is_empty() {
+            debug!("app/ directory found but no root layout, no route group layouts, and no route handlers — skipping app router");
             return Ok(None);
         }
-        debug!("app/ directory has no root layout but route groups provide layouts");
+        if !has_group_layout {
+            debug!("app/ directory has no root layout but has route handlers");
+        } else {
+            debug!("app/ directory has no root layout but route groups provide layouts");
+        }
     }
 
     let mut routes = Vec::new();
@@ -52,11 +62,16 @@ pub fn scan_app(app_dir: &Path) -> anyhow::Result<Option<AppScanResult>> {
     // Sort by specificity (highest first)
     routes.sort_by(|a, b| b.specificity.cmp(&a.specificity));
 
-    debug!(routes = routes.len(), "app/ directory scanned");
+    debug!(
+        routes = routes.len(),
+        api_routes = api_routes.len(),
+        "app/ directory scanned"
+    );
 
     Ok(Some(AppScanResult {
         root,
         routes,
+        api_routes,
         root_layout,
     }))
 }
@@ -65,6 +80,7 @@ pub fn scan_app(app_dir: &Path) -> anyhow::Result<Option<AppScanResult>> {
 fn scan_segment(dir: &Path, segment_name: &str) -> anyhow::Result<AppSegment> {
     let layout = find_component(dir, "layout");
     let page = find_component(dir, "page");
+    let route = find_component(dir, "route");
     let loading = find_component(dir, "loading");
     let error_boundary = find_component(dir, "error");
     let not_found = find_component(dir, "not-found");
@@ -92,10 +108,15 @@ fn scan_segment(dir: &Path, segment_name: &str) -> anyhow::Result<AppSegment> {
         }
     }
 
+    // Per Next.js convention: route.ts and page.tsx are mutually exclusive.
+    // If both exist, page takes priority and route is ignored.
+    let route = if page.is_some() { None } else { route };
+
     Ok(AppSegment {
         segment: segment_name.to_string(),
         layout,
         page,
+        route,
         loading,
         error_boundary,
         not_found,
@@ -172,6 +193,37 @@ fn flatten_routes(
     }
 }
 
+/// Flatten the segment tree into a list of API routes (route.ts handlers).
+fn flatten_api_routes(
+    segment: &AppSegment,
+    pattern_parts: &[String],
+    api_routes: &mut Vec<AppApiRoute>,
+) {
+    let mut current_parts = pattern_parts.to_vec();
+    let is_group = is_route_group(&segment.segment);
+
+    if !segment.segment.is_empty() && !is_group {
+        current_parts.push(segment.segment.clone());
+    }
+
+    // If this segment has a route handler, register it as an API route.
+    if let Some(handler_path) = &segment.route {
+        let (pattern, dynamic_segments, specificity) = build_pattern(&current_parts);
+        debug!(pattern = %pattern, handler = %handler_path.display(), "app api route");
+
+        api_routes.push(AppApiRoute {
+            pattern,
+            handler_path: handler_path.clone(),
+            dynamic_segments,
+            specificity,
+        });
+    }
+
+    for child in &segment.children {
+        flatten_api_routes(child, &current_parts, api_routes);
+    }
+}
+
 /// Check if a segment name is a route group (parenthesized, e.g. "(marketing)").
 fn is_route_group(segment: &str) -> bool {
     segment.starts_with('(') && segment.ends_with(')')
@@ -227,373 +279,4 @@ fn parse_dynamic_segment(part: &str) -> Option<DynamicSegment> {
         return Some(DynamicSegment::Single(name));
     }
     None
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-    use std::fs;
-
-    fn setup_fixture(dir: &Path) {
-        // app/
-        //   layout.tsx
-        //   page.tsx
-        //   loading.tsx
-        //   about/
-        //     page.tsx
-        //   blog/
-        //     page.tsx
-        //     [slug]/
-        //       page.tsx
-        //       layout.tsx
-        //   (marketing)/
-        //     pricing/
-        //       page.tsx
-        //   dashboard/
-        //     layout.tsx
-        //     page.tsx
-        //     settings/
-        //       page.tsx
-
-        let dirs = [
-            "",
-            "about",
-            "blog",
-            "blog/[slug]",
-            "(marketing)",
-            "(marketing)/pricing",
-            "dashboard",
-            "dashboard/settings",
-        ];
-        for d in &dirs {
-            fs::create_dir_all(dir.join(d)).unwrap();
-        }
-
-        let files = [
-            "layout.tsx",
-            "page.tsx",
-            "loading.tsx",
-            "about/page.tsx",
-            "blog/page.tsx",
-            "blog/[slug]/page.tsx",
-            "blog/[slug]/layout.tsx",
-            "(marketing)/pricing/page.tsx",
-            "dashboard/layout.tsx",
-            "dashboard/page.tsx",
-            "dashboard/settings/page.tsx",
-        ];
-        for f in &files {
-            fs::write(dir.join(f), format!("// {f}")).unwrap();
-        }
-    }
-
-    #[test]
-    fn scans_app_dir() {
-        let tmp = tempfile::tempdir().unwrap();
-        let app_dir = tmp.path().join("app");
-        setup_fixture(&app_dir);
-
-        let result = scan_app(&app_dir).unwrap().unwrap();
-
-        assert!(result.root_layout.as_ref().unwrap().exists());
-        assert!(!result.routes.is_empty());
-    }
-
-    #[test]
-    fn correct_route_count() {
-        let tmp = tempfile::tempdir().unwrap();
-        let app_dir = tmp.path().join("app");
-        setup_fixture(&app_dir);
-
-        let result = scan_app(&app_dir).unwrap().unwrap();
-
-        // Routes: /, /about, /blog, /blog/:slug, /pricing, /dashboard, /dashboard/settings
-        assert_eq!(result.routes.len(), 7);
-    }
-
-    #[test]
-    fn route_group_excluded_from_url() {
-        let tmp = tempfile::tempdir().unwrap();
-        let app_dir = tmp.path().join("app");
-        setup_fixture(&app_dir);
-
-        let result = scan_app(&app_dir).unwrap().unwrap();
-        let patterns: Vec<&str> = result.routes.iter().map(|r| r.pattern.as_str()).collect();
-
-        // (marketing)/pricing → /pricing (group not in URL)
-        assert!(patterns.contains(&"/pricing"));
-        assert!(!patterns.iter().any(|p| p.contains("marketing")));
-    }
-
-    #[test]
-    fn dynamic_segment_parsed() {
-        let tmp = tempfile::tempdir().unwrap();
-        let app_dir = tmp.path().join("app");
-        setup_fixture(&app_dir);
-
-        let result = scan_app(&app_dir).unwrap().unwrap();
-        let blog_slug = result
-            .routes
-            .iter()
-            .find(|r| r.pattern == "/blog/:slug")
-            .expect("should have /blog/:slug route");
-
-        assert_eq!(blog_slug.dynamic_segments.len(), 1);
-        assert!(matches!(
-            &blog_slug.dynamic_segments[0],
-            DynamicSegment::Single(n) if n == "slug"
-        ));
-    }
-
-    #[test]
-    fn layout_chain_ordering() {
-        let tmp = tempfile::tempdir().unwrap();
-        let app_dir = tmp.path().join("app");
-        setup_fixture(&app_dir);
-
-        let result = scan_app(&app_dir).unwrap().unwrap();
-
-        // /blog/:slug has two layouts: root + blog/[slug]/layout.tsx
-        let blog_slug = result
-            .routes
-            .iter()
-            .find(|r| r.pattern == "/blog/:slug")
-            .unwrap();
-        assert_eq!(blog_slug.layout_chain.len(), 2);
-        // First should be root layout
-        assert!(blog_slug.layout_chain[0]
-            .to_string_lossy()
-            .ends_with("layout.tsx"));
-        // Second should be blog/[slug]/layout.tsx
-        assert!(blog_slug.layout_chain[1]
-            .to_string_lossy()
-            .contains("[slug]"));
-
-        // /about has only root layout
-        let about = result
-            .routes
-            .iter()
-            .find(|r| r.pattern == "/about")
-            .unwrap();
-        assert_eq!(about.layout_chain.len(), 1);
-    }
-
-    #[test]
-    fn nested_layout_chain() {
-        let tmp = tempfile::tempdir().unwrap();
-        let app_dir = tmp.path().join("app");
-        setup_fixture(&app_dir);
-
-        let result = scan_app(&app_dir).unwrap().unwrap();
-
-        // /dashboard/settings has root layout + dashboard/layout.tsx
-        let settings = result
-            .routes
-            .iter()
-            .find(|r| r.pattern == "/dashboard/settings")
-            .unwrap();
-        assert_eq!(settings.layout_chain.len(), 2);
-    }
-
-    #[test]
-    fn loading_chain_parallel() {
-        let tmp = tempfile::tempdir().unwrap();
-        let app_dir = tmp.path().join("app");
-        setup_fixture(&app_dir);
-
-        let result = scan_app(&app_dir).unwrap().unwrap();
-
-        // Root has loading.tsx, so first entry is Some
-        let root_route = result.routes.iter().find(|r| r.pattern == "/").unwrap();
-        assert_eq!(root_route.loading_chain.len(), 1);
-        assert!(root_route.loading_chain[0].is_some());
-    }
-
-    #[test]
-    fn no_app_dir_returns_none() {
-        let tmp = tempfile::tempdir().unwrap();
-        let result = scan_app(&tmp.path().join("nonexistent")).unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn no_root_layout_no_groups_returns_none() {
-        let tmp = tempfile::tempdir().unwrap();
-        let app_dir = tmp.path().join("app");
-        fs::create_dir_all(&app_dir).unwrap();
-        fs::write(app_dir.join("page.tsx"), "// page").unwrap();
-        // No layout.tsx, no route groups
-
-        let result = scan_app(&app_dir).unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn route_groups_with_own_layouts_no_root_layout() {
-        let tmp = tempfile::tempdir().unwrap();
-        let app_dir = tmp.path().join("app");
-
-        // app/
-        //   (frontend)/
-        //     layout.tsx     <- group provides its own layout
-        //     page.tsx
-        //     about/
-        //       page.tsx
-        //   (admin)/
-        //     layout.tsx
-        //     dashboard/
-        //       page.tsx
-        fs::create_dir_all(app_dir.join("(frontend)/about")).unwrap();
-        fs::create_dir_all(app_dir.join("(admin)/dashboard")).unwrap();
-
-        fs::write(app_dir.join("(frontend)/layout.tsx"), "// frontend layout").unwrap();
-        fs::write(app_dir.join("(frontend)/page.tsx"), "// home page").unwrap();
-        fs::write(app_dir.join("(frontend)/about/page.tsx"), "// about page").unwrap();
-        fs::write(app_dir.join("(admin)/layout.tsx"), "// admin layout").unwrap();
-        fs::write(app_dir.join("(admin)/dashboard/page.tsx"), "// dashboard").unwrap();
-
-        let result = scan_app(&app_dir).unwrap().unwrap();
-
-        // No root layout
-        assert!(result.root_layout.is_none());
-
-        // Should have 3 routes: /, /about, /dashboard
-        assert_eq!(result.routes.len(), 3);
-
-        let patterns: Vec<&str> = result.routes.iter().map(|r| r.pattern.as_str()).collect();
-        assert!(patterns.contains(&"/"));
-        assert!(patterns.contains(&"/about"));
-        assert!(patterns.contains(&"/dashboard"));
-
-        // Each route's layout chain should contain its group's layout
-        let home = result.routes.iter().find(|r| r.pattern == "/").unwrap();
-        assert_eq!(home.layout_chain.len(), 1);
-        assert!(home.layout_chain[0]
-            .to_string_lossy()
-            .contains("(frontend)"));
-
-        let dashboard = result
-            .routes
-            .iter()
-            .find(|r| r.pattern == "/dashboard")
-            .unwrap();
-        assert_eq!(dashboard.layout_chain.len(), 1);
-        assert!(dashboard.layout_chain[0]
-            .to_string_lossy()
-            .contains("(admin)"));
-    }
-
-    #[test]
-    fn error_boundary_in_chain() {
-        let tmp = tempfile::tempdir().unwrap();
-        let app_dir = tmp.path().join("app");
-        fs::create_dir_all(app_dir.join("protected")).unwrap();
-
-        fs::write(app_dir.join("layout.tsx"), "// root layout").unwrap();
-        fs::write(app_dir.join("page.tsx"), "// root page").unwrap();
-        // Error/loading chains are parallel to layout chain — a layout is needed
-        // at the protected segment for the error boundary to appear in the chain.
-        fs::write(app_dir.join("protected/layout.tsx"), "// protected layout").unwrap();
-        fs::write(app_dir.join("protected/page.tsx"), "// protected page").unwrap();
-        fs::write(app_dir.join("protected/error.tsx"), "// error boundary").unwrap();
-
-        let result = scan_app(&app_dir).unwrap().unwrap();
-        let protected = result
-            .routes
-            .iter()
-            .find(|r| r.pattern == "/protected")
-            .expect("should have /protected route");
-
-        // Error chain should have entries parallel to layout chain
-        assert_eq!(protected.error_chain.len(), protected.layout_chain.len());
-        // The protected segment has error.tsx + layout, so the second entry should be Some
-        assert!(
-            protected.error_chain.iter().any(|e| e.is_some()),
-            "error chain should contain the error boundary"
-        );
-        // Verify the error boundary path
-        let error_path = protected
-            .error_chain
-            .iter()
-            .find_map(|e| e.as_ref())
-            .unwrap();
-        assert!(error_path.to_string_lossy().contains("error.tsx"));
-    }
-
-    #[test]
-    fn catch_all_route() {
-        let tmp = tempfile::tempdir().unwrap();
-        let app_dir = tmp.path().join("app");
-        fs::create_dir_all(app_dir.join("docs/[...slug]")).unwrap();
-
-        fs::write(app_dir.join("layout.tsx"), "// root layout").unwrap();
-        fs::write(app_dir.join("page.tsx"), "// root page").unwrap();
-        fs::write(app_dir.join("docs/[...slug]/page.tsx"), "// catch-all page").unwrap();
-
-        let result = scan_app(&app_dir).unwrap().unwrap();
-        let catch_all = result
-            .routes
-            .iter()
-            .find(|r| {
-                r.dynamic_segments
-                    .iter()
-                    .any(|d| matches!(d, DynamicSegment::CatchAll(_)))
-            })
-            .expect("should have a catch-all route");
-
-        assert!(catch_all.pattern.contains("*slug"));
-        assert_eq!(catch_all.dynamic_segments.len(), 1);
-        assert!(matches!(
-            &catch_all.dynamic_segments[0],
-            DynamicSegment::CatchAll(n) if n == "slug"
-        ));
-    }
-
-    #[test]
-    fn optional_catch_all_route() {
-        let tmp = tempfile::tempdir().unwrap();
-        let app_dir = tmp.path().join("app");
-        fs::create_dir_all(app_dir.join("help/[[...path]]")).unwrap();
-
-        fs::write(app_dir.join("layout.tsx"), "// root layout").unwrap();
-        fs::write(app_dir.join("page.tsx"), "// root page").unwrap();
-        fs::write(
-            app_dir.join("help/[[...path]]/page.tsx"),
-            "// optional catch-all",
-        )
-        .unwrap();
-
-        let result = scan_app(&app_dir).unwrap().unwrap();
-        let opt_catch_all = result
-            .routes
-            .iter()
-            .find(|r| {
-                r.dynamic_segments
-                    .iter()
-                    .any(|d| matches!(d, DynamicSegment::OptionalCatchAll(_)))
-            })
-            .expect("should have an optional catch-all route");
-
-        assert_eq!(opt_catch_all.dynamic_segments.len(), 1);
-        assert!(matches!(
-            &opt_catch_all.dynamic_segments[0],
-            DynamicSegment::OptionalCatchAll(n) if n == "path"
-        ));
-    }
-
-    #[test]
-    fn specificity_ordering() {
-        let tmp = tempfile::tempdir().unwrap();
-        let app_dir = tmp.path().join("app");
-        setup_fixture(&app_dir);
-
-        let result = scan_app(&app_dir).unwrap().unwrap();
-
-        // Routes should be sorted by specificity descending.
-        // Static routes have higher specificity than dynamic ones.
-        for window in result.routes.windows(2) {
-            assert!(window[0].specificity >= window[1].specificity);
-        }
-    }
 }

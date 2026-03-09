@@ -56,6 +56,7 @@ pub enum DynamicSegment {
 pub enum PageType {
     Regular,
     Api,      // pages/api/*
+    AppApi,   // app/**/route.ts (app router route handlers)
     App,      // _app
     Document, // _document
     Error,    // _error

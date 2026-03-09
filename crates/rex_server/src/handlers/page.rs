@@ -136,7 +136,14 @@ pub(super) async fn page_handler_inner(
     method: &Method,
     body: &axum::body::Bytes,
 ) -> Response {
-    // Check app/ routes first (RSC)
+    // Check app/ route handlers first (route.ts — API-style, no rendering)
+    if let Some(ref app_api_trie) = hot.app_api_route_trie {
+        if let Some(api_match) = app_api_trie.match_path(path) {
+            return handle_app_route_handler(state, &api_match, method, uri, headers, body).await;
+        }
+    }
+
+    // Check app/ page routes (RSC)
     if let Some(ref app_trie) = hot.app_route_trie {
         if let Some(app_match) = app_trie.match_path(path) {
             // Progressive enhancement: handle POST form submissions with $ACTION_ID_*
@@ -525,6 +532,107 @@ pub(super) async fn page_handler_inner(
         .expect("response build")
 }
 
+/// Handle an app router route handler (route.ts) request.
+///
+/// Dispatches to the V8 runtime which calls the correct HTTP method export
+/// (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS) on the route module.
+pub(super) async fn handle_app_route_handler(
+    state: &Arc<AppState>,
+    route_match: &rex_core::RouteMatch,
+    method: &Method,
+    uri: &Uri,
+    headers: &HeaderMap,
+    body: &axum::body::Bytes,
+) -> Response {
+    let route_pattern = route_match.route.pattern.clone();
+    let params = route_match.params.clone();
+
+    // Parse query string
+    let query: HashMap<String, String> = uri
+        .query()
+        .map(|q| {
+            url::form_urlencoded::parse(q.as_bytes())
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Parse body based on content-type
+    let content_type = headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let body_value = if content_type.starts_with("application/json") {
+        serde_json::from_slice::<serde_json::Value>(body).unwrap_or(serde_json::Value::Null)
+    } else if !body.is_empty() {
+        serde_json::Value::String(String::from_utf8_lossy(body).into_owned())
+    } else {
+        serde_json::Value::Null
+    };
+
+    let req_data = serde_json::json!({
+        "method": method.as_str(),
+        "url": uri.path(),
+        "headers": headers.iter()
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect::<HashMap<String, String>>(),
+        "query": query,
+        "body": body_value,
+        "params": params,
+    });
+    let req_json = serde_json::to_string(&req_data).expect("JSON serialization");
+
+    let result = state
+        .isolate_pool
+        .execute(move |iso| iso.call_app_route_handler(&route_pattern, &req_json))
+        .await;
+
+    match result {
+        Ok(Ok(json)) => {
+            let api_res: super::api::ApiResponse = match serde_json::from_str(&json) {
+                Ok(r) => r,
+                Err(e) => {
+                    error!("Failed to parse app route handler response: {e}");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response();
+                }
+            };
+
+            let status = StatusCode::from_u16(api_res.status_code()).unwrap_or(StatusCode::OK);
+            let mut builder = Response::builder().status(status);
+            for (k, v) in api_res.headers() {
+                builder = builder.header(k.as_str(), v.as_str());
+            }
+            builder
+                .body(Body::from(api_res.body().to_string()))
+                .expect("response build")
+        }
+        Ok(Err(e)) => {
+            error!("App route handler V8 error: {e}");
+            if state.is_dev {
+                return axum::response::Html(dev_error_overlay(
+                    "Route Handler Error",
+                    &e.to_string(),
+                    None,
+                ))
+                .into_response();
+            }
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Route handler error: {e}"),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            error!("App route handler pool error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "page_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "app_route_tests.rs"]
+mod app_route_tests;
