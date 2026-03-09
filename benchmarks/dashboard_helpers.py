@@ -75,6 +75,10 @@ def load_results(path: Path) -> pl.DataFrame:
     raw = json.loads(path.read_text())
     if not raw:
         return pl.DataFrame()
+    # Filter out meta entries (e.g. network_speed) that lack a framework field
+    raw = [r for r in raw if "framework" in r]
+    if not raw:
+        return pl.DataFrame()
     frame = pl.DataFrame(raw)
     if frame.is_empty():
         return frame

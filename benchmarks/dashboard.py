@@ -34,14 +34,19 @@ def _():
     make_server_summary = _mod.make_server_summary
 
     BENCH_DIR = Path(__file__).parent
-    RESULTS_PATH = BENCH_DIR / "results.json"
+    # Default to checked-in results; fresh runs write to results.json
+    RESULTS_README = BENCH_DIR / "results-readme.json"
+    RESULTS_FRESH = BENCH_DIR / "results.json"
+    RESULTS_PATH = RESULTS_FRESH if RESULTS_FRESH.exists() else RESULTS_README
 
     return (
         BENCH_DIR,
         COLORS,
         EP_LABELS,
         FW_ORDER,
+        RESULTS_FRESH,
         RESULTS_PATH,
+        RESULTS_README,
         go,
         has_suite,
         load_results,
@@ -49,6 +54,7 @@ def _():
         make_server_summary,
         make_subplots,
         mo,
+        Path,
         pl,
         px,
         re,
@@ -121,7 +127,7 @@ def _(mo):
 @app.cell
 def _(
     BENCH_DIR,
-    RESULTS_PATH,
+    RESULTS_FRESH,
     concurrency_input,
     fw_select,
     mo,
@@ -152,7 +158,7 @@ def _(
             "--concurrency",
             str(int(concurrency_input.value)),
             "--json",
-            str(RESULTS_PATH),
+            str(RESULTS_FRESH),
         ]
 
         t0 = time.time()
@@ -193,9 +199,11 @@ def _(
 
 
 @app.cell
-def _(RESULTS_PATH, get_bench_ts, load_results):
+def _(RESULTS_FRESH, RESULTS_README, get_bench_ts, load_results):
     get_bench_ts()
-    df = load_results(RESULTS_PATH)
+    # Prefer fresh run results; fall back to checked-in data
+    path = RESULTS_FRESH if RESULTS_FRESH.exists() else RESULTS_README
+    df = load_results(path)
     return (df,)
 
 
