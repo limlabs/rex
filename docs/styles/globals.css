@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+/* Prose styling for MDX content */
+.prose {
+  @apply text-slate-700 leading-relaxed;
+}
+
+.prose h1 {
+  @apply text-3xl font-bold text-slate-900 mb-6 mt-0 pb-3 border-b border-slate-200;
+}
+
+.prose h2 {
+  @apply text-2xl font-semibold text-slate-900 mt-10 mb-4;
+}
+
+.prose h3 {
+  @apply text-xl font-semibold text-slate-800 mt-8 mb-3;
+}
+
+.prose p {
+  @apply mb-4;
+}
+
+.prose a {
+  @apply text-emerald-600 underline decoration-emerald-300 hover:text-emerald-700 hover:decoration-emerald-500 transition-colors;
+}
+
+.prose strong {
+  @apply text-slate-900 font-semibold;
+}
+
+.prose code {
+  @apply bg-slate-100 text-emerald-700 px-1.5 py-0.5 rounded text-sm font-mono;
+}
+
+.prose pre {
+  @apply bg-slate-900 text-slate-100 rounded-lg p-4 overflow-x-auto mb-4 text-sm leading-relaxed;
+}
+
+.prose pre code {
+  @apply bg-transparent text-slate-100 p-0 rounded-none text-sm;
+}
+
+.prose ul {
+  @apply list-disc pl-6 mb-4 space-y-1;
+}
+
+.prose ol {
+  @apply list-decimal pl-6 mb-4 space-y-1;
+}
+
+.prose li {
+  @apply text-slate-700;
+}
+
+.prose blockquote {
+  @apply border-l-4 border-emerald-400 bg-emerald-50 pl-4 py-2 mb-4 text-slate-600 italic;
+}
+
+.prose table {
+  @apply w-full border-collapse mb-4 text-sm;
+}
+
+.prose th {
+  @apply bg-slate-100 text-left font-semibold text-slate-900 px-4 py-2 border border-slate-200;
+}
+
+.prose td {
+  @apply px-4 py-2 border border-slate-200;
+}
+
+.prose hr {
+  @apply border-slate-200 my-8;
+}

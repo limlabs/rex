@@ -1,0 +1,113 @@
+# Deployment
+
+Rex produces a single binary and a build output directory. Deploy it anywhere you can run a container or a Linux binary.
+
+## Docker
+
+Rex includes a Dockerfile in every project. Build and run locally:
+
+```bash
+docker build -t my-app .
+docker run -p 3000:3000 my-app
+```
+
+### Example Dockerfile
+
+```dockerfile
+FROM ghcr.io/limlabs/rex:latest AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+RUN rex build
+
+FROM ghcr.io/limlabs/rex:latest
+WORKDIR /app
+COPY --from=builder /app/.rex .rex
+COPY --from=builder /app/public public
+CMD ["rex", "start"]
+```
+
+### Docker Compose
+
+```yaml
+version: "3.8"
+services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+```
+
+## Cloud platforms
+
+Rex works with any platform that supports Docker containers.
+
+### Railway
+
+Deploy directly from a GitHub repo — Railway auto-detects the Dockerfile:
+
+1. Connect your repo on [Railway](https://railway.app)
+2. Railway builds the Docker image and deploys
+3. Set the `PORT` environment variable if needed (Railway provides it automatically)
+
+### Fly.io
+
+```bash
+fly launch
+fly deploy
+```
+
+Fly detects the Dockerfile. Add a `fly.toml` to configure regions and scaling:
+
+```toml
+[http_service]
+  internal_port = 3000
+  force_https = true
+```
+
+### AWS App Runner
+
+1. Push your image to ECR
+2. Create an App Runner service pointing to the image
+3. Set the port to 3000
+
+### Google Cloud Run
+
+```bash
+gcloud run deploy my-app \
+  --source . \
+  --port 3000 \
+  --allow-unauthenticated
+```
+
+Cloud Run builds from the Dockerfile and deploys a serverless container.
+
+### Azure Container Apps
+
+```bash
+az containerapp up \
+  --name my-app \
+  --source . \
+  --ingress external \
+  --target-port 3000
+```
+
+### DigitalOcean App Platform
+
+1. Connect your GitHub repo
+2. Select "Dockerfile" as the build method
+3. Set the HTTP port to 3000
+
+## Production readiness
+
+Before deploying to production, verify:
+
+- **Visual correctness** — review every page and interactive element in a staging environment
+- **Functional testing** — test forms, navigation, data fetching, and error states
+- **Security** — audit dependencies, validate user input, configure HTTPS and security headers
+- **Performance** — run load tests to understand throughput and latency under expected traffic
+- **Monitoring** — set up logging, error tracking, and health checks
+- **Environment variables** — ensure secrets are stored securely and not committed to source control

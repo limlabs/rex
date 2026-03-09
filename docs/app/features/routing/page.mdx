@@ -1,0 +1,131 @@
+# Routing
+
+Rex supports two routing modes: the **Pages Router** and the **App Router**. Both use file-system conventions to define routes.
+
+## Pages Router
+
+Place files in the `pages/` directory. Each file becomes a route:
+
+```
+pages/
+  index.tsx       → /
+  about.tsx       → /about
+  blog/
+    index.tsx     → /blog
+    [slug].tsx    → /blog/:slug
+```
+
+### Dynamic routes
+
+Use square brackets for dynamic segments:
+
+```tsx
+// pages/blog/[slug].tsx
+import React from "react";
+
+export async function getServerSideProps(context: { params: { slug: string } }) {
+  return {
+    props: { slug: context.params.slug },
+  };
+}
+
+export default function BlogPost({ slug }: { slug: string }) {
+  return <h1>Post: {slug}</h1>;
+}
+```
+
+### Catch-all routes
+
+Use `[...param]` to match multiple segments:
+
+```
+pages/docs/[...path].tsx  → /docs/a, /docs/a/b, /docs/a/b/c
+```
+
+The `path` param is an array of strings: `["a", "b", "c"]`.
+
+### Special files
+
+| File | Purpose |
+|------|---------|
+| `_app.tsx` | Wraps all pages — add global layout, CSS imports |
+| `_document.tsx` | Customize the HTML document shell |
+| `_error.tsx` | Custom error page |
+| `404.tsx` | Custom 404 page |
+
+## App Router
+
+Place files in the `app/` directory using the nested layout convention:
+
+```
+app/
+  layout.tsx      → Root layout (required)
+  page.tsx        → /
+  about/
+    page.tsx      → /about
+  blog/
+    layout.tsx    → Shared layout for /blog/*
+    page.tsx      → /blog
+    [slug]/
+      page.tsx    → /blog/:slug
+```
+
+### Layouts
+
+Layouts wrap their child routes and persist across navigations:
+
+```tsx
+// app/layout.tsx
+import React from "react";
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html>
+      <body>{children}</body>
+    </html>
+  );
+}
+```
+
+Nested layouts compose automatically — `app/blog/layout.tsx` wraps all pages under `/blog/`.
+
+### Route groups
+
+Use `(groupName)` folders to organize routes without affecting the URL:
+
+```
+app/
+  (marketing)/
+    page.tsx        → /
+    about/page.tsx  → /about
+  (dashboard)/
+    layout.tsx      → Shared dashboard layout
+    settings/page.tsx → /settings
+```
+
+### Server Components
+
+In the App Router, components are **server components by default**. Add `"use client"` at the top of a file to make it a client component:
+
+```tsx
+"use client";
+
+import React, { useState } from "react";
+
+export default function Counter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(count + 1)}>Count: {count}</button>;
+}
+```
+
+## Link component
+
+Use `Link` for client-side navigation in both routers:
+
+```tsx
+import Link from "rex/link";
+
+<Link href="/about">About</Link>
+```
+
+The `Link` component prefetches pages on hover for instant navigation.

@@ -1,0 +1,76 @@
+# MDX
+
+Rex supports MDX — Markdown files that can include JSX components. Write documentation, blog posts, and content-heavy pages in Markdown while embedding interactive React components.
+
+## Basic usage
+
+Create a page with the `.mdx` extension:
+
+```mdx
+# Welcome to my site
+
+This is written in **Markdown** with JSX support.
+
+<CustomAlert type="info">
+  You can embed React components directly in your content.
+</CustomAlert>
+```
+
+MDX files work as pages in both the Pages Router (`pages/docs.mdx`) and App Router (`app/docs/page.mdx`).
+
+## Frontmatter
+
+Use YAML frontmatter for page metadata:
+
+```mdx
+---
+title: Getting Started
+description: Learn how to use Rex
+---
+
+# {frontmatter.title}
+
+{frontmatter.description}
+```
+
+The `frontmatter` object is available as a variable in your MDX content.
+
+## Custom components
+
+Create an `mdx-components.tsx` file in your project root to override default HTML elements:
+
+```tsx
+import React from "react";
+
+export function useMDXComponents(components: any) {
+  return {
+    h1: ({ children }: any) => (
+      <h1 className="text-3xl font-bold mb-4">{children}</h1>
+    ),
+    code: ({ children }: any) => (
+      <code className="bg-gray-100 px-1 rounded text-sm">{children}</code>
+    ),
+    ...components,
+  };
+}
+```
+
+## Using components in MDX
+
+Import and use React components directly in your MDX files:
+
+```mdx
+import { Chart } from "../components/Chart";
+
+# Sales Report
+
+Here's the quarterly breakdown:
+
+<Chart data={[10, 25, 30, 45]} />
+```
+
+## App Router vs Pages Router
+
+**App Router**: MDX files are server components by default. Use `"use client"` in imported components that need browser APIs.
+
+**Pages Router**: MDX files behave like regular page components. You can export `getServerSideProps` or `getStaticProps` from them.

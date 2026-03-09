@@ -1,0 +1,97 @@
+# CLI Reference
+
+Rex provides a command-line interface for development, building, and running your application.
+
+## rex dev
+
+Start the development server with hot module replacement (HMR).
+
+```bash
+rex dev [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--port <port>` | Port to listen on (default: 3000) |
+| `--root <path>` | Project root directory (default: current directory) |
+
+The dev server watches your files and automatically rebuilds when you make changes. HMR updates are pushed to the browser over a WebSocket connection — no full page reload needed for most changes.
+
+```bash
+rex dev --port 8080
+```
+
+## rex build
+
+Create a production build.
+
+```bash
+rex build [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--root <path>` | Project root directory |
+
+This produces optimized bundles in `.rex/build/`:
+
+- **Server bundle** — single IIFE for V8 SSR
+- **Client bundles** — code-split ESM chunks
+- **Manifest** — route map and build metadata
+- **CSS** — extracted and optimized stylesheets
+
+```bash
+rex build && rex start
+```
+
+## rex start
+
+Start the production server using a pre-built bundle.
+
+```bash
+rex start [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--port <port>` | Port to listen on (default: 3000) |
+| `--root <path>` | Project root directory |
+
+Requires `rex build` to have been run first. Static pages are pre-rendered at startup for zero-latency serving.
+
+## rex typecheck
+
+Run the TypeScript compiler to check for type errors.
+
+```bash
+rex typecheck
+```
+
+Runs `tsc --noEmit` against your project. No TypeScript configuration needed beyond `tsconfig.json`.
+
+## rex lint
+
+Run the linter on your TypeScript and JavaScript files.
+
+```bash
+rex lint
+```
+
+Uses [OxLint](https://oxc.rs/docs/guide/usage/linter) for fast, zero-config linting. No ESLint setup required.
+
+## rex fmt
+
+Format your source files.
+
+```bash
+rex fmt
+```
+
+Formats TypeScript, JavaScript, CSS, and JSON files.
+
+## Environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `PORT` | Override the default port (same as `--port`) |
+| `RUST_LOG` | Set log level — e.g., `RUST_LOG=rex=debug` for verbose output |

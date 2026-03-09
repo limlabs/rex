@@ -1,0 +1,101 @@
+# Configuration
+
+Rex is configured via `rex.config.toml` in your project root. All fields are optional.
+
+## Redirects
+
+Redirect one URL to another:
+
+```toml
+[[redirects]]
+source = "/old-page"
+destination = "/new-page"
+permanent = true
+
+[[redirects]]
+source = "/blog/:slug"
+destination = "/posts/:slug"
+permanent = false
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source` | string | URL pattern to match (supports `:param` segments) |
+| `destination` | string | URL to redirect to (can reference `:param` segments) |
+| `permanent` | boolean | `true` for 308, `false` for 307 |
+
+Redirects are evaluated before route matching.
+
+## Rewrites
+
+Serve content from a different path without changing the URL:
+
+```toml
+[[rewrites]]
+source = "/docs"
+destination = "/docs/getting-started"
+
+[[rewrites]]
+source = "/api/:path*"
+destination = "https://api.example.com/:path*"
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source` | string | URL pattern to match |
+| `destination` | string | Internal or external URL to serve |
+
+Rewrites are transparent to the user — the browser URL stays the same.
+
+## Headers
+
+Add custom HTTP headers to responses:
+
+```toml
+[[headers]]
+source = "/:path*"
+
+  [[headers.headers]]
+  key = "X-Frame-Options"
+  value = "DENY"
+
+  [[headers.headers]]
+  key = "X-Content-Type-Options"
+  value = "nosniff"
+
+[[headers]]
+source = "/api/:path*"
+
+  [[headers.headers]]
+  key = "Cache-Control"
+  value = "no-store"
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source` | string | URL pattern to match |
+| `headers` | array | List of `{ key, value }` pairs |
+
+## Full example
+
+```toml
+[[redirects]]
+source = "/legacy"
+destination = "/"
+permanent = true
+
+[[rewrites]]
+source = "/docs"
+destination = "/docs/getting-started"
+
+[[headers]]
+source = "/:path*"
+
+  [[headers.headers]]
+  key = "X-Powered-By"
+  value = "Rex"
+
+  [[headers.headers]]
+  key = "Strict-Transport-Security"
+  value = "max-age=63072000; includeSubDomains"
+```

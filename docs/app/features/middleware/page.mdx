@@ -1,0 +1,61 @@
+# Middleware
+
+Middleware runs before every request, letting you modify the request or response, redirect users, or add headers.
+
+## Basic usage
+
+Create a `middleware.ts` file in your project root:
+
+```tsx
+import type { RexRequest, RexResponse } from "@limlabs/rex";
+
+export function middleware(request: RexRequest) {
+  // Add a custom header to every response
+  const response = RexResponse.next();
+  response.headers.set("x-powered-by", "rex");
+  return response;
+}
+```
+
+## Redirects
+
+```tsx
+export function middleware(request: RexRequest) {
+  const url = new URL(request.url);
+
+  if (url.pathname === "/old-page") {
+    return RexResponse.redirect(new URL("/new-page", request.url));
+  }
+
+  return RexResponse.next();
+}
+```
+
+## Matchers
+
+By default, middleware runs on every route. Use the `config` export to limit which routes it applies to:
+
+```tsx
+export const config = {
+  matcher: ["/dashboard/:path*", "/api/:path*"],
+};
+
+export function middleware(request: RexRequest) {
+  // Only runs for /dashboard/* and /api/* routes
+  const token = request.headers.get("authorization");
+  if (!token) {
+    return RexResponse.redirect(new URL("/login", request.url));
+  }
+  return RexResponse.next();
+}
+```
+
+## Execution order
+
+Middleware runs after static file resolution but before page rendering:
+
+1. Static file check (public/ directory)
+2. **Middleware** executes
+3. Route matching
+4. Data fetching (getServerSideProps / getStaticProps)
+5. Page rendering (SSR)

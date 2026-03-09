@@ -1,0 +1,70 @@
+# Custom Server
+
+Rex can be embedded into your own server, giving you full control over the HTTP layer while Rex handles routing, bundling, and SSR.
+
+## Node.js / Bun (NAPI)
+
+Rex provides NAPI bindings so you can use it from Node.js or Bun:
+
+```js
+const { createRex } = require("@limlabs/rex/server");
+
+async function main() {
+  const rex = await createRex({ root: "." });
+  const handler = rex.getRequestHandler();
+
+  const http = require("http");
+  const server = http.createServer(async (req, res) => {
+    // Add your own routes or middleware here
+    if (req.url === "/health") {
+      res.writeHead(200);
+      res.end("ok");
+      return;
+    }
+
+    // Let Rex handle everything else
+    await handler(req, res);
+  });
+
+  server.listen(3000, () => {
+    console.log("Custom server running on http://localhost:3000");
+  });
+}
+
+main();
+```
+
+This gives you the flexibility of a custom Node.js server with Rex's Rust-powered rendering pipeline.
+
+## Rust
+
+Embed Rex directly in your own Axum server for maximum performance:
+
+```rust
+use axum::{Router, routing::get};
+use rex_server::RexApp;
+
+#[tokio::main]
+async fn main() {
+    let rex = RexApp::new("./my-app").await.unwrap();
+    let rex_router = rex.router();
+
+    let app = Router::new()
+        .route("/health", get(|| async { "ok" }))
+        .merge(rex_router);
+
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+        .await
+        .unwrap();
+    axum::serve(listener, app).await.unwrap();
+}
+```
+
+## When to use a custom server
+
+- Adding custom API endpoints alongside Rex pages
+- Integrating with existing services or middleware
+- Custom authentication or rate limiting at the HTTP layer
+- Health checks and observability endpoints for your infrastructure
+
+For most applications, `rex start` is sufficient. Use a custom server only when you need control that Rex's built-in server doesn't provide.

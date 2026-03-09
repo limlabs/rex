@@ -1,0 +1,82 @@
+# Quickstart
+
+Get a Rex app running in under a minute.
+
+## Create a new project
+
+```bash
+mkdir my-app && cd my-app
+npm init -y
+npm install @limlabs/rex react react-dom
+```
+
+## Add your first page
+
+Create `pages/index.tsx`:
+
+```tsx
+import React from "react";
+
+export default function Home() {
+  return (
+    <div>
+      <h1>Hello from Rex!</h1>
+      <p>Your Rust-powered React app is running.</p>
+    </div>
+  );
+}
+```
+
+## Start the dev server
+
+```bash
+npx rex dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) to see your page.
+
+## Add another page
+
+Create `pages/about.tsx`:
+
+```tsx
+import React from "react";
+import Link from "rex/link";
+
+export default function About() {
+  return (
+    <div>
+      <h1>About</h1>
+      <p>This is the about page.</p>
+      <Link href="/">Back home</Link>
+    </div>
+  );
+}
+```
+
+Rex uses file-system routing — every file in `pages/` becomes a route automatically.
+
+## Add server-side data
+
+```tsx
+import React from "react";
+
+export async function getServerSideProps() {
+  return {
+    props: {
+      timestamp: new Date().toISOString(),
+    },
+  };
+}
+
+export default function Dashboard({ timestamp }: { timestamp: string }) {
+  return <p>Server time: {timestamp}</p>;
+}
+```
+
+## Next steps
+
+- [Installation](/getting-started/installation) — system requirements and install options
+- [Architecture](/architecture) — how Rex works under the hood
+- [Routing](/features/routing) — Pages Router and App Router
+- [CLI Reference](/cli) — all available commands

@@ -1,0 +1,114 @@
+# Styling
+
+Rex supports Tailwind CSS, CSS Modules, global CSS, and Google Fonts.
+
+## Tailwind CSS
+
+Install Tailwind as a dependency:
+
+```bash
+npm install tailwindcss @tailwindcss/cli
+```
+
+Create a CSS file with the Tailwind import:
+
+```css
+/* styles/globals.css */
+@import "tailwindcss";
+```
+
+Import it in your app entry:
+
+```tsx
+// pages/_app.tsx (Pages Router)
+import "../styles/globals.css";
+
+// app/layout.tsx (App Router)
+import "../styles/globals.css";
+```
+
+Then use Tailwind utilities in your components:
+
+```tsx
+export default function Card() {
+  return (
+    <div className="rounded-lg border border-gray-200 p-6 shadow-sm">
+      <h2 className="text-xl font-bold text-gray-900">Hello</h2>
+    </div>
+  );
+}
+```
+
+Rex processes Tailwind during the build — no PostCSS config needed.
+
+## CSS Modules
+
+Files ending in `.module.css` are scoped automatically:
+
+```css
+/* Button.module.css */
+.button {
+  background: #10b981;
+  color: white;
+  padding: 8px 16px;
+  border-radius: 6px;
+}
+
+.button:hover {
+  background: #059669;
+}
+```
+
+```tsx
+import styles from "./Button.module.css";
+
+export default function Button() {
+  return <button className={styles.button}>Click me</button>;
+}
+```
+
+Class names are scoped to the component, so `.button` won't conflict with other `.button` classes elsewhere. The generated class names follow the pattern `{FileName}_{class}_{hash}`.
+
+## Global CSS
+
+Import CSS files in `_app.tsx` (Pages Router) or `layout.tsx` (App Router) to apply them globally:
+
+```tsx
+import "../styles/globals.css";
+```
+
+Global styles apply to all pages. Use them for resets, typography defaults, and CSS custom properties.
+
+## Google Fonts
+
+Import fonts from `rex/font/google`:
+
+```tsx
+import { Inter } from "rex/font/google";
+
+const inter = Inter({
+  weight: ["400", "600", "700"],
+  subsets: ["latin"],
+  variable: "--font-sans",
+});
+
+export default function Layout({ children }) {
+  return (
+    <html className={inter.className}>
+      <body>{children}</body>
+    </html>
+  );
+}
+```
+
+Fonts are fetched and optimized during the build. No external requests are made at runtime.
+
+### Using CSS variables
+
+Pass `variable` to create a CSS custom property, then reference it in your styles:
+
+```css
+body {
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+```

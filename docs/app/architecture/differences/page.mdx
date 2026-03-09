@@ -1,0 +1,60 @@
+# Differences from Next.js
+
+Rex aims for API compatibility with Next.js while making different architectural choices. Here's what's the same, what's different, and what's new.
+
+## What works the same
+
+- **File-system routing** — `pages/` and `app/` directories
+- **Dynamic routes** — `[param]` and `[...catchAll]` segments
+- **Data fetching** — `getServerSideProps`, `getStaticProps`
+- **React Server Components** — `"use client"` directive, server/client split
+- **`_app.tsx` and `_document.tsx`** — custom app wrapper and document
+- **`Link` component** — client-side navigation with prefetching
+- **`Head` component** — inject tags into `<head>`
+- **CSS Modules** — `.module.css` scoped styles
+- **Middleware** — `middleware.ts` with request/response modification
+- **API routes** — `pages/api/*.ts` handlers
+
+## What's not supported
+
+| Feature | Reason |
+|---------|--------|
+| Edge Runtime | Rex uses V8 isolates, not edge workers |
+| i18n routing | Not yet implemented |
+| ISR (Incremental Static Regeneration) | Static pages are built once at build time |
+| Image Optimization API | Use standard `<img>` or a CDN |
+| Built-in caching layer | No opaque fetch cache — data fetching is explicit |
+| `next/font` local loading | Use `rex/font/google` for Google Fonts |
+
+## What's new in Rex
+
+### Rust performance
+
+The server, router, and build pipeline are Rust-native. This means:
+
+- **Faster cold starts** — single binary, no Node.js boot
+- **Lower memory** — V8 isolates are lighter than full Node.js processes
+- **Smaller Docker images** — no `node_modules` on the server
+
+### Built-in tooling
+
+Rex includes tools that Next.js requires separate packages for:
+
+- **Linting** — `rex lint` runs OxLint (no ESLint config needed)
+- **Formatting** — `rex fmt` (no Prettier config needed)
+- **Type checking** — `rex typecheck` runs the TypeScript compiler
+
+### Custom server options
+
+Beyond Node.js, Rex supports:
+
+- **Rust custom server** — embed Rex as a library in your own Axum server
+- **NAPI bindings** — use Rex from Node.js or Bun with native performance
+
+### MCP server
+
+Rex can expose an MCP (Model Context Protocol) server, making your app accessible to AI agents and tools.
+
+### No vendor lock-in
+
+Rex is open-source with no commercial platform dependency. Deploy anywhere that runs a Docker container or a Linux binary.

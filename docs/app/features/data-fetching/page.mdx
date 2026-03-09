@@ -1,0 +1,116 @@
+# Data Fetching
+
+Rex supports three data-fetching strategies, depending on when and how your data is loaded.
+
+## getServerSideProps
+
+Runs on **every request**. The page is server-rendered with fresh data each time.
+
+```tsx
+import React from "react";
+
+export async function getServerSideProps(context: {
+  params: Record<string, string>;
+  query: Record<string, string>;
+}) {
+  const res = await fetch("https://api.example.com/data");
+  const data = await res.json();
+
+  return {
+    props: { data },
+  };
+}
+
+export default function Page({ data }: { data: any }) {
+  return <pre>{JSON.stringify(data, null, 2)}</pre>;
+}
+```
+
+### Context object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `params` | `Record<string, string>` | Dynamic route parameters |
+| `query` | `Record<string, string>` | URL query string parameters |
+
+### Return values
+
+```tsx
+// Pass data to the page
+return { props: { data } };
+
+// Redirect the user
+return { redirect: { destination: "/login", permanent: false } };
+
+// Show 404
+return { notFound: true };
+```
+
+## getStaticProps
+
+Runs at **build time**. The page is pre-rendered to static HTML and served from cache.
+
+```tsx
+import React from "react";
+
+export async function getStaticProps() {
+  const posts = await fetch("https://api.example.com/posts").then((r) =>
+    r.json()
+  );
+
+  return {
+    props: { posts },
+  };
+}
+
+export default function Blog({ posts }: { posts: any[] }) {
+  return (
+    <ul>
+      {posts.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+Static pages are rendered once when the server starts and served without hitting V8 again. This is the fastest option for content that doesn't change between requests.
+
+## React Server Components
+
+In the **App Router**, components are server components by default. They can be `async` and fetch data directly:
+
+```tsx
+// app/posts/page.tsx — this is a server component
+import React from "react";
+
+export default async function Posts() {
+  const posts = await fetch("https://api.example.com/posts").then((r) =>
+    r.json()
+  );
+
+  return (
+    <ul>
+      {posts.map((post: any) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+Server components can import and render client components, but not the other way around. Use `"use client"` at the top of files that need browser APIs or React hooks like `useState`.
+
+## No data function
+
+Pages without any data-fetching function are pre-rendered as static HTML:
+
+```tsx
+import React from "react";
+
+export default function About() {
+  return <h1>About us</h1>;
+}
+```
+
+These pages are the fastest to serve — they're rendered once at startup and served as static files.
