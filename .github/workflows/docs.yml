@@ -30,17 +30,17 @@ jobs:
         run: npm install
         working-directory: docs
 
-      - name: Build Rex
-        run: cargo build --release
+      - name: Build Rex (export-only, skips dev/lint)
+        run: cargo build --bin rex --no-default-features --features build --release
 
-      - name: Build docs site
-        run: ./target/release/rex build
+      - name: Export docs site
+        run: ./target/release/rex export --force
         working-directory: docs
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/.rex/build/client
+          path: docs/.rex/export
 
   deploy:
     environment:
