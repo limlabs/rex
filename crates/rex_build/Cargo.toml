@@ -43,3 +43,4 @@ oxc_transformer = "0.115"
 [dev-dependencies]
 tempfile = "3"
 rex_v8 = { path = "../rex_v8" }
+rex_server = { path = "../rex_server" }
