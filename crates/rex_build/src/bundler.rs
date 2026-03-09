@@ -38,6 +38,9 @@ pub fn resolve_modules_dirs(config: &RexConfig) -> Result<Vec<String>> {
             "Using built-in React {}",
             crate::builtin_modules::EMBEDDED_REACT_VERSION
         );
+    } else {
+        // Project manages its own deps — still ensure Rex-internal packages
+        crate::builtin_modules::ensure_internal_packages(&config.project_root)?;
     }
     Ok(vec![
         config

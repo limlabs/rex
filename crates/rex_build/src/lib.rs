@@ -23,6 +23,7 @@ pub(crate) mod tailwind_scan;
 pub(crate) mod tailwind_v8;
 
 // Internal modules extracted from rsc_bundler.rs
+pub(crate) mod cjs_interop;
 pub(crate) mod rsc_build_config;
 pub(crate) mod rsc_client_bundle;
 pub(crate) mod rsc_entries;

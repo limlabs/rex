@@ -5,9 +5,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export function fileURLToPath(url: string | URL): string {
+    if (url == null) return '';
     const urlStr = typeof url === 'string' ? url : url.href;
     if (!urlStr.startsWith('file://')) {
-        throw new TypeError('The URL must be of scheme file');
+        return urlStr; // Gracefully return as-is for non-file URLs in V8
     }
     // Remove file:// prefix and decode percent-encoding
     let path = urlStr.slice(7);

@@ -562,6 +562,11 @@ pub async fn build_server_bundle(
     ];
     // Append user-defined aliases from rex.config build.alias
     aliases.extend(project_config.build.resolved_aliases(&config.project_root));
+    // tsconfig auto-resolution is disabled (to prevent rex/* overrides), so we
+    // manually parse tsconfig paths for user aliases like @/ → src/.
+    aliases.extend(crate::build_utils::tsconfig_path_aliases(
+        &config.project_root,
+    ));
 
     let options = rolldown::BundlerOptions {
         input: Some(vec![rolldown::InputItem {

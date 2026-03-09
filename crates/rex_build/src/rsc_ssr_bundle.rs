@@ -41,6 +41,9 @@ pub(crate) async fn build_rsc_ssr_bundle(
     let runtime_dir = crate::build_utils::runtime_server_dir()?;
     ssr_aliases.extend(crate::build_utils::node_polyfill_aliases(&runtime_dir));
     ssr_aliases.extend(ctx.mdx_aliases.clone());
+    // Manual tsconfig paths (since we disable tsconfig auto-resolution to
+    // prevent "jsx": "preserve" from leaving raw JSX in the bundle).
+    ssr_aliases.extend(crate::build_utils::tsconfig_path_aliases(&ctx.project_root));
 
     let options = rolldown::BundlerOptions {
         input: Some(vec![rolldown::InputItem {
@@ -57,7 +60,10 @@ pub(crate) async fn build_rsc_ssr_bundle(
         banner: Some(rolldown::AddonOutputOption::String(Some(
             ctx.server_banner(),
         ))),
-        tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+        // Disable tsconfig auto-resolution — we manually parse paths into
+        // aliases above.  This prevents "jsx": "preserve" in tsconfig from
+        // leaving raw JSX in the output.
+        tsconfig: Some(rolldown_common::TsConfig::Auto(false)),
         minify: ctx.minify_options(),
         treeshake: react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {

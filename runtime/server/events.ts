@@ -12,12 +12,18 @@ interface ListenerEntry {
 }
 
 export class EventEmitter {
-    private _events: Map<string, ListenerEntry[]>;
-    private _maxListeners: number;
+    private _events!: Map<string, ListenerEntry[]>;
+    private _maxListeners!: number;
 
     constructor() {
         this._events = new Map();
         this._maxListeners = 10;
+    }
+
+    // Lazy init for subclasses that don't call super()
+    private _ensureEvents(): Map<string, ListenerEntry[]> {
+        if (!this._events) this._events = new Map();
+        return this._events;
     }
 
     on(event: string, listener: Listener): this {
@@ -37,29 +43,31 @@ export class EventEmitter {
     }
 
     removeListener(event: string, listener: Listener): this {
-        const entries = this._events.get(event);
+        const events = this._ensureEvents();
+        const entries = events.get(event);
         if (!entries) return this;
         const idx = entries.findIndex(e => e.fn === listener);
         if (idx !== -1) {
             entries.splice(idx, 1);
-            if (entries.length === 0) this._events.delete(event);
+            if (entries.length === 0) events.delete(event);
         }
         return this;
     }
 
     removeAllListeners(event?: string): this {
+        const events = this._ensureEvents();
         if (event !== undefined) {
-            this._events.delete(event);
+            events.delete(event);
         } else {
-            this._events.clear();
+            events.clear();
         }
         return this;
     }
 
     emit(event: string, ...args: any[]): boolean {
-        const entries = this._events.get(event);
+        const events = this._ensureEvents();
+        const entries = events.get(event);
         if (!entries || entries.length === 0) return false;
-        // Copy to allow mutation during iteration
         const copy = entries.slice();
         for (const entry of copy) {
             if (entry.once) {
@@ -71,18 +79,18 @@ export class EventEmitter {
     }
 
     listeners(event: string): Listener[] {
-        const entries = this._events.get(event);
+        const entries = this._ensureEvents().get(event);
         if (!entries) return [];
         return entries.map(e => e.fn);
     }
 
     listenerCount(event: string): number {
-        const entries = this._events.get(event);
+        const entries = this._ensureEvents().get(event);
         return entries ? entries.length : 0;
     }
 
     eventNames(): string[] {
-        return Array.from(this._events.keys());
+        return Array.from(this._ensureEvents().keys());
     }
 
     setMaxListeners(n: number): this {
@@ -91,7 +99,7 @@ export class EventEmitter {
     }
 
     getMaxListeners(): number {
-        return this._maxListeners;
+        return this._maxListeners || 10;
     }
 
     prependListener(event: string, listener: Listener): this {
@@ -107,10 +115,11 @@ export class EventEmitter {
     }
 
     private _addListener(event: string, listener: Listener, once: boolean, prepend = false): this {
-        let entries = this._events.get(event);
+        const events = this._ensureEvents();
+        let entries = events.get(event);
         if (!entries) {
             entries = [];
-            this._events.set(event, entries);
+            events.set(event, entries);
         }
         const entry: ListenerEntry = { fn: listener, once };
         if (prepend) {
@@ -128,5 +137,24 @@ export class EventEmitter {
 
 // Allow EventEmitter to be used as a base class
 (EventEmitter as any).EventEmitter = EventEmitter;
+
+// Static helpers for CJS interop
+export function getMaxListeners(emitter: EventEmitter): number {
+    return emitter.getMaxListeners();
+}
+export function setMaxListeners(n: number, ...emitters: EventEmitter[]): void {
+    for (const e of emitters) e.setMaxListeners(n);
+}
+export const defaultMaxListeners = 10;
+
+export function once(emitter: EventEmitter, event: string): Promise<any[]> {
+    return new Promise((resolve) => {
+        emitter.once(event, (...args: any[]) => resolve(args));
+    });
+}
+
+export function on(_emitter: EventEmitter, _event: string): AsyncIterable<any> {
+    return { [Symbol.asyncIterator]() { return { next() { return new Promise(() => {}); } }; } };
+}
 
 export default EventEmitter;

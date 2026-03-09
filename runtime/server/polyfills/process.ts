@@ -2,6 +2,12 @@
 // process polyfill for bare V8
 // Note: process.env is overwritten by Rust's build_process_env_script() at isolate
 // creation time, so the env object here is just a fallback.
+
+// Node.js `global` alias — many packages reference `global` instead of `globalThis`
+if (typeof (globalThis as any).global === 'undefined') {
+    (globalThis as any).global = globalThis;
+}
+
 if (typeof (globalThis as any).process === 'undefined') {
     (globalThis as any).process = { env: { NODE_ENV: 'production' } };
 }
@@ -19,11 +25,17 @@ if (typeof (globalThis as any).process === 'undefined') {
         };
     }
 
-    // versions — intentionally omit `node` key so libraries that check
-    // `process.versions.node` know they're NOT running on Node.js.
-    // pg uses this to decide between legacy crypto and WebCrypto paths.
+    // versions — provide a fake node version so libraries that call
+    // `process.versions.node.split(...)` don't crash. Some libs (undici,
+    // drizzle) unconditionally parse the version string at module init.
     if (!p.versions) {
         p.versions = {};
+    }
+    if (!p.versions.node) {
+        p.versions.node = '20.0.0';
+    }
+    if (!p.version) {
+        p.version = 'v20.0.0';
     }
 
     // platform — used by pg for connection parameter defaults

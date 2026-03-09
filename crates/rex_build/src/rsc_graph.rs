@@ -135,21 +135,28 @@ fn has_expression_use_server(expr: &oxc_ast::ast::Expression) -> bool {
     }
 }
 
+/// File extensions that are non-code assets — skip during module graph analysis.
+const ASSET_EXTENSIONS: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "ico", "avif", "bmp", "tiff", "svg", "css", "scss",
+    "sass", "less", "woff", "woff2", "ttf", "eot", "otf", "mp3", "mp4", "wav", "ogg", "webm",
+    "pdf", "json", "mdx",
+];
+
 /// Detect `"use client"` directive and extract exports from a source file.
 fn analyze_module(path: &Path, root: &Path) -> Result<ModuleInfo> {
-    // MDX files cannot have "use client"/"use server" directives.
-    // They always export a single default component. Skip OXC parsing
-    // since MDX syntax is not valid JavaScript.
-    if path.extension().and_then(|e| e.to_str()) == Some("mdx") {
-        return Ok(ModuleInfo {
-            path: path.to_path_buf(),
-            is_client: false,
-            is_server: false,
-            uses_dynamic_functions: false,
-            imports: Vec::new(),
-            exports: vec!["default".to_string()],
-            server_functions: Vec::new(),
-        });
+    // Skip non-code assets (binary files, stylesheets, fonts, MDX, etc.)
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        if ASSET_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
+            return Ok(ModuleInfo {
+                path: path.to_path_buf(),
+                is_client: false,
+                is_server: false,
+                uses_dynamic_functions: false,
+                imports: Vec::new(),
+                exports: vec!["default".to_string()],
+                server_functions: Vec::new(),
+            });
+        }
     }
 
     let source = std::fs::read_to_string(path)
@@ -286,6 +293,29 @@ fn analyze_module(path: &Path, root: &Path) -> Result<ModuleInfo> {
     })
 }
 
+/// Try resolving a candidate path with extension guessing and index fallback.
+fn try_resolve_path(candidate: &Path) -> Option<PathBuf> {
+    if candidate.exists() && candidate.is_file() {
+        return candidate.canonicalize().ok();
+    }
+    let extensions = ["tsx", "ts", "jsx", "js", "mdx"];
+    for ext in &extensions {
+        let with_ext = candidate.with_extension(ext);
+        if with_ext.exists() && with_ext.is_file() {
+            return with_ext.canonicalize().ok();
+        }
+    }
+    if candidate.is_dir() {
+        for ext in &extensions {
+            let index = candidate.join(format!("index.{ext}"));
+            if index.exists() && index.is_file() {
+                return index.canonicalize().ok();
+            }
+        }
+    }
+    None
+}
+
 /// Resolve a relative import specifier to an absolute path.
 ///
 /// Handles: relative paths (`./Foo`, `../Foo`), with extension guessing
@@ -307,6 +337,20 @@ fn resolve_import(from: &Path, specifier: &str, root: &Path) -> Option<PathBuf> 
         return None;
     }
 
+    // Try tsconfig path aliases (e.g. @/ → src/)
+    let aliases = crate::build_utils::tsconfig_path_aliases(root);
+    for (prefix, targets) in &aliases {
+        if specifier.starts_with(prefix) {
+            if let Some(Some(target)) = targets.first() {
+                let rest = &specifier[prefix.len()..];
+                let candidate = PathBuf::from(format!("{target}{rest}"));
+                if let Some(resolved) = try_resolve_path(&candidate) {
+                    return Some(resolved);
+                }
+            }
+        }
+    }
+
     // Only resolve relative imports
     if !specifier.starts_with('.') {
         return None;
@@ -314,32 +358,7 @@ fn resolve_import(from: &Path, specifier: &str, root: &Path) -> Option<PathBuf> 
 
     let dir = from.parent()?;
     let candidate = dir.join(specifier);
-
-    // If it already has an extension and exists, use it
-    if candidate.exists() && candidate.is_file() {
-        return candidate.canonicalize().ok();
-    }
-
-    // Try standard extensions (includes .mdx for MDX content imports)
-    let extensions = ["tsx", "ts", "jsx", "js", "mdx"];
-    for ext in &extensions {
-        let with_ext = candidate.with_extension(ext);
-        if with_ext.exists() && with_ext.is_file() {
-            return with_ext.canonicalize().ok();
-        }
-    }
-
-    // Try as directory with index file
-    if candidate.is_dir() {
-        for ext in &extensions {
-            let index = candidate.join(format!("index.{ext}"));
-            if index.exists() && index.is_file() {
-                return index.canonicalize().ok();
-            }
-        }
-    }
-
-    None
+    try_resolve_path(&candidate)
 }
 
 /// Analyze the module graph starting from the given entry points.
