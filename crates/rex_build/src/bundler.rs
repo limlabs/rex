@@ -361,7 +361,14 @@ globalThis.__rex_resolve_api = function() {
 
     let runtime_dir = runtime_server_dir()?;
     let mut module_types = rustc_hash::FxHashMap::default();
-    module_types.insert(".css".to_string(), rolldown::ModuleType::Empty);
+    for ext in &[".css", ".scss", ".sass", ".less", ".mdx", ".svg"] {
+        module_types.insert((*ext).to_string(), rolldown::ModuleType::Empty);
+    }
+    for ext in &[
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2", ".ttf", ".eot",
+    ] {
+        module_types.insert((*ext).to_string(), rolldown::ModuleType::Binary);
+    }
 
     let options = rolldown::BundlerOptions {
         input: Some(vec![rolldown::InputItem {

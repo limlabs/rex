@@ -49,10 +49,23 @@ impl<'a> RscBuildContext<'a> {
         &self.build_id[..8.min(self.build_id.len())]
     }
 
-    /// CSS → empty module type map (shared across all 3 bundles).
-    pub fn css_empty_module_types(&self) -> rustc_hash::FxHashMap<String, rolldown::ModuleType> {
+    /// Empty module type map for non-JS assets (shared across all 3 bundles).
+    ///
+    /// These file types cannot be parsed as JavaScript by rolldown/OXC.
+    /// They are treated as empty modules so bundling can proceed without
+    /// crashing on transitive imports from node_modules.
+    pub fn non_js_empty_module_types(&self) -> rustc_hash::FxHashMap<String, rolldown::ModuleType> {
         let mut m = rustc_hash::FxHashMap::default();
-        m.insert(".css".to_string(), rolldown::ModuleType::Empty);
+        // Text-based non-JS assets → empty
+        for ext in &[".css", ".scss", ".sass", ".less", ".mdx", ".svg"] {
+            m.insert((*ext).to_string(), rolldown::ModuleType::Empty);
+        }
+        // Binary assets → binary (prevents UTF-8 read errors)
+        for ext in &[
+            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2", ".ttf", ".eot",
+        ] {
+            m.insert((*ext).to_string(), rolldown::ModuleType::Binary);
+        }
         m
     }
 
@@ -245,11 +258,14 @@ mod tests {
     }
 
     #[test]
-    fn css_empty_module_types_has_css() {
+    fn non_js_empty_module_types_has_expected_extensions() {
         let config = rex_core::RexConfig::new(std::path::PathBuf::from("/tmp")).with_dev(true);
         let ctx = RscBuildContext::new(&config, "test", &[], &[]);
-        let types = ctx.css_empty_module_types();
+        let types = ctx.non_js_empty_module_types();
         assert!(types.contains_key(".css"));
+        assert!(types.contains_key(".scss"));
+        assert!(types.contains_key(".mdx"));
+        assert!(types.contains_key(".svg"));
     }
 
     #[test]
