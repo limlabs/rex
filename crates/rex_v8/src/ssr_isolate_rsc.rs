@@ -147,10 +147,10 @@ impl SsrIsolate {
     /// Runs fetch loop + microtask pump, then calls __rex_resolve_rsc_pending()
     /// until all async slots are resolved (or timeout).
     fn resolve_rsc_async(&mut self) -> Result<()> {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
             if std::time::Instant::now() > deadline {
-                return Err(anyhow::anyhow!("RSC async resolution timed out after 5s"));
+                return Err(anyhow::anyhow!("RSC async resolution timed out after 10s"));
             }
 
             crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);

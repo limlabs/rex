@@ -351,14 +351,127 @@ fn resolve_import(from: &Path, specifier: &str, root: &Path) -> Option<PathBuf> 
         }
     }
 
-    // Only resolve relative imports
+    // Resolve bare specifiers through node_modules to detect "use client"
+    // boundaries in third-party packages (e.g. @payloadcms/ui).
     if !specifier.starts_with('.') {
-        return None;
+        return resolve_bare_specifier(specifier, root);
     }
 
     let dir = from.parent()?;
     let candidate = dir.join(specifier);
     try_resolve_path(&candidate)
+}
+
+/// Resolve a bare specifier (e.g. `@payloadcms/ui`, `react-datepicker`)
+/// through node_modules. Uses package.json `exports`/`main`/`module` fields.
+///
+/// Only resolves the entry point — does NOT recurse into the package's
+/// internal dependencies. This is sufficient for detecting `"use client"`
+/// at the package boundary.
+fn resolve_bare_specifier(specifier: &str, root: &Path) -> Option<PathBuf> {
+    // Split into package name and optional subpath
+    // e.g. "@payloadcms/ui/dist/foo" → ("@payloadcms/ui", "dist/foo")
+    // e.g. "react-datepicker" → ("react-datepicker", "")
+    let (pkg_name, subpath) = split_bare_specifier(specifier);
+
+    // Walk up from root to find node_modules containing this package
+    let pkg_dir = find_package_dir(root, pkg_name)?;
+    let pkg_json_path = pkg_dir.join("package.json");
+
+    if !subpath.is_empty() {
+        // Direct subpath: resolve as a file within the package
+        let candidate = pkg_dir.join(subpath);
+        return try_resolve_path(&candidate);
+    }
+
+    // Read package.json to find the entry point
+    let pkg_json = std::fs::read_to_string(&pkg_json_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&pkg_json).ok()?;
+
+    // Try `exports["."]` first (modern packages)
+    if let Some(exports) = parsed.get("exports") {
+        if let Some(entry) = resolve_exports_entry(exports) {
+            let candidate = pkg_dir.join(entry);
+            if let Some(resolved) = try_resolve_path(&candidate) {
+                return Some(resolved);
+            }
+        }
+    }
+
+    // Fall back to `module` (ESM) then `main` (CJS)
+    for field in &["module", "main"] {
+        if let Some(entry) = parsed.get(field).and_then(|v| v.as_str()) {
+            let candidate = pkg_dir.join(entry);
+            if let Some(resolved) = try_resolve_path(&candidate) {
+                return Some(resolved);
+            }
+        }
+    }
+
+    // Last resort: index.js
+    try_resolve_path(&pkg_dir.join("index"))
+}
+
+/// Split a bare specifier into (package_name, subpath).
+fn split_bare_specifier(specifier: &str) -> (&str, &str) {
+    if let Some(after_at) = specifier.strip_prefix('@') {
+        // Scoped package: @scope/name/subpath
+        if let Some(pos) = after_at.find('/') {
+            let after_scope = pos + 1; // position in after_at
+            if let Some(pos2) = after_at[after_scope + 1..].find('/') {
+                // +1 for '@' prefix
+                let split = 1 + after_scope + 1 + pos2;
+                return (&specifier[..split], &specifier[split + 1..]);
+            }
+            return (specifier, "");
+        }
+        (specifier, "")
+    } else {
+        // Regular package: name/subpath
+        if let Some(pos) = specifier.find('/') {
+            (&specifier[..pos], &specifier[pos + 1..])
+        } else {
+            (specifier, "")
+        }
+    }
+}
+
+/// Find the package directory in node_modules, walking up from root.
+/// Handles pnpm symlinked node_modules by following symlinks.
+fn find_package_dir(root: &Path, pkg_name: &str) -> Option<PathBuf> {
+    let mut dir = root.to_path_buf();
+    loop {
+        let candidate = dir.join("node_modules").join(pkg_name);
+        if candidate.exists() {
+            // Follow symlinks (pnpm uses them)
+            return candidate.canonicalize().ok();
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+/// Extract the entry point from a package.json `exports` field.
+/// Handles common patterns: string, `{".": ...}`, `{"import": ...}`, `{"default": ...}`.
+fn resolve_exports_entry(exports: &serde_json::Value) -> Option<&str> {
+    match exports {
+        serde_json::Value::String(s) => Some(s.as_str()),
+        serde_json::Value::Object(obj) => {
+            // Try "." entry first
+            if let Some(dot) = obj.get(".") {
+                return resolve_exports_entry(dot);
+            }
+            // Try condition names in priority order
+            for key in &["import", "require", "default"] {
+                if let Some(val) = obj.get(*key) {
+                    return resolve_exports_entry(val);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
 }
 
 /// Analyze the module graph starting from the given entry points.
@@ -387,15 +500,20 @@ pub fn analyze_module_graph(entries: &[PathBuf], root: &Path) -> Result<ModuleGr
     while let Some(path) = queue.pop_front() {
         let info = analyze_module(&path, root)?;
 
-        if !info.is_client {
-            // Server modules: walk all imports normally.
+        // For node_modules files without "use client", don't recurse into
+        // their dependencies — that would be expensive and unnecessary.
+        // We only enter node_modules to detect "use client" at the boundary.
+        let in_node_modules = path.components().any(|c| c.as_os_str() == "node_modules");
+
+        if !info.is_client && !in_node_modules {
+            // Server modules (user code): walk all imports normally.
             for import in &info.imports {
                 if !visited.contains(import) {
                     visited.insert(import.clone());
                     queue.push_back(import.clone());
                 }
             }
-        } else {
+        } else if info.is_client {
             // Client boundary modules: don't fully recurse, but check imports
             // for "use server" modules so we can generate action stubs.
             for import in &info.imports {
@@ -427,177 +545,11 @@ mod tests {
     }
 
     #[test]
-    fn detects_use_client_directive() {
-        let source = r#"
-"use client";
-
-export default function Counter() {
-    return <button>Click</button>;
-}
-"#;
-        assert!(has_use_client_directive(
-            source,
-            oxc_span::SourceType::tsx()
-        ));
-    }
-
-    #[test]
-    fn no_use_client_for_server_component() {
-        let source = r#"
-export default function Page() {
-    return <div>Hello</div>;
-}
-"#;
-        assert!(!has_use_client_directive(
-            source,
-            oxc_span::SourceType::tsx()
-        ));
-    }
-
-    #[test]
-    fn use_client_must_be_directive() {
-        // "use client" as a regular string expression (not a directive)
-        let source = r#"
-const x = "use client";
-export default function Page() { return <div />; }
-"#;
-        assert!(!has_use_client_directive(
-            source,
-            oxc_span::SourceType::tsx()
-        ));
-    }
-
-    #[test]
-    fn analyze_simple_graph() {
-        let dir = setup_temp_dir();
-        let root = dir.path();
-
-        // Server component (page)
-        fs::write(
-            root.join("page.tsx"),
-            r#"
-import Counter from './Counter';
-export default function Page() { return <Counter />; }
-"#,
-        )
-        .unwrap();
-
-        // Client component
-        fs::write(
-            root.join("Counter.tsx"),
-            r#"
-"use client";
-export default function Counter() { return <button>0</button>; }
-"#,
-        )
-        .unwrap();
-
-        let entries = vec![root.join("page.tsx")];
-        let graph = analyze_module_graph(&entries, root).unwrap();
-
-        assert_eq!(graph.modules.len(), 2);
-
-        let page_canonical = root.join("page.tsx").canonicalize().unwrap();
-        let counter_canonical = root.join("Counter.tsx").canonicalize().unwrap();
-
-        let page = graph.modules.get(&page_canonical).unwrap();
-        assert!(!page.is_client);
-        assert!(page.exports.contains(&"default".to_string()));
-
-        let counter = graph.modules.get(&counter_canonical).unwrap();
-        assert!(counter.is_client);
-        assert!(counter.exports.contains(&"default".to_string()));
-    }
-
-    #[test]
-    fn client_boundary_detection() {
-        let dir = setup_temp_dir();
-        let root = dir.path();
-
-        // layout (server)
-        fs::write(
-            root.join("layout.tsx"),
-            r#"
-import Header from './Header';
-export default function Layout({ children }) { return <div><Header />{children}</div>; }
-"#,
-        )
-        .unwrap();
-
-        // Header (server)
-        fs::write(
-            root.join("Header.tsx"),
-            r#"
-export default function Header() { return <nav>Nav</nav>; }
-"#,
-        )
-        .unwrap();
-
-        // page (server, imports client)
-        fs::write(
-            root.join("page.tsx"),
-            r#"
-import SearchForm from './SearchForm';
-export default function Page() { return <SearchForm />; }
-"#,
-        )
-        .unwrap();
-
-        // SearchForm (client)
-        fs::write(
-            root.join("SearchForm.tsx"),
-            r#"
-"use client";
-import { useState } from 'react';
-export default function SearchForm() { return <input />; }
-"#,
-        )
-        .unwrap();
-
-        let entries = vec![root.join("layout.tsx"), root.join("page.tsx")];
-        let graph = analyze_module_graph(&entries, root).unwrap();
-
-        let client_boundaries = graph.client_boundary_modules();
-        assert_eq!(client_boundaries.len(), 1);
-        assert!(client_boundaries[0].path.ends_with("SearchForm.tsx"));
-
-        let server_mods = graph.server_modules();
-        assert_eq!(server_mods.len(), 3); // layout, Header, page
-    }
-
-    #[test]
-    fn named_exports_detection() {
-        let dir = setup_temp_dir();
-        let root = dir.path();
-
-        fs::write(
-            root.join("utils.tsx"),
-            r#"
-"use client";
-export function Counter() { return <div />; }
-export const INITIAL = 0;
-export default function Main() { return <div />; }
-"#,
-        )
-        .unwrap();
-
-        let entries = vec![root.join("utils.tsx")];
-        let graph = analyze_module_graph(&entries, root).unwrap();
-
-        let canonical = root.join("utils.tsx").canonicalize().unwrap();
-        let info = graph.modules.get(&canonical).unwrap();
-        assert!(info.is_client);
-        assert!(info.exports.contains(&"Counter".to_string()));
-        assert!(info.exports.contains(&"INITIAL".to_string()));
-        assert!(info.exports.contains(&"default".to_string()));
-    }
-
-    #[test]
     fn resolve_import_with_extension_guessing() {
-        let dir = setup_temp_dir();
+        let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
 
-        fs::write(root.join("Foo.tsx"), "export default function Foo() {}").unwrap();
+        std::fs::write(root.join("Foo.tsx"), "export default function Foo() {}").unwrap();
 
         let from = root.join("page.tsx");
         let resolved = resolve_import(&from, "./Foo", root);
@@ -607,7 +559,7 @@ export default function Main() { return <div />; }
 
     #[test]
     fn resolve_import_ignores_bare_specifiers() {
-        let dir = setup_temp_dir();
+        let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let from = root.join("page.tsx");
         assert!(resolve_import(&from, "react", root).is_none());

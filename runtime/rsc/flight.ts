@@ -85,6 +85,17 @@ function _resolveMetadata(routeKey: string, propsJson: string): void {
 
 // --- Helpers ---
 
+// Safely stringify an error, handling cases where .stack or .message
+// access throws (e.g. malformed error objects in React internals).
+function _safeErrorString(e: unknown): string {
+    try {
+        if (e instanceof Error) return e.message || 'Unknown error';
+        return String(e);
+    } catch {
+        return 'Unknown error (serialization failed)';
+    }
+}
+
 function _buildElement(routeKey: string, propsJson: string): React.ReactElement | null {
     const props = JSON.parse(propsJson);
     const Page = globalThis.__rex_app_pages[routeKey];
@@ -136,7 +147,16 @@ function _startReading(reader: ReadableStreamDefaultReader<Uint8Array>): void {
                 }
             }, function(err: unknown) {
                 _streamDone = true;
-                _flightString = '0:{"error":' + JSON.stringify(String(err)) + '}\n';
+                _flightString = '0:{"error":' + JSON.stringify(_safeErrorString(err)) + '}\n';
+                if (_wantHtml && !_htmlDone) {
+                    const errMsg = _safeErrorString(err);
+                    _htmlResult = JSON.stringify({
+                        body: '<div style="color:red">RSC Stream Error: ' + errMsg.replace(/</g, '&lt;') + '</div>',
+                        head: '',
+                        flight: _flightString
+                    });
+                    _htmlDone = true;
+                }
             });
         }
         sync = false;
@@ -182,8 +202,14 @@ globalThis.__rex_render_flight = function(routeKey: string, propsJson: string): 
     if (globalThis.__rex_server_actions) {
         renderOptions.serverManifest = bundlerConfig;
     }
-    const stream = __rex_renderToReadableStream(element, bundlerConfig, renderOptions);
-    _startReading(stream.getReader());
+
+    try {
+        const stream = __rex_renderToReadableStream(element, bundlerConfig, renderOptions);
+        _startReading(stream.getReader());
+    } catch (e) {
+        _streamDone = true;
+        _flightString = '0:{"error":' + JSON.stringify(_safeErrorString(e)) + '}\n';
+    }
 
     if (_streamDone) {
         return _flightString!;
@@ -220,8 +246,21 @@ globalThis.__rex_render_rsc_to_html = function(routeKey: string, propsJson: stri
     if (globalThis.__rex_server_actions) {
         renderOptions.serverManifest = bundlerConfig;
     }
-    const stream = __rex_renderToReadableStream(element, bundlerConfig, renderOptions);
-    _startReading(stream.getReader());
+
+    try {
+        const stream = __rex_renderToReadableStream(element, bundlerConfig, renderOptions);
+        _startReading(stream.getReader());
+    } catch (e) {
+        const errMsg = _safeErrorString(e);
+        _streamDone = true;
+        _flightString = '0:{"error":' + JSON.stringify(errMsg) + '}\n';
+        _htmlResult = JSON.stringify({
+            body: '<div style="color:red">RSC Error: ' + errMsg.replace(/</g, '&lt;') + '</div>',
+            head: '',
+            flight: _flightString
+        });
+        _htmlDone = true;
+    }
 
     if (_htmlDone && _metadataDone) {
         // Inject metadata head into the result

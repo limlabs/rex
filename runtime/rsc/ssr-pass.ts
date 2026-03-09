@@ -12,6 +12,15 @@
 var _ssrPending = false;
 var _ssrResult: string | null = null;
 
+function _ssrSafeErrorString(e: unknown): string {
+    try {
+        if (e instanceof Error) return e.message || 'Unknown error';
+        return String(e);
+    } catch {
+        return 'Unknown error (serialization failed)';
+    }
+}
+
 globalThis.__rex_rsc_flight_to_html = function(flightString: string): string {
     _ssrPending = true;
     _ssrResult = null;
@@ -37,7 +46,7 @@ globalThis.__rex_rsc_flight_to_html = function(flightString: string): string {
         });
     } catch(e) {
         _ssrResult = JSON.stringify({
-            body: '<div style="color:red">RSC SSR Error: ' + String(e).replace(/</g, '&lt;') + '</div>',
+            body: '<div style="color:red">RSC SSR Error: ' + _ssrSafeErrorString(e).replace(/</g, '&lt;') + '</div>',
             head: '',
             flight: flightString
         });
@@ -54,7 +63,7 @@ globalThis.__rex_rsc_flight_to_html = function(flightString: string): string {
                 _ssrResult = JSON.stringify({ body: html, head: '', flight: flightString });
             } catch(e) {
                 _ssrResult = JSON.stringify({
-                    body: '<div style="color:red">SSR render error: ' + String(e).replace(/</g, '&lt;') + '</div>',
+                    body: '<div style="color:red">SSR render error: ' + _ssrSafeErrorString(e).replace(/</g, '&lt;') + '</div>',
                     head: '',
                     flight: flightString
                 });
@@ -62,7 +71,7 @@ globalThis.__rex_rsc_flight_to_html = function(flightString: string): string {
             _ssrPending = false;
         }, function(err: unknown) {
             _ssrResult = JSON.stringify({
-                body: '<div style="color:red">SSR error: ' + String(err).replace(/</g, '&lt;') + '</div>',
+                body: '<div style="color:red">SSR error: ' + _ssrSafeErrorString(err).replace(/</g, '&lt;') + '</div>',
                 head: '',
                 flight: flightString
             });
@@ -81,7 +90,7 @@ globalThis.__rex_rsc_flight_to_html = function(flightString: string): string {
         _ssrResult = JSON.stringify({ body: html, head: '', flight: flightString });
     } catch(e) {
         _ssrResult = JSON.stringify({
-            body: '<div style="color:red">SSR render error: ' + String(e).replace(/</g, '&lt;') + '</div>',
+            body: '<div style="color:red">SSR render error: ' + _ssrSafeErrorString(e).replace(/</g, '&lt;') + '</div>',
             head: '',
             flight: flightString
         });
