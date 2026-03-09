@@ -51,7 +51,11 @@ All commits must use [Conventional Commits](https://www.conventionalcommits.org/
 - `feat!: redesign config format` — breaking change (major bump)
 - Types: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`
 
-## Test Organization
+## Testing
+
+Rex has four layers of testing. **Every code change should consider which layers need new or updated tests.**
+
+### Layer 1: Unit & Integration Tests (`cargo test`)
 
 Follow the standard Rust convention for test placement:
 
@@ -60,6 +64,75 @@ Follow the standard Rust convention for test placement:
 
 Prefer integration tests in `tests/` over inline `#[cfg(test)]` modules. This keeps production source files focused, improves coverage accuracy, and follows Rust idioms.
 
+Key test suites by crate:
+
+| Crate | Integration tests | What they cover |
+|-------|-------------------|-----------------|
+| `rex_build` | `build_tests.rs`, `integration_tests.rs`, `font_tests.rs`, `mdx_tests.rs` | Build pipeline, SSR bundles loaded into V8, Google Fonts, MDX |
+| `rex_v8` | `ssr_isolate.rs`, `ssr_url.rs`, `fetch.rs`, `ssr_actions.rs`, `ssr_fs.rs`, `ssr_middleware.rs`, `ssr_crypto.rs`, `fs_sandbox.rs` | V8 isolate pool, page rendering, polyfills, server actions, middleware |
+| `rex_server` | inline `#[cfg(test)]` in `handlers/*.rs` | Route handling, GSSP, document assembly, API routes, RSC |
+| `rex_router` | inline `#[cfg(test)]` in `scanner.rs`, `matcher.rs` | File scanning, route matching, dynamic segments |
+
+Test helpers live in `crates/<crate>/tests/common/mod.rs` — they provide mock `node_modules`, temp project scaffolding, and minimal React runtimes for V8.
+
+**Coverage ratchet**: CI fails if line coverage drops below the threshold in `.coverage-threshold` (currently **68%**). This value only goes up — when your changes raise coverage, bump the threshold to lock in the gain. Measured with `cargo llvm-cov --workspace --ignore-filename-regex 'tests/'`.
+
+### Layer 2: E2E Tests (`cargo test -p rex_e2e`)
+
+End-to-end tests in `crates/rex_e2e/tests/` build and run the actual `rex` binary against fixture projects:
+
+- **Pages Router** (`lib.rs`): Spawns `rex dev` against `fixtures/basic`, verifies page renders, dynamic routes, GSSP, HMR connectivity. Tests are `#[ignore]`-gated — run with `cargo test -p rex_e2e -- --ignored`.
+- **App Router ASO** (`aso_e2e.rs`): Runs `rex build` + `rex start` against `fixtures/app-router`, tests static pre-rendering and caching.
+- **RSC** (`rsc_e2e.rs`): Full React Server Components workflow with server actions against `fixtures/app-router`.
+
+The test harness (`rex_e2e/src/lib.rs`) handles binary detection (`REX_BIN` env var or `target/`), free port allocation, TCP health checks, and 30-second startup timeout.
+
+**Before running E2E tests locally**, install fixture dependencies: `cd fixtures/basic && npm install` (and similarly for `fixtures/app-router`).
+
+### Layer 3: Smoke Tests (CI only — post-publish)
+
+After a release publishes npm packages, `.github/workflows/smoke-test.yml` verifies the published artifacts work:
+
+1. Rewrites each fixture's `package.json` to use the published `@limlabs/rex` version (not a local file reference)
+2. Waits for the package to appear on the npm registry (up to 5 minutes)
+3. Runs `npm install` → `rex build` → `rex start` → `curl http://localhost:3000/` and asserts HTTP 200
+
+**Fixture matrix**: `basic`, `tailwind`, `mcp`, `app-router`, `custom-server`
+
+An additional Railway deployment smoke test verifies the Docker image works in a hosted environment.
+
+### Layer 4: Static Analysis (CI)
+
+Run automatically on every PR:
+
+- `cargo fmt --check` — formatting
+- `cargo clippy -- -D warnings` — zero-warning lint
+- `npx oxlint --deny-warnings` — JS/TS lint
+- `npm run typecheck` + `scripts/typecheck-fixtures.sh` — TypeScript strict mode on runtime/ and fixtures
+- `scripts/check-file-length.sh` — 700-line file limit
+
+### Test Fixtures
+
+All live in `fixtures/`. Each is a complete project requiring `npm install`.
+
+| Fixture | Router | Purpose |
+|---------|--------|---------|
+| `basic` | Pages | Main fixture — index, about, blog/[slug], \_app, \_document |
+| `app-router` | App | Server components, client components, layouts |
+| `tailwind` | Pages | Tailwind CSS + CSS modules |
+| `mdx` | App | MDX compilation |
+| `mcp` | Pages | MCP server integration |
+| `custom-server` | Pages | Custom Express server wrapper |
+| `font` | App | Google Fonts + custom fonts |
+
+### When to Add Tests
+
+- **New feature or handler** → integration test in `crates/<crate>/tests/` + E2E test if it affects page rendering
+- **Bug fix** → regression test at the most specific layer that reproduces the bug
+- **New fixture** → add to smoke test matrix in `.github/workflows/smoke-test.yml`
+- **Runtime JS change** → TypeScript typecheck coverage is automatic; add E2E assertions if behavior changes
+- **Config change** → unit test for parsing + integration test for behavior
+
 ## 700-Line Rule
 
 Source files must not exceed **700 lines**. This is enforced by CI. When a file crosses this threshold, it needs to be broken down into smaller, focused modules for better maintainability and testability.
@@ -67,7 +140,10 @@ Source files must not exceed **700 lines**. This is enforced by CI. When a file 
 ## Quick Reference
 
 - **Build**: `cargo build`
-- **Test**: `cargo test`
+- **Test (unit + integration)**: `cargo test`
+- **Test (single crate)**: `cargo test -p rex_build`
+- **Test (E2E)**: `cargo test -p rex_e2e -- --ignored`
+- **Coverage**: `cargo llvm-cov --workspace --ignore-filename-regex 'tests/'`
 - **Check**: `cargo check` — must be zero warnings
 - **Run dev server**: `cargo run -- dev --root fixtures/basic`
 - **Verbose logging**: `RUST_LOG=rex=debug cargo run -- dev --root fixtures/basic`
