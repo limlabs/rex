@@ -93,6 +93,9 @@ hex = "0.4"
 # Embed files at compile time
 include_dir = "0.7"
 
+# CSS processing
+lightningcss = "1.0.0-alpha.71"
+
 # Image processing
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 base64 = "0.22"
