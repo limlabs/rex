@@ -78,9 +78,14 @@ pub(crate) async fn build_rsc_server_bundle(
     // that end up in the server bundle. The bridge preserves __SERVER_INTERNALS
     // needed by react-server-dom-webpack.
     let bridge_path = runtime_dir.join("react-server-bridge.ts");
-    let react_server_cjs = ctx
-        .project_root
-        .join("node_modules/react/cjs/react.react-server.production.js");
+    let react_variant = if ctx.config.dev {
+        "development"
+    } else {
+        "production"
+    };
+    let react_server_cjs = ctx.project_root.join(format!(
+        "node_modules/react/cjs/react.react-server.{react_variant}.js"
+    ));
     if bridge_path.exists() && react_server_cjs.exists() {
         aliases.push((
             "react".to_string(),

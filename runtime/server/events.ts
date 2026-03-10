@@ -67,7 +67,10 @@ export class EventEmitter {
     emit(event: string, ...args: any[]): boolean {
         const events = this._ensureEvents();
         const entries = events.get(event);
-        if (!entries || entries.length === 0) return false;
+
+        if (!entries || entries.length === 0) {
+            return false;
+        }
         const copy = entries.slice();
         for (const entry of copy) {
             if (entry.once) {

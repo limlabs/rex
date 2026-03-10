@@ -26,6 +26,7 @@ const SERVER_RUNTIME_TS: &[&str] = &[
 const V8_POLYFILL_MODULES: &[&str] = &[
     "process",
     "navigator",
+    "intl",
     "timers",
     "message-channel",
     "text-encoding",

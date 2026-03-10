@@ -41,23 +41,33 @@ fn start_echo_server() -> (u16, std::thread::JoinHandle<()>) {
 }
 
 #[test]
-fn test_tcp_connect_write_read_close() {
+fn test_tcp_connect_write_push_read_close() {
     let (port, server) = start_echo_server();
 
+    // Uses push-based IO: poll_tcp_sockets calls __rex_tcp_push_data
     let gssp_code = format!(
         r#"async function(ctx) {{
+            var resolve;
+            var p = new Promise(function(r) {{ resolve = r; }});
+
+            globalThis.__rex_tcp_push_data = function(connId, data) {{
+                var text = '';
+                for (var i = 0; i < data.length; i++) {{
+                    text += String.fromCharCode(data[i]);
+                }}
+                resolve(text);
+            }};
+            globalThis.__rex_tcp_push_eof = function() {{}};
+            globalThis.__rex_tcp_push_error = function() {{}};
+
             var connId = globalThis.__rex_tcp_connect('127.0.0.1', {port});
             var arr = new Uint8Array([104, 101, 108, 108, 111]);
             globalThis.__rex_tcp_write(connId, arr);
-            var result = await globalThis.__rex_tcp_read(connId);
+            globalThis.__rex_tcp_enable_polling(connId);
+
+            var text = await p;
             globalThis.__rex_tcp_close(connId);
-            var text = '';
-            if (result.value) {{
-                for (var i = 0; i < result.value.length; i++) {{
-                    text += String.fromCharCode(result.value[i]);
-                }}
-            }}
-            return {{ props: {{ data: text, done: result.done }} }};
+            return {{ props: {{ data: text }} }};
         }}"#
     );
 
@@ -67,7 +77,6 @@ fn test_tcp_connect_write_read_close() {
         .unwrap();
     let val: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(val["props"]["data"].as_str().unwrap(), "hello");
-    assert!(!val["props"]["done"].as_bool().unwrap());
 
     server.join().unwrap();
 }
@@ -78,16 +87,25 @@ fn test_tcp_write_string_data() {
 
     let gssp_code = format!(
         r#"async function(ctx) {{
+            var resolve;
+            var p = new Promise(function(r) {{ resolve = r; }});
+
+            globalThis.__rex_tcp_push_data = function(connId, data) {{
+                var text = '';
+                for (var i = 0; i < data.length; i++) {{
+                    text += String.fromCharCode(data[i]);
+                }}
+                resolve(text);
+            }};
+            globalThis.__rex_tcp_push_eof = function() {{}};
+            globalThis.__rex_tcp_push_error = function() {{}};
+
             var connId = globalThis.__rex_tcp_connect('127.0.0.1', {port});
             globalThis.__rex_tcp_write(connId, 'world');
-            var result = await globalThis.__rex_tcp_read(connId);
+            globalThis.__rex_tcp_enable_polling(connId);
+
+            var text = await p;
             globalThis.__rex_tcp_close(connId);
-            var text = '';
-            if (result.value) {{
-                for (var i = 0; i < result.value.length; i++) {{
-                    text += String.fromCharCode(result.value[i]);
-                }}
-            }}
             return {{ props: {{ data: text }} }};
         }}"#
     );
@@ -186,30 +204,6 @@ fn test_tcp_start_tls_invalid_conn_id() {
         error.contains("not found"),
         "Expected not found error, got: {error}"
     );
-}
-
-#[test]
-fn test_tcp_read_closed_connection() {
-    // Read from a connection that has been closed — should resolve with done: true
-    let (port, server) = start_echo_server();
-
-    let gssp_code = format!(
-        r#"async function(ctx) {{
-            var connId = globalThis.__rex_tcp_connect('127.0.0.1', {port});
-            globalThis.__rex_tcp_close(connId);
-            var result = await globalThis.__rex_tcp_read(connId);
-            return {{ props: {{ done: result.done }} }};
-        }}"#
-    );
-
-    let mut iso = make_tcp_isolate(&gssp_code);
-    let json = iso
-        .get_server_side_props("page", r#"{"params":{}}"#)
-        .unwrap();
-    let val: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert!(val["props"]["done"].as_bool().unwrap());
-
-    server.join().unwrap();
 }
 
 #[test]

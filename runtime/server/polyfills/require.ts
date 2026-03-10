@@ -107,6 +107,15 @@ if (typeof (globalThis as any).require !== 'function') {
             createHook() { return { enable() {}, disable() {} }; },
         },
     };
+    // drizzle-kit/api — used by PayloadCMS's @payloadcms/drizzle for schema
+    // push/migration. During SSR we don't run migrations, but the require() call
+    // still happens during initialization. Return stubs that act as no-ops.
+    modules['drizzle-kit/api'] = {
+        generateDrizzleJson: async (_schema: any) => ({ id: '', version: '7', tables: {}, enums: {}, schemas: {}, views: {}, sequences: {}, _meta: { tables: {}, columns: {} } }),
+        generateMigration: async () => [],
+        pushSchema: async () => ({ apply: async () => {}, hasDataLoss: false, warnings: [] }),
+        upPgSnapshot: (snapshot: any) => snapshot,
+    };
     modules['querystring'] = modules['node:querystring'];
     modules['diagnostics_channel'] = modules['node:diagnostics_channel'];
     modules['util'] = modules['node:util'];

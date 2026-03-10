@@ -167,7 +167,9 @@ impl SsrIsolate {
             };
 
             match status.as_str() {
-                "done" => break,
+                "done" => {
+                    break;
+                }
                 "pending" => {
                     // Yield briefly to avoid CPU-spinning when async slots are
                     // waiting on microtasks but no fetch requests are queued.

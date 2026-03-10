@@ -39,8 +39,10 @@ globalThis.__rex_rsc_flight_to_html = function(flightString: string): string {
     var treeResult: unknown;
     try {
         treeResult = __rex_createFromReadableStream(stream, {
-            ssrManifest: {
+            // React 19.2+ uses serverConsumerManifest, older uses ssrManifest
+            serverConsumerManifest: {
                 moduleMap: ssrManifest,
+                serverModuleMap: {},
                 moduleLoading: null
             }
         });
