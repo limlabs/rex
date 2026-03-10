@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.14.0](https://github.com/limlabs/rex/compare/v0.13.0...v0.14.0) (2026-03-10)
+
+
+### Features
+
+* add rex export command for static site generation ([#138](https://github.com/limlabs/rex/issues/138)) ([a0724af](https://github.com/limlabs/rex/commit/a0724af10834d639740fe9e893a670842c8f6dbe))
+* **export:** add --base-path and fix docs CI ([#142](https://github.com/limlabs/rex/issues/142)) ([af36f9e](https://github.com/limlabs/rex/commit/af36f9e6ce4cd2ef1644b830be0e6d4b132f1728))
+* **router:** add app router route.ts handler support ([#135](https://github.com/limlabs/rex/issues/135)) ([ef660a1](https://github.com/limlabs/rex/commit/ef660a14f4840949f59114fa4f63f66a2307784c))
+
+
+### Bug Fixes
+
+* **ci:** prevent beta-release double-fire from lockfile push ([#143](https://github.com/limlabs/rex/issues/143)) ([6d69f4b](https://github.com/limlabs/rex/commit/6d69f4bccc2ace2ed4f95e2ade374cd91d03cc45))
+* **export:** rewrite navigation links with base path prefix ([#144](https://github.com/limlabs/rex/issues/144)) ([be15c8e](https://github.com/limlabs/rex/commit/be15c8edc9353abb45502140f85f995fe47b1551))
+* inject CSS into RSC/app router HTML documents ([#147](https://github.com/limlabs/rex/issues/147)) ([4dc80f7](https://github.com/limlabs/rex/commit/4dc80f719e4b80844c9d8b0486ec3df9cac35f1e))
+
+
+### Performance Improvements
+
+* **ci:** use feature flags to speed up docs export ([#141](https://github.com/limlabs/rex/issues/141)) ([db0fbe9](https://github.com/limlabs/rex/commit/db0fbe9dd04897aeaea33b8edc1e287afda03939))
+* **ci:** use feature flags to speed up docs site build ([#140](https://github.com/limlabs/rex/issues/140)) ([8f45889](https://github.com/limlabs/rex/commit/8f4588957bd85b703f5c15472b9706067fa087ad))
+
 ## [0.13.0](https://github.com/limlabs/rex/compare/v0.12.0...v0.13.0) (2026-03-09)
 
 

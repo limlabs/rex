@@ -1,6 +1,6 @@
 [package]
 name = "rex_router"
-version = "0.13.0" # x-release-please-version
+version = "0.14.0" # x-release-please-version
 edition = "2021"
 description = "File-system router with trie-based matching for the Rex framework"
 license = "MIT"
@@ -10,7 +10,7 @@ repository = "https://github.com/limlabs/rex"
 workspace = true
 
 [dependencies]
-rex_core = { path = "../rex_core", version = "0.13.0" } # x-release-please-version
+rex_core = { path = "../rex_core", version = "0.14.0" } # x-release-please-version
 tracing = { workspace = true }
 anyhow = { workspace = true }
 
