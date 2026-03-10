@@ -185,7 +185,7 @@ mod aso {
             "Pre-rendered page should have DOCTYPE"
         );
         assert!(
-            body.contains("<html>"),
+            body.contains("<html"),
             "Pre-rendered page should have <html> tag"
         );
         assert!(

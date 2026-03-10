@@ -2,6 +2,16 @@ use std::collections::HashMap;
 
 use crate::document::{escape_script_content, escape_style_content};
 
+/// Escape a string for safe embedding inside a JavaScript single-quoted string literal.
+/// Handles backslashes, single quotes, newlines, and `</script>` sequences.
+fn escape_js_string(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace("</script", "<\\/script")
+}
+
 /// Parameters for assembling an RSC HTML document.
 pub struct RscDocumentParams<'a> {
     /// Server-rendered HTML body from the RSC two-pass render
@@ -176,14 +186,15 @@ pub fn assemble_rsc_body_tail(
     if !html_attrs.is_empty() || !body_attrs.is_empty() {
         html.push_str("<script>");
         if !html_attrs.is_empty() {
-            // Parse attributes and set them on document.documentElement
+            let escaped = escape_js_string(html_attrs);
             html.push_str(&format!(
-                "!function(){{var d=document.createElement('div');d.innerHTML='<span {html_attrs}>';var a=d.firstChild.attributes;for(var i=0;i<a.length;i++)document.documentElement.setAttribute(a[i].name,a[i].value)}}();"
+                "!function(){{var d=document.createElement('div');d.innerHTML='<span {escaped}>';var a=d.firstChild.attributes;for(var i=0;i<a.length;i++)document.documentElement.setAttribute(a[i].name,a[i].value)}}();"
             ));
         }
         if !body_attrs.is_empty() {
+            let escaped = escape_js_string(body_attrs);
             html.push_str(&format!(
-                "!function(){{var d=document.createElement('div');d.innerHTML='<span {body_attrs}>';var a=d.firstChild.attributes;for(var i=0;i<a.length;i++)document.body.setAttribute(a[i].name,a[i].value)}}();"
+                "!function(){{var d=document.createElement('div');d.innerHTML='<span {escaped}>';var a=d.firstChild.attributes;for(var i=0;i<a.length;i++)document.body.setAttribute(a[i].name,a[i].value)}}();"
             ));
         }
         html.push_str("</script>");

@@ -354,6 +354,27 @@ mod rsc {
 
     #[tokio::test]
     #[ignore]
+    async fn rsc_html_has_layout_attributes() {
+        // Root layout sets <html lang="en"> and <body className="app-root">.
+        // These attributes must flow through the RSC render into the served HTML
+        // to prevent React hydration mismatch errors (#418).
+        let url = format!("{}/", base_url());
+        let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
+
+        assert!(
+            body.contains(r#"<html lang="en">"#) || body.contains(r#"<html lang="en" "#),
+            "Served HTML must include lang=\"en\" on <html> from root layout.\nGot: {}",
+            &body[..body.len().min(500)]
+        );
+        assert!(
+            body.contains(r#"class="app-root""#),
+            "Served HTML must include class=\"app-root\" on <body> from root layout.\nGot: {}",
+            &body[..body.len().min(500)]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
     async fn rsc_concurrent_requests() {
         let base = base_url();
         let mut handles = vec![];
@@ -749,7 +770,7 @@ mod rsc {
 
         // Verify complete document structure
         assert!(full_html.starts_with("<!DOCTYPE html>"));
-        assert!(full_html.contains("<html>"));
+        assert!(full_html.contains("<html"));
         assert!(full_html.contains("<head>"));
         assert!(full_html.contains("</head>"));
         assert!(full_html.contains("<body>") || full_html.contains("<body "));
