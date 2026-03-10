@@ -176,6 +176,8 @@ pub async fn prerender_static_app_routes(
             flight_data: &rsc_result.flight,
             client_chunks: &assets.client_chunks,
             client_manifest_json: &client_manifest_json,
+            css_files: &manifest.global_css,
+            css_contents: &manifest.css_contents,
             is_dev: false,
             manifest_json: Some(manifest_json),
         });

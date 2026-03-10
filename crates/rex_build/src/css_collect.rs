@@ -2,9 +2,22 @@ use crate::build_utils::{detect_data_strategy, route_to_chunk_name};
 use crate::manifest::AssetManifest;
 use anyhow::Result;
 use rex_router::ScanResult;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+
+/// Generate a unique CSS output filename from the source path and build hash.
+/// Includes a short hash of the full path to avoid collisions when different
+/// directories contain CSS files with the same basename.
+pub(crate) fn css_output_filename(css_path: &Path, build_hash: &str) -> String {
+    let stem = css_path.file_stem().unwrap_or_default().to_string_lossy();
+    let mut hasher = DefaultHasher::new();
+    css_path.hash(&mut hasher);
+    let path_hash = format!("{:016x}", hasher.finish());
+    format!("{stem}-{build_hash}-{}.css", &path_hash[..6])
+}
 
 /// Scan source files for CSS imports and copy them to the output directory.
 /// Registers global CSS (from _app) and per-page CSS in the manifest.
@@ -26,8 +39,7 @@ pub(crate) fn collect_css_files(
         let css_paths = extract_css_imports(effective)?;
         for css_path in css_paths {
             if css_path.exists() {
-                let stem = css_path.file_stem().unwrap_or_default().to_string_lossy();
-                let filename = format!("{stem}-{hash}.css");
+                let filename = css_output_filename(&css_path, hash);
                 let dest = output_dir.join(&filename);
                 // Use Tailwind-processed output if available, otherwise raw source
                 if let Some(tw_output) = tailwind_outputs.get(&css_path) {
@@ -56,8 +68,7 @@ pub(crate) fn collect_css_files(
         let mut page_css = Vec::new();
         for css_path in css_paths {
             if css_path.exists() {
-                let stem = css_path.file_stem().unwrap_or_default().to_string_lossy();
-                let filename = format!("{stem}-{hash}.css");
+                let filename = css_output_filename(&css_path, hash);
                 let dest = output_dir.join(&filename);
                 if let Some(tw_output) = tailwind_outputs.get(&css_path) {
                     let content = fs::read_to_string(tw_output)?;

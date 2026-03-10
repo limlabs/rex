@@ -46,7 +46,7 @@ fn run_tailwind(bin: &Path, input: &Path, output: &Path, project_root: &Path) ->
     Ok(())
 }
 
-/// Collect all CSS import paths from _app and pages (reusing extract_css_imports).
+/// Collect all CSS import paths from _app, pages, and app/ routes (reusing extract_css_imports).
 pub fn collect_all_css_import_paths(scan: &ScanResult) -> Result<Vec<PathBuf>> {
     let mut all = Vec::new();
     if let Some(app) = &scan.app {
@@ -54,6 +54,20 @@ pub fn collect_all_css_import_paths(scan: &ScanResult) -> Result<Vec<PathBuf>> {
     }
     for route in &scan.routes {
         all.extend(extract_css_imports(&route.abs_path)?);
+    }
+    // Also scan app/ router files (layouts and pages) for CSS imports
+    if let Some(app_scan) = &scan.app_scan {
+        let mut seen = std::collections::HashSet::new();
+        for route in &app_scan.routes {
+            if seen.insert(route.page_path.clone()) {
+                all.extend(extract_css_imports(&route.page_path)?);
+            }
+            for layout in &route.layout_chain {
+                if seen.insert(layout.clone()) {
+                    all.extend(extract_css_imports(layout)?);
+                }
+            }
+        }
     }
     Ok(all)
 }
