@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.0](https://github.com/limlabs/rex/compare/v0.14.0...v0.15.0) (2026-03-10)
+
+
+### Features
+
+* add Node built-in shims for http, https, url, querystring, events ([#149](https://github.com/limlabs/rex/issues/149)) ([9f6e452](https://github.com/limlabs/rex/commit/9f6e45267aeac23ebafa2132d345a241688bc0eb))
+* **build:** embed Tailwind CSS v4 compiler for zero-install builds ([#151](https://github.com/limlabs/rex/issues/151)) ([20640ad](https://github.com/limlabs/rex/commit/20640ad24cd45a9c3e46ebe8e2a787f1a3160a21))
+
+
+### Bug Fixes
+
+* **docs:** zero-config docs site with embedded react-server-dom-webpack ([#153](https://github.com/limlabs/rex/issues/153)) ([65237a9](https://github.com/limlabs/rex/commit/65237a9d4e0b430d7a768badabdd85903f363107))
+* **export:** make Link component base-path-aware after hydration ([#150](https://github.com/limlabs/rex/issues/150)) ([49eb61c](https://github.com/limlabs/rex/commit/49eb61c3762306e8d0f752f57836da7dae039678))
+
 ## [0.14.0](https://github.com/limlabs/rex/compare/v0.13.0...v0.14.0) (2026-03-10)
 
 
