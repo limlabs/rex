@@ -232,12 +232,12 @@ export function resolve(from: string, to: string): string {
     try {
         return new globalThis.URL(to, from).href;
     } catch {
-        const dummy = 'http://__rex_dummy__/';
-        const resolved = new globalThis.URL(to, dummy + from).href;
-        if (!resolved.startsWith(dummy)) {
+        const dummyOrigin = 'http://__rex_dummy__';
+        const resolved = new globalThis.URL(to, dummyOrigin + '/' + from).href;
+        if (!resolved.startsWith(dummyOrigin)) {
             return resolved;
         }
-        return resolved.slice(dummy.length);
+        return resolved.slice(dummyOrigin.length);
     }
 }
 

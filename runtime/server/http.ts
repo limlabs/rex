@@ -58,6 +58,7 @@ export class ClientRequest extends EventEmitter {
     private _headers: Record<string, string> = {};
     private _ended: boolean = false;
     private _abortController: AbortController = new AbortController();
+    private _timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     constructor(options: RequestOptions, callback?: (res: IncomingMessage) => void) {
         super();
@@ -165,9 +166,17 @@ export class ClientRequest extends EventEmitter {
         this.emit('response', msg);
 
         // Read body as raw bytes and emit as Uint8Array to preserve binary data
-        const buffer = await response.arrayBuffer();
-        if (buffer.byteLength > 0) {
-            msg.emit('data', new Uint8Array(buffer));
+        try {
+            const buffer = await response.arrayBuffer();
+            if (buffer.byteLength > 0) {
+                msg.emit('data', new Uint8Array(buffer));
+            }
+        } catch (bodyErr: any) {
+            msg.emit('error', bodyErr);
+        }
+        if (this._timeoutId !== null) {
+            clearTimeout(this._timeoutId);
+            this._timeoutId = null;
         }
         msg.complete = true;
         msg.emit('end');
@@ -181,7 +190,7 @@ export class ClientRequest extends EventEmitter {
     setTimeout(ms: number, callback?: () => void): this {
         if (callback) this.once('timeout', callback);
         if (ms > 0) {
-            setTimeout(() => this.emit('timeout'), ms);
+            this._timeoutId = setTimeout(() => this.emit('timeout'), ms);
         }
         return this;
     }
