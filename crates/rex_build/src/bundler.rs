@@ -277,8 +277,7 @@ pub async fn build_bundles(
                         if !css_path.exists() {
                             continue;
                         }
-                        let stem = css_path.file_stem().unwrap_or_default().to_string_lossy();
-                        let filename = format!("{stem}-{hash}.css");
+                        let filename = crate::css_collect::css_output_filename(&css_path, hash);
                         if manifest.css_contents.contains_key(&filename) {
                             // Already collected (e.g. by font processing)
                             continue;

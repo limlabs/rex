@@ -145,6 +145,12 @@ fn escape_script_content(s: &str) -> String {
         .replace('\u{2029}', "\\u2029")
 }
 
+/// Escape content for safe embedding inside a <style> tag.
+/// Prevents injection via </style> sequences in CSS content.
+fn escape_style_content(s: &str) -> String {
+    s.replace("</style", "<\\/style")
+}
+
 /// Escape a string for use as an HTML attribute value.
 fn escape_attr(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -201,7 +207,7 @@ pub fn assemble_head_shell(
     for css in css_files {
         if let Some(content) = css_contents.get(css) {
             html.push_str("  <style>");
-            html.push_str(content);
+            html.push_str(&escape_style_content(content));
             html.push_str("</style>\n");
         } else {
             html.push_str(&format!(
@@ -370,7 +376,7 @@ pub fn assemble_rsc_head_shell(
     for css in css_files {
         if let Some(content) = css_contents.get(css) {
             html.push_str("<style>");
-            html.push_str(content);
+            html.push_str(&escape_style_content(content));
             html.push_str("</style>");
         } else {
             html.push_str(&format!(
