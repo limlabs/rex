@@ -2,6 +2,99 @@ use std::collections::HashMap;
 
 use crate::document::{escape_script_content, escape_style_content};
 
+/// Sanitize a string containing multiple HTML attributes (e.g. `lang="en" class="dark"`).
+///
+/// Parses individual attributes and escapes dangerous characters in attribute values
+/// to prevent attribute injection attacks. Invalid or malformed attributes are
+/// silently dropped to ensure the output is always safe.
+///
+/// # Examples
+/// - `lang="en"` → `lang="en"`
+/// - `lang="<script>"` → `lang="&lt;script&gt;"`
+/// - `class='"><img src=x onerror=alert(1)'` → `class="&quot;&gt;&lt;img src=x onerror=alert(1)"`
+fn sanitize_attrs(attrs: &str) -> String {
+    if attrs.is_empty() {
+        return String::new();
+    }
+
+    let mut result = Vec::new();
+    let mut chars = attrs.chars().peekable();
+
+    while let Some(&c) = chars.peek() {
+        // Skip whitespace between attributes
+        if c.is_whitespace() {
+            chars.next();
+            continue;
+        }
+
+        // Parse attribute name: ASCII letters, digits, hyphens, underscores, colons
+        let name: String = chars
+            .by_ref()
+            .take_while(|&ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == ':')
+            .collect();
+
+        if name.is_empty() {
+            // Invalid character at start of attribute name — skip it to avoid infinite loop
+            chars.next();
+            continue;
+        }
+
+        // Skip whitespace around '='
+        while chars.peek().is_some_and(|&ch| ch.is_whitespace()) {
+            chars.next();
+        }
+
+        // Check for '='
+        if chars.peek() != Some(&'=') {
+            // Boolean attribute (no value) — include as-is
+            result.push(name);
+            continue;
+        }
+        chars.next(); // consume '='
+
+        // Skip whitespace after '='
+        while chars.peek().is_some_and(|&ch| ch.is_whitespace()) {
+            chars.next();
+        }
+
+        // Parse attribute value
+        let value = match chars.peek() {
+            Some(&'"') => {
+                chars.next(); // consume opening quote
+                let v: String = chars.by_ref().take_while(|&ch| ch != '"').collect();
+                v
+            }
+            Some(&'\'') => {
+                chars.next(); // consume opening quote
+                let v: String = chars.by_ref().take_while(|&ch| ch != '\'').collect();
+                v
+            }
+            _ => {
+                // Unquoted value — take until whitespace or end
+                let v: String = chars
+                    .by_ref()
+                    .take_while(|&ch| !ch.is_whitespace())
+                    .collect();
+                v
+            }
+        };
+
+        // Escape the value and emit with double quotes
+        let escaped = escape_attr_value(&value);
+        result.push(format!("{name}=\"{escaped}\""));
+    }
+
+    result.join(" ")
+}
+
+/// Escape a string for use as an HTML attribute value.
+fn escape_attr_value(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 /// Parameters for assembling an RSC HTML document.
 pub struct RscDocumentParams<'a> {
     /// Server-rendered HTML body from the RSC two-pass render
@@ -83,11 +176,12 @@ fn assemble_rsc_head_shell_with_attrs(
     body_attrs: &str,
 ) -> String {
     let mut html = String::with_capacity(2048);
-    if html_attrs.is_empty() {
+    let sanitized_html_attrs = sanitize_attrs(html_attrs);
+    if sanitized_html_attrs.is_empty() {
         html.push_str("<!DOCTYPE html>\n<html><head>");
     } else {
         html.push_str("<!DOCTYPE html>\n<html ");
-        html.push_str(html_attrs);
+        html.push_str(&sanitized_html_attrs);
         html.push_str("><head>");
     }
     html.push_str("<meta charset=\"utf-8\" />");
@@ -112,11 +206,12 @@ fn assemble_rsc_head_shell_with_attrs(
         ));
     }
 
-    if body_attrs.is_empty() {
+    let sanitized_body_attrs = sanitize_attrs(body_attrs);
+    if sanitized_body_attrs.is_empty() {
         html.push_str("</head><body>");
     } else {
         html.push_str("</head><body ");
-        html.push_str(body_attrs);
+        html.push_str(&sanitized_body_attrs);
         html.push('>');
     }
 
@@ -465,5 +560,129 @@ mod tests {
         let html = assemble_rsc_document(&params);
         assert!(html.contains(r#"<html lang="en"><head>"#));
         assert!(html.contains(r#"<body class="dark">"#));
+    }
+
+    #[test]
+    fn sanitize_attrs_empty() {
+        assert_eq!(sanitize_attrs(""), "");
+    }
+
+    #[test]
+    fn sanitize_attrs_single_attribute() {
+        assert_eq!(sanitize_attrs(r#"lang="en""#), r#"lang="en""#);
+    }
+
+    #[test]
+    fn sanitize_attrs_multiple_attributes() {
+        assert_eq!(
+            sanitize_attrs(r#"lang="en" class="dark""#),
+            r#"lang="en" class="dark""#
+        );
+    }
+
+    #[test]
+    fn sanitize_attrs_single_quotes_converted() {
+        // Single quotes should be converted to double quotes
+        assert_eq!(sanitize_attrs(r#"lang='en'"#), r#"lang="en""#);
+    }
+
+    #[test]
+    fn sanitize_attrs_escapes_angle_brackets() {
+        // Angle brackets in attribute values should be escaped
+        assert_eq!(
+            sanitize_attrs(r#"data="<script>""#),
+            r#"data="&lt;script&gt;""#
+        );
+    }
+
+    #[test]
+    fn sanitize_attrs_escapes_quotes_in_value() {
+        // Double quotes inside value should be escaped
+        assert_eq!(
+            sanitize_attrs(r#"data='say "hello"'"#),
+            r#"data="say &quot;hello&quot;""#
+        );
+    }
+
+    #[test]
+    fn sanitize_attrs_xss_injection_attempt() {
+        // Classic XSS injection attempt: break out of attribute, inject HTML
+        let malicious = r#"lang='"><img src=x onerror=alert(1) a="'"#;
+        let result = sanitize_attrs(malicious);
+        // The dangerous characters should be escaped
+        assert!(result.contains("&quot;"));
+        assert!(result.contains("&gt;"));
+        assert!(result.contains("&lt;"));
+        // No raw angle brackets or quotes that would allow breakout
+        assert!(!result.contains("\"><"));
+        assert!(!result.contains("<img"));
+    }
+
+    #[test]
+    fn sanitize_attrs_boolean_attribute() {
+        // Boolean attributes without a value should be preserved
+        assert_eq!(sanitize_attrs("disabled"), "disabled");
+        assert_eq!(
+            sanitize_attrs(r#"disabled class="btn""#),
+            r#"disabled class="btn""#
+        );
+    }
+
+    #[test]
+    fn sanitize_attrs_unquoted_value() {
+        // Unquoted attribute values should be quoted in output
+        assert_eq!(sanitize_attrs("lang=en"), r#"lang="en""#);
+    }
+
+    #[test]
+    fn sanitize_attrs_ampersand_escaped() {
+        assert_eq!(
+            sanitize_attrs(r#"data="a&b""#),
+            r#"data="a&amp;b""#
+        );
+    }
+
+    #[test]
+    fn sanitize_attrs_preserves_data_attributes() {
+        assert_eq!(
+            sanitize_attrs(r#"data-testid="my-test" data-value="123""#),
+            r#"data-testid="my-test" data-value="123""#
+        );
+    }
+
+    #[test]
+    fn rsc_head_shell_sanitizes_malicious_html_attrs() {
+        let malicious_html_attrs = r#"lang='"><script>alert(1)</script><span a="'"#;
+        let html = assemble_rsc_head_shell_with_attrs(
+            &[],
+            "{}",
+            &[],
+            &HashMap::new(),
+            malicious_html_attrs,
+            "",
+        );
+        // Should not contain unescaped injection
+        assert!(!html.contains("<script>alert(1)</script>"));
+        assert!(!html.contains("><script>"));
+        // Should contain escaped version
+        assert!(html.contains("&lt;script&gt;"));
+    }
+
+    #[test]
+    fn rsc_head_shell_sanitizes_malicious_body_attrs() {
+        let malicious_body_attrs = r#"class='"><img src=x onerror=alert(1)>'"#;
+        let html = assemble_rsc_head_shell_with_attrs(
+            &[],
+            "{}",
+            &[],
+            &HashMap::new(),
+            "",
+            malicious_body_attrs,
+        );
+        // Should not contain unescaped injection
+        assert!(!html.contains("<img src=x onerror=alert(1)>"));
+        assert!(!html.contains("><img"));
+        // Should contain escaped version
+        assert!(html.contains("&lt;img"));
     }
 }
