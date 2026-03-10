@@ -15,6 +15,7 @@ pub async fn cmd_export(
     output: Option<PathBuf>,
     force: bool,
     base_path: String,
+    html_extensions: bool,
 ) -> Result<()> {
     let root = std::fs::canonicalize(&root)?;
     let config = RexConfig::new(root);
@@ -100,6 +101,7 @@ pub async fn cmd_export(
         output_dir: output_dir.clone(),
         force,
         base_path,
+        html_extensions,
     };
 
     let ctx = ExportContext {

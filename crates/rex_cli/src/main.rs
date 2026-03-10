@@ -87,6 +87,13 @@ enum Commands {
         /// Base path prefix for asset URLs (e.g. "/rex" for GitHub Pages)
         #[arg(long, default_value = "")]
         base_path: String,
+
+        /// Append .html extensions to internal navigation links.
+        /// Most static hosts (GitHub Pages, Netlify, Vercel) handle clean URLs
+        /// automatically, so this is off by default. Enable for hosts that
+        /// require explicit .html extensions (e.g. S3, basic nginx).
+        #[arg(long)]
+        html_extensions: bool,
     },
 
     /// Start the production server
@@ -226,9 +233,10 @@ async fn main() -> Result<()> {
             output,
             force,
             base_path,
+            html_extensions,
         } => {
             init_plain_tracing();
-            export::cmd_export(root, output, force, base_path).await
+            export::cmd_export(root, output, force, base_path, html_extensions).await
         }
         Commands::Start { port, host, root } => {
             init_plain_tracing();

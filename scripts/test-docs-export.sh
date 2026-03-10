@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Test the docs static export end-to-end:
 #   1. Build the rex binary
-#   2. Export the docs site
-#   3. Serve it and verify pages render with correct styling/links
+#   2. Export the docs site (default: clean URLs for GitHub Pages)
+#   3. Optionally test with --html-extensions
+#   4. Verify pages render with correct styling/links
 #
 # Usage: ./scripts/test-docs-export.sh
 
@@ -16,10 +17,11 @@ cargo build --quiet
 
 REX="$ROOT/target/debug/rex"
 
-echo "==> Cleaning previous export..."
-rm -rf docs/.rex
+# ─── Test 1: Default export (clean URLs, no .html extensions) ───
 
-echo "==> Exporting docs site..."
+echo ""
+echo "==> Test 1: Default export (clean URLs)"
+rm -rf docs/.rex
 "$REX" export --root docs 2>&1 | grep -E '✓|Error|error'
 
 EXPORT_DIR="$ROOT/docs/.rex/export"
@@ -41,6 +43,45 @@ else
   exit 1
 fi
 
+echo "==> Checking nav links do NOT have .html extensions (clean URLs)..."
+if grep -q 'href="/getting-started"' "$EXPORT_DIR/index.html"; then
+  echo "   OK: HTML links use clean URLs"
+else
+  echo "   FAIL: expected clean URL href=\"/getting-started\" (no .html)"
+  exit 1
+fi
+
+echo "==> Checking static export flag injected..."
+if grep -q '__REX_STATIC_EXPORT' "$EXPORT_DIR/index.html"; then
+  echo "   OK: __REX_STATIC_EXPORT flag present"
+else
+  echo "   FAIL: __REX_STATIC_EXPORT flag missing"
+  exit 1
+fi
+
+echo "==> Checking __REX_STATIC_HTML_EXT is NOT set..."
+if grep -q '__REX_STATIC_HTML_EXT' "$EXPORT_DIR/index.html"; then
+  echo "   FAIL: __REX_STATIC_HTML_EXT should not be set without --html-extensions"
+  exit 1
+else
+  echo "   OK: __REX_STATIC_HTML_EXT not set"
+fi
+
+echo "==> Checking subpage renders correctly..."
+if grep -q 'Quickstart' "$EXPORT_DIR/getting-started.html"; then
+  echo "   OK: getting-started.html contains Quickstart content"
+else
+  echo "   FAIL: getting-started.html missing content"
+  exit 1
+fi
+
+# ─── Test 2: Export with --html-extensions ───
+
+echo ""
+echo "==> Test 2: Export with --html-extensions"
+rm -rf docs/.rex
+"$REX" export --root docs --html-extensions 2>&1 | grep -E '✓|Error|error'
+
 echo "==> Checking nav links have .html extensions..."
 if grep -q 'href="/getting-started.html"' "$EXPORT_DIR/index.html"; then
   echo "   OK: HTML links have .html extension"
@@ -57,19 +98,11 @@ else
   exit 1
 fi
 
-echo "==> Checking static export flag injected..."
-if grep -q '__REX_STATIC_EXPORT' "$EXPORT_DIR/index.html"; then
-  echo "   OK: __REX_STATIC_EXPORT flag present"
+echo "==> Checking __REX_STATIC_HTML_EXT is set..."
+if grep -q '__REX_STATIC_HTML_EXT' "$EXPORT_DIR/index.html"; then
+  echo "   OK: __REX_STATIC_HTML_EXT flag present"
 else
-  echo "   FAIL: __REX_STATIC_EXPORT flag missing"
-  exit 1
-fi
-
-echo "==> Checking subpage renders correctly..."
-if grep -q 'Quickstart' "$EXPORT_DIR/getting-started.html"; then
-  echo "   OK: getting-started.html contains Quickstart content"
-else
-  echo "   FAIL: getting-started.html missing content"
+  echo "   FAIL: __REX_STATIC_HTML_EXT flag missing"
   exit 1
 fi
 

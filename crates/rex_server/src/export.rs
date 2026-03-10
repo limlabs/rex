@@ -13,6 +13,13 @@ pub struct ExportConfig {
     pub force: bool,
     /// Base path prefix for asset URLs (e.g. "/rex" for GitHub Pages at user.github.io/rex/).
     pub base_path: String,
+    /// Append `.html` extensions to internal navigation links.
+    ///
+    /// Most static hosts (GitHub Pages, Netlify, Vercel, Cloudflare Pages) serve
+    /// `about.html` for requests to `/about`, so this is **off by default** for
+    /// clean URLs.  Enable with `--html-extensions` for hosts that require the
+    /// explicit extension (e.g. S3, basic nginx).
+    pub html_extensions: bool,
 }
 
 /// Result of a static export.
@@ -126,8 +133,12 @@ pub async fn export_site(
 
     for (pattern, html) in &prerendered_pages {
         let file_path = route_to_file_path(output, pattern);
-        let html = rewrite_nav_links_to_html(html);
-        let html = inject_static_export_flag(&html);
+        let html = if config.html_extensions {
+            rewrite_nav_links_to_html(html)
+        } else {
+            html.to_string()
+        };
+        let html = inject_static_export_flag(&html, config.html_extensions);
         let html = rewrite_asset_paths(&html, &config.base_path);
         write_html_file(&file_path, &html)?;
         debug!(pattern, path = %file_path.display(), "Exported page");
@@ -155,8 +166,12 @@ pub async fn export_site(
 
     for (pattern, rendered) in &prerendered_app {
         let file_path = route_to_file_path(output, pattern);
-        let html = rewrite_nav_links_to_html(&rendered.html);
-        let html = inject_static_export_flag(&html);
+        let html = if config.html_extensions {
+            rewrite_nav_links_to_html(&rendered.html)
+        } else {
+            rendered.html.clone()
+        };
+        let html = inject_static_export_flag(&html, config.html_extensions);
         let html = rewrite_asset_paths(&html, &config.base_path);
         write_html_file(&file_path, &html)?;
         debug!(pattern, path = %file_path.display(), "Exported app route");
@@ -271,8 +286,12 @@ async fn export_404_page(
         Some(ctx.manifest_json),
     );
     let combined = format!("{shell}{tail}");
-    let html = rewrite_nav_links_to_html(&combined);
-    let html = inject_static_export_flag(&html);
+    let html = if config.html_extensions {
+        rewrite_nav_links_to_html(&combined)
+    } else {
+        combined
+    };
+    let html = inject_static_export_flag(&html, config.html_extensions);
     let html = rewrite_asset_paths(&html, &config.base_path);
 
     let path = config.output_dir.join("404.html");
@@ -406,11 +425,19 @@ fn rewrite_nav_links_to_html(html: &str) -> String {
 
 /// Inject `window.__REX_STATIC_EXPORT=true` so the client-side Link component
 /// falls back to full-page navigation instead of RSC flight data fetching.
-fn inject_static_export_flag(html: &str) -> String {
+///
+/// When `html_extensions` is true, also sets `window.__REX_STATIC_HTML_EXT=true`
+/// so the Link component appends `.html` to internal hrefs at runtime.
+fn inject_static_export_flag(html: &str, html_extensions: bool) -> String {
     let tag = "<head>";
     if let Some(pos) = html.find(tag) {
         let insert_at = pos + tag.len();
-        let script = "<script>window.__REX_STATIC_EXPORT=true</script>";
+        let ext_part = if html_extensions {
+            ";window.__REX_STATIC_HTML_EXT=true"
+        } else {
+            ""
+        };
+        let script = format!("<script>window.__REX_STATIC_EXPORT=true{ext_part}</script>");
         format!("{}{}{}", &html[..insert_at], script, &html[insert_at..])
     } else {
         html.to_string()

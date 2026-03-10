@@ -31,7 +31,7 @@ function withBasePath(href: string): string {
 function withHtmlExtension(href: string): string {
   if (
     typeof window === "undefined" ||
-    !window.__REX_STATIC_EXPORT ||
+    !window.__REX_STATIC_HTML_EXT ||
     href === "/" ||
     !href.startsWith("/") ||
     href.startsWith("/_rex/") ||
