@@ -14,8 +14,8 @@
 // renderer handles thenables natively (suspends until resolved). Awaiting
 // the thenable first yields raw tree data without proper $$typeof symbols.
 
-var _ssrPending = false;
-var _ssrResult: string | null = null;
+let _ssrPending = false;
+let _ssrResult: string | null = null;
 
 function _ssrSafeErrorString(e: unknown): string {
     try {
@@ -43,19 +43,19 @@ function _drainHtmlStream(
     reader: ReadableStreamDefaultReader<Uint8Array>,
     flightString: string,
 ): void {
-    var chunks: (string | Uint8Array)[] = [];
+    const chunks: (string | Uint8Array)[] = [];
 
     function drain(): void {
-        var sync = true;
-        var loop = true;
+        let sync = true;
+        let loop = true;
         while (loop) {
             loop = false;
             reader.read().then(function(result: ReadableStreamReadResult<Uint8Array>) {
                 if (result.done) {
-                    var decoder = new TextDecoder();
-                    var parts: string[] = [];
-                    for (var i = 0; i < chunks.length; i++) {
-                        var c = chunks[i];
+                    const decoder = new TextDecoder();
+                    const parts: string[] = [];
+                    for (let i = 0; i < chunks.length; i++) {
+                        const c = chunks[i];
                         parts.push(typeof c === 'string' ? c : decoder.decode(c));
                     }
                     _ssrResult = JSON.stringify({
@@ -87,14 +87,14 @@ function _drainHtmlStream(
 // renderer handles this natively by suspending until it resolves.
 function _renderToHtml(element: unknown, flightString: string): void {
     try {
-        var streamPromise = __rex_renderToReadableStream_ssr(element, {
+        const streamPromise = __rex_renderToReadableStream_ssr(element, {
             onError: function(err: unknown) {
                 if (typeof console !== 'undefined') {
                     console.error('[Rex SSR onError]', _ssrSafeErrorString(err));
                 }
             }
         });
-        Promise.resolve(streamPromise).then(function(htmlStream: any) {
+        Promise.resolve(streamPromise).then(function(htmlStream: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
             htmlStream.allReady.then(function() {
                 _drainHtmlStream(htmlStream.getReader(), flightString);
             }, function(err: unknown) {
@@ -117,11 +117,11 @@ globalThis.__rex_rsc_flight_to_html = function(flightString: string): string {
 
     // Use raw flight bytes if available (avoids UTF-8 round-trip that corrupts
     // binary flight chunks like TypedArrays). Falls back to re-encoding the string.
-    var rawChunks: Uint8Array[] | null = globalThis.__rex_flight_raw_chunks || null;
-    var stream: ReadableStream<Uint8Array>;
+    const rawChunks: Uint8Array[] | null = globalThis.__rex_flight_raw_chunks || null;
+    let stream: ReadableStream<Uint8Array>;
 
     if (rawChunks && rawChunks.length > 0) {
-        var chunkIndex = 0;
+        let chunkIndex = 0;
         stream = new ReadableStream<Uint8Array>({
             pull: function(controller: ReadableStreamDefaultController<Uint8Array>) {
                 if (chunkIndex < rawChunks!.length) {
@@ -132,8 +132,8 @@ globalThis.__rex_rsc_flight_to_html = function(flightString: string): string {
             }
         });
     } else {
-        var encoder = new TextEncoder();
-        var encoded = encoder.encode(flightString);
+        const encoder = new TextEncoder();
+        const encoded = encoder.encode(flightString);
         stream = new ReadableStream<Uint8Array>({
             start: function(controller: ReadableStreamDefaultController<Uint8Array>) {
                 controller.enqueue(encoded);
@@ -142,8 +142,8 @@ globalThis.__rex_rsc_flight_to_html = function(flightString: string): string {
         });
     }
 
-    var ssrManifest = globalThis.__rex_webpack_ssr_manifest || {};
-    var treeResult: unknown;
+    const ssrManifest = globalThis.__rex_webpack_ssr_manifest || {};
+    let treeResult: unknown;
     try {
         treeResult = __rex_createFromReadableStream(stream, {
             serverConsumerManifest: {
@@ -151,7 +151,7 @@ globalThis.__rex_rsc_flight_to_html = function(flightString: string): string {
                 serverModuleMap: {},
                 moduleLoading: null
             }
-        });
+        } as any); // eslint-disable-line @typescript-eslint/no-explicit-any
     } catch(e) {
         _ssrResult = _ssrError('RSC SSR Error: ' + _ssrSafeErrorString(e), flightString);
         _ssrPending = false;

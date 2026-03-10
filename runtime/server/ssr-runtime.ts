@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+/* eslint-disable no-var -- ambient declarations require `declare var` in TypeScript */
 declare var __rex_pages: Record<string, any>;
 declare var __rex_app: { default?: any } | undefined;
 declare var __rex_api_handlers: Record<string, any> | undefined;
@@ -16,6 +17,7 @@ declare var __rex_gsp_resolved: any;
 declare var __rex_gsp_rejected: any;
 declare var __rex_get_static_props: (routeKey: string, contextJson: string) => string;
 declare var __rex_resolve_gsp: () => string;
+/* eslint-enable no-var */
 
 // SSR render function — returns JSON { body, head }
 globalThis.__rex_render_page = function(routeKey: string, propsJson: string): string {

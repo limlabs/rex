@@ -10,9 +10,9 @@ if (typeof globalThis.ReadableStream === 'undefined') {
         underlyingSource?: any,
         strategy?: any,
     ) {
-        var source = underlyingSource || {};
-        var isByteStream = source.type === 'bytes';
-        var hwm = (strategy && typeof strategy.highWaterMark === 'number')
+        const source = underlyingSource || {};
+        const isByteStream = source.type === 'bytes';
+        const hwm = (strategy && typeof strategy.highWaterMark === 'number')
             ? strategy.highWaterMark
             : (isByteStream ? 0 : 1);
 
@@ -28,12 +28,12 @@ if (typeof globalThis.ReadableStream === 'undefined') {
         this._pulling = false;
         this._pullAgain = false;
 
-        var self = this; // eslint-disable-line no-this-alias
-        var controller: any = {
+        const self = this; // eslint-disable-line no-this-alias
+        const controller: any = {
             enqueue: function(chunk: any) {
                 if (self._closed || self._errored) return;
                 if (self._readerResolve) {
-                    var resolve = self._readerResolve;
+                    const resolve = self._readerResolve;
                     self._readerResolve = null;
                     resolve({ value: chunk, done: false });
                 } else {
@@ -49,7 +49,7 @@ if (typeof globalThis.ReadableStream === 'undefined') {
                 if (self._closed || self._errored) return;
                 self._closed = true;
                 if (self._readerResolve) {
-                    var resolve = self._readerResolve;
+                    const resolve = self._readerResolve;
                     self._readerResolve = null;
                     resolve({ value: undefined, done: true });
                 }
@@ -59,7 +59,7 @@ if (typeof globalThis.ReadableStream === 'undefined') {
                 self._errored = true;
                 self._error = e;
                 if (self._readerResolve) {
-                    var resolve = self._readerResolve;
+                    const resolve = self._readerResolve;
                     self._readerResolve = null;
                     resolve(Promise.reject(e));
                 }
@@ -75,7 +75,7 @@ if (typeof globalThis.ReadableStream === 'undefined') {
         this._underlyingSource = source;
 
         if (typeof source.start === 'function') {
-            var startResult = source.start(controller);
+            const startResult = source.start(controller);
             if (startResult && typeof startResult.then === 'function') {
                 startResult.then(function() {
                     // start resolved — pull if needed
@@ -90,9 +90,9 @@ if (typeof globalThis.ReadableStream === 'undefined') {
         if (this._pulling || this._closed || this._errored) return;
         if (typeof this._underlyingSource.pull !== 'function') return;
         this._pulling = true;
-        var self = this; // eslint-disable-line no-this-alias
+        const self = this; // eslint-disable-line no-this-alias
         try {
-            var result = this._underlyingSource.pull(this._controller);
+            const result = this._underlyingSource.pull(this._controller);
             if (result && typeof result.then === 'function') {
                 result.then(function() {
                     self._pulling = false;
@@ -115,12 +115,12 @@ if (typeof globalThis.ReadableStream === 'undefined') {
 
     (globalThis as any).ReadableStream.prototype.getReader = function(this: any) {
         this._reader = true;
-        var self = this; // eslint-disable-line no-this-alias
+        const self = this; // eslint-disable-line no-this-alias
         return {
             read: function() {
                 if (self._errored) return Promise.reject(self._error);
                 if (self._queue.length > 0) {
-                    var value = self._queue.shift();
+                    const value = self._queue.shift();
                     // Decrease queueSize for byte streams
                     if (self._isByteStream && value && typeof value.byteLength === 'number') {
                         self._queueSize -= value.byteLength;
@@ -137,7 +137,7 @@ if (typeof globalThis.ReadableStream === 'undefined') {
                 self._callPull();
                 // Check if pull synchronously enqueued or closed
                 if (self._queue.length > 0) {
-                    var val = self._queue.shift();
+                    const val = self._queue.shift();
                     if (self._isByteStream && val && typeof val.byteLength === 'number') {
                         self._queueSize -= val.byteLength;
                     } else {

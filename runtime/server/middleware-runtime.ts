@@ -1,10 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+/* eslint-disable no-var -- ambient declarations require `declare var` in TypeScript */
 declare var __rex_middleware: any | undefined;
 declare var __rex_mw_resolved: any;
 declare var __rex_mw_rejected: any;
 declare var __rex_run_middleware: (reqJson: string) => string;
 declare var __rex_resolve_middleware: () => string;
+/* eslint-enable no-var */
 
 interface MiddlewareResult {
     _action?: string;
