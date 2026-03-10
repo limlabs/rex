@@ -124,6 +124,7 @@ All live in `fixtures/`. Each is a complete project requiring `npm install`.
 | `mcp` | Pages | MCP server integration |
 | `custom-server` | Pages | Custom Express server wrapper |
 | `font` | App | Google Fonts + custom fonts |
+| `live` | Pages | Live mode multi-project mounting (app-a, app-b sub-dirs) |
 
 ### When to Add Tests
 
