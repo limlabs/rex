@@ -35,18 +35,18 @@ export interface UrlObject {
 }
 
 function parseQueryParams(searchStr: string): Record<string, string | string[]> {
-    const params: Record<string, string | string[]> = {};
+    const params: Record<string, string | string[]> = Object.create(null);
     if (!searchStr) return params;
     for (const pair of searchStr.split('&')) {
         const eqIdx = pair.indexOf('=');
         let key: string;
         let value: string;
         if (eqIdx === -1) {
-            key = safeDecode(pair);
+            key = safeDecode(pair.replace(/\+/g, ' '));
             value = '';
         } else {
-            key = safeDecode(pair.slice(0, eqIdx));
-            value = safeDecode(pair.slice(eqIdx + 1));
+            key = safeDecode(pair.slice(0, eqIdx).replace(/\+/g, ' '));
+            value = safeDecode(pair.slice(eqIdx + 1).replace(/\+/g, ' '));
         }
         const existing = params[key];
         if (existing === undefined) {
@@ -136,10 +136,11 @@ function parseFallback(urlString: string, parseQueryString?: boolean): UrlObject
     if (rest.startsWith('//')) {
         result.slashes = true;
         rest = rest.slice(2);
-        // Auth
-        const atIdx = rest.indexOf('@');
+        // Auth — use lastIndexOf to handle @ in passwords
         const slashIdx = rest.indexOf('/');
-        if (atIdx !== -1 && (slashIdx === -1 || atIdx < slashIdx)) {
+        const authSection = slashIdx === -1 ? rest : rest.slice(0, slashIdx);
+        const atIdx = authSection.lastIndexOf('@');
+        if (atIdx !== -1) {
             result.auth = rest.slice(0, atIdx);
             rest = rest.slice(atIdx + 1);
         }
@@ -207,12 +208,16 @@ export function format(urlObj: UrlObject): string {
     } else if (urlObj.query) {
         const q = typeof urlObj.query === 'string'
             ? urlObj.query
-            : Object.entries(urlObj.query).map(([k, v]) => {
-                if (Array.isArray(v)) {
-                    return v.map((item) => encodeURIComponent(k) + '=' + encodeURIComponent(item)).join('&');
-                }
-                return encodeURIComponent(k) + '=' + encodeURIComponent(v);
-            }).join('&');
+            : Object.entries(urlObj.query)
+                .map(([k, v]) => {
+                    if (Array.isArray(v)) {
+                        if (v.length === 0) return '';
+                        return v.map((item) => encodeURIComponent(k) + '=' + encodeURIComponent(item)).join('&');
+                    }
+                    return encodeURIComponent(k) + '=' + encodeURIComponent(v);
+                })
+                .filter(Boolean)
+                .join('&');
         result += '?' + q;
     }
     if (urlObj.hash) {
@@ -229,6 +234,9 @@ export function resolve(from: string, to: string): string {
     } catch {
         const dummy = 'http://__rex_dummy__';
         const resolved = new globalThis.URL(to, dummy + from).href;
+        if (!resolved.startsWith(dummy)) {
+            return resolved;
+        }
         return resolved.slice(dummy.length);
     }
 }

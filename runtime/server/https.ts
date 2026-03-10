@@ -15,7 +15,7 @@ import {
 
 function ensureHttps(args: any[]): any[] {
     const first = args[0];
-    if (typeof first === 'object' && !(first instanceof URL) && !first.protocol) {
+    if (first && typeof first === 'object' && !(first instanceof URL) && !first.protocol) {
         args[0] = { ...first, protocol: 'https:' };
     }
     return args;

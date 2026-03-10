@@ -104,10 +104,10 @@ export class ClientRequest extends EventEmitter {
         if (data) this.write(data);
 
         const finish = callback;
-        this._execute().then(() => {
-            if (finish) finish();
-        }).catch((err: any) => {
-            this.emit('error', err);
+        this._execute(finish).catch((err: any) => {
+            if ((err as Error).name !== 'AbortError') {
+                this.emit('error', err);
+            }
         });
     }
 
@@ -133,7 +133,7 @@ export class ClientRequest extends EventEmitter {
         return merged;
     }
 
-    private async _execute(): Promise<void> {
+    private async _execute(onFlushed?: () => void): Promise<void> {
         const opts = this._options;
         const protocol = opts.protocol || 'http:';
         const hostname = opts.hostname || opts.host || 'localhost';
@@ -153,6 +153,10 @@ export class ClientRequest extends EventEmitter {
         }
 
         const response = await fetch(url, fetchInit);
+
+        // Signal that the request has been flushed (Node.js end callback semantics)
+        if (onFlushed) onFlushed();
+
         const msg = new IncomingMessage(response);
 
         if (this._callback) {
