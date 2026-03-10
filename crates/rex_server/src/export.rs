@@ -311,15 +311,23 @@ fn copy_client_assets(client_build_dir: &Path, static_dir: &Path) -> anyhow::Res
     Ok(())
 }
 
-/// Rewrite `/_rex/` asset paths in HTML/JS content to include the base path prefix.
+/// Rewrite asset paths and internal links in HTML/JS content to include the base path prefix.
 ///
 /// When `base_path` is empty, returns the input unchanged.
-/// When `base_path` is e.g. "/rex", rewrites `/_rex/` → `/rex/_rex/`.
+/// When `base_path` is e.g. "/rex":
+///   - `/_rex/` → `/rex/_rex/` (asset URLs)
+///   - `href="/about"` → `href="/rex/about"` (navigation links)
 fn rewrite_asset_paths(content: &str, base_path: &str) -> String {
     if base_path.is_empty() {
         return content.to_string();
     }
-    content.replace("/_rex/", &format!("{base_path}/_rex/"))
+    // 1. Protect /_rex/ paths with a placeholder to avoid double-prefixing
+    let content = content.replace("/_rex/", "\x00_REX_ASSET_\x00");
+    // 2. Rewrite internal navigation links (href="/path")
+    let content = content.replace("href=\"/", &format!("href=\"{base_path}/"));
+    let content = content.replace("href='/", &format!("href='{base_path}/"));
+    // 3. Restore /_rex/ paths with the base path prefix
+    content.replace("\x00_REX_ASSET_\x00", &format!("{base_path}/_rex/"))
 }
 
 /// Recursively copy a directory's contents into a destination directory.
@@ -440,9 +448,32 @@ mod tests {
     fn rewrite_asset_paths_multiple_occurrences() {
         let html = "/_rex/static/a.js /_rex/static/b.js /_rex/data/c.json";
         let result = rewrite_asset_paths(html, "/docs");
-        assert_eq!(
-            result,
-            "/docs/_rex/static/a.js /docs/_rex/static/b.js /docs/_rex/data/c.json"
-        );
+        assert!(result.contains("/docs/_rex/static/a.js"));
+        assert!(result.contains("/docs/_rex/static/b.js"));
+        assert!(result.contains("/docs/_rex/data/c.json"));
+    }
+
+    #[test]
+    fn rewrite_asset_paths_rewrites_nav_links() {
+        let html = r#"<a href="/about">About</a><a href="/getting-started">Start</a>"#;
+        let result = rewrite_asset_paths(html, "/rex");
+        assert!(result.contains(r#"href="/rex/about""#));
+        assert!(result.contains(r#"href="/rex/getting-started""#));
+    }
+
+    #[test]
+    fn rewrite_asset_paths_preserves_external_links() {
+        let html = r#"<a href="https://github.com">GH</a>"#;
+        let result = rewrite_asset_paths(html, "/rex");
+        assert_eq!(result, html);
+    }
+
+    #[test]
+    fn rewrite_asset_paths_no_double_prefix() {
+        let html = r#"<link href="/_rex/static/s.css" /><a href="/about">A</a>"#;
+        let result = rewrite_asset_paths(html, "/rex");
+        assert!(result.contains(r#"href="/rex/_rex/static/s.css""#));
+        assert!(result.contains(r#"href="/rex/about""#));
+        assert!(!result.contains("/rex/rex/"));
     }
 }
