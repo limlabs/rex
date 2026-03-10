@@ -9,7 +9,7 @@ export function exec(_cmd: string, _opts?: any, cb?: any): any {
     return {};
 }
 
-export function execSync(_cmd: string, _opts?: any): Buffer {
+export function execSync(_cmd: string, _opts?: any): any {
     throw new Error('child_process.execSync is not supported in Rex V8 runtime');
 }
 

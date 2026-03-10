@@ -30,7 +30,7 @@ function sharp(_input?: any, _options?: any): any {
         tiff: () => instance,
         raw: () => instance,
         toFormat: () => instance,
-        toBuffer: () => Promise.resolve(Buffer.alloc(0)),
+        toBuffer: () => Promise.resolve(new Uint8Array(0)),
         toFile: () => Promise.resolve({ width: 0, height: 0, channels: 3, size: 0 }),
         metadata: () => Promise.resolve({ width: 0, height: 0, channels: 3, format: 'unknown' }),
         stats: () => Promise.resolve({}),
