@@ -57,11 +57,9 @@ fn collect_source_files(config: &RexConfig, scan: &ScanResult) -> Vec<PathBuf> {
         }
     }
 
-    // Also scan any files under pages_dir / app_dir that we might have missed
-    scan_directory(&config.pages_dir, &mut files);
-    if config.app_dir.exists() {
-        scan_directory(&config.app_dir, &mut files);
-    }
+    // Scan the entire project root for source files (components/, lib/, src/, etc.)
+    // This matches Tailwind v4's automatic content detection behavior.
+    scan_project_root(&config.project_root, &mut files);
 
     // Deduplicate
     let mut seen = HashSet::new();
@@ -70,8 +68,18 @@ fn collect_source_files(config: &RexConfig, scan: &ScanResult) -> Vec<PathBuf> {
     files
 }
 
-/// Recursively find source files in a directory.
-fn scan_directory(dir: &std::path::Path, files: &mut Vec<PathBuf>) {
+/// Scan the project root for source files, skipping non-source directories.
+///
+/// This ensures components outside `app/` and `pages/` (e.g. `components/`, `lib/`,
+/// `src/`) are included in Tailwind candidate scanning — matching Tailwind v4's
+/// automatic content detection.
+fn scan_project_root(root: &std::path::Path, files: &mut Vec<PathBuf>) {
+    const SKIP_DIRS: &[&str] = &["node_modules", ".rex", ".git", ".next", "public", "dist"];
+    scan_directory_filtered(root, files, SKIP_DIRS);
+}
+
+/// Recursively find source files in a directory, skipping directories in `skip`.
+fn scan_directory_filtered(dir: &std::path::Path, files: &mut Vec<PathBuf>, skip: &[&str]) {
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
@@ -79,7 +87,11 @@ fn scan_directory(dir: &std::path::Path, files: &mut Vec<PathBuf>) {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            scan_directory(&path, files);
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if !skip.iter().any(|s| *s == &*name) {
+                scan_directory_filtered(&path, files, skip);
+            }
         } else if is_scannable(&path) {
             files.push(path);
         }
@@ -246,5 +258,34 @@ mod tests {
         assert!(!is_candidate(""));
         assert!(!is_candidate("123abc"));
         assert!(!is_candidate("//comment"));
+    }
+
+    #[test]
+    fn test_scan_project_root_includes_components_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let comp_dir = tmp.path().join("components");
+        fs::create_dir_all(&comp_dir).unwrap();
+        fs::write(
+            comp_dir.join("Sidebar.tsx"),
+            r#"export default function Sidebar() { return <div className="bg-slate-900">hi</div>; }"#,
+        )
+        .unwrap();
+        // Also create a file in node_modules (should be skipped)
+        let nm = tmp.path().join("node_modules").join("pkg");
+        fs::create_dir_all(&nm).unwrap();
+        fs::write(nm.join("index.js"), "className=\"should-not-appear\"").unwrap();
+
+        let mut files = Vec::new();
+        scan_project_root(tmp.path(), &mut files);
+
+        let names: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
+        assert!(
+            names.iter().any(|n| n.contains("Sidebar.tsx")),
+            "should find components/Sidebar.tsx, got: {names:?}"
+        );
+        assert!(
+            !names.iter().any(|n| n.contains("node_modules")),
+            "should skip node_modules, got: {names:?}"
+        );
     }
 }
