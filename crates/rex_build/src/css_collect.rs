@@ -15,7 +15,7 @@ pub(crate) fn css_output_filename(css_path: &Path, build_hash: &str) -> String {
     let stem = css_path.file_stem().unwrap_or_default().to_string_lossy();
     let mut hasher = DefaultHasher::new();
     css_path.hash(&mut hasher);
-    let path_hash = format!("{:x}", hasher.finish());
+    let path_hash = format!("{:016x}", hasher.finish());
     format!("{stem}-{build_hash}-{}.css", &path_hash[..6])
 }
 
