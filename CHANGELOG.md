@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.2](https://github.com/limlabs/rex/compare/v0.15.1...v0.15.2) (2026-03-10)
+
+
+### Bug Fixes
+
+* **export:** CSS scanning, static nav links, and clean URLs ([#162](https://github.com/limlabs/rex/issues/162)) ([efb0368](https://github.com/limlabs/rex/commit/efb036855c374a6b986d46bfd8371cd51287ebf0))
+* **server:** pass html/body attrs from RSC render to document shell ([#154](https://github.com/limlabs/rex/issues/154)) ([f7a9e5c](https://github.com/limlabs/rex/commit/f7a9e5c2fa6a491761995e620b01188c2231edd3))
+
 ## [0.15.1](https://github.com/limlabs/rex/compare/v0.15.0...v0.15.1) (2026-03-10)
 
 
