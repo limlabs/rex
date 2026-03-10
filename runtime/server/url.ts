@@ -232,7 +232,7 @@ export function resolve(from: string, to: string): string {
     try {
         return new globalThis.URL(to, from).href;
     } catch {
-        const dummy = 'http://__rex_dummy__';
+        const dummy = 'http://__rex_dummy__/';
         const resolved = new globalThis.URL(to, dummy + from).href;
         if (!resolved.startsWith(dummy)) {
             return resolved;

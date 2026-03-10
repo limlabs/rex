@@ -139,7 +139,7 @@ export class ClientRequest extends EventEmitter {
         const hostname = opts.hostname || opts.host || 'localhost';
         const port = opts.port ? ':' + opts.port : '';
         const path = opts.path || '/';
-        const url = protocol + '//' + hostname + port + path;
+        const url = protocol + '//' + hostname + port + (path.startsWith('/') ? path : '/' + path);
         const method = (opts.method || 'GET').toUpperCase();
 
         const fetchInit: RequestInit = {
