@@ -10,6 +10,7 @@ A next-generation React framework built on the Next.js API. Write standard React
 - **One CLI** — `rex dev`, `rex build`, `rex start`, plus built-in `lint` (oxlint), `fmt` (oxfmt), and `typecheck` (tsc).
 - **Single binary** — ships as one native executable per platform via npm. No Node.js required at runtime.
 - **Zero-config** — works without a `package.json`. Add one when you need a lockfile or extra dependencies.
+- **Agent-friendly** — fewer files and dependencies means less baseline context for AI coding agents, leaving more of the context window for your actual application logic.
 
 ### Performance
 
