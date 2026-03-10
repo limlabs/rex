@@ -11,6 +11,14 @@ declare const globalThis: {
 };
 /* eslint-enable no-shadow-restricted-names */
 
+function safeDecode(str: string): string {
+    try {
+        return decodeURIComponent(str);
+    } catch {
+        return str;
+    }
+}
+
 export interface UrlObject {
     protocol?: string | null;
     slashes?: boolean | null;
@@ -20,19 +28,51 @@ export interface UrlObject {
     port?: string | null;
     pathname?: string | null;
     search?: string | null;
-    query?: string | Record<string, string> | null;
+    query?: string | Record<string, string | string[]> | null;
     hash?: string | null;
     path?: string | null;
     href?: string;
 }
 
+function parseQueryParams(searchStr: string): Record<string, string | string[]> {
+    const params: Record<string, string | string[]> = {};
+    if (!searchStr) return params;
+    for (const pair of searchStr.split('&')) {
+        const eqIdx = pair.indexOf('=');
+        let key: string;
+        let value: string;
+        if (eqIdx === -1) {
+            key = safeDecode(pair);
+            value = '';
+        } else {
+            key = safeDecode(pair.slice(0, eqIdx));
+            value = safeDecode(pair.slice(eqIdx + 1));
+        }
+        const existing = params[key];
+        if (existing === undefined) {
+            params[key] = value;
+        } else if (Array.isArray(existing)) {
+            existing.push(value);
+        } else {
+            params[key] = [existing, value];
+        }
+    }
+    return params;
+}
+
+// Protocols that use // slashes (non-exhaustive, covers common cases)
+const SLASHED_PROTOCOLS = new Set([
+    'http:', 'https:', 'ftp:', 'ftps:', 'gopher:', 'ws:', 'wss:', 'file:',
+]);
+
 export function parse(urlString: string, parseQueryString?: boolean): UrlObject {
     // Try WHATWG URL first for well-formed URLs
     try {
         const u = new globalThis.URL(urlString);
+        const hasSlashes = SLASHED_PROTOCOLS.has(u.protocol);
         const result: UrlObject = {
             protocol: u.protocol,
-            slashes: true,
+            slashes: hasSlashes,
             auth: u.username ? (u.password ? u.username + ':' + u.password : u.username) : null,
             host: u.host,
             hostname: u.hostname,
@@ -45,11 +85,7 @@ export function parse(urlString: string, parseQueryString?: boolean): UrlObject 
             query: null,
         };
         if (parseQueryString && u.search) {
-            const params: Record<string, string> = {};
-            u.searchParams.forEach((value: any, key: any) => {
-                params[key] = value;
-            });
-            result.query = params;
+            result.query = parseQueryParams(u.search.slice(1));
         } else {
             result.query = u.search ? u.search.slice(1) : null;
         }
@@ -83,20 +119,7 @@ function parseFallback(urlString: string, parseQueryString?: boolean): UrlObject
         result.search = rest.slice(qIdx);
         rest = rest.slice(0, qIdx);
         if (parseQueryString) {
-            const params: Record<string, string> = {};
-            const searchStr = result.search.slice(1);
-            if (searchStr) {
-                for (const pair of searchStr.split('&')) {
-                    const eqIdx = pair.indexOf('=');
-                    if (eqIdx === -1) {
-                        params[decodeURIComponent(pair)] = '';
-                    } else {
-                        params[decodeURIComponent(pair.slice(0, eqIdx))] =
-                            decodeURIComponent(pair.slice(eqIdx + 1));
-                    }
-                }
-            }
-            result.query = params;
+            result.query = parseQueryParams(result.search.slice(1));
         } else {
             result.query = result.search.slice(1);
         }
@@ -120,18 +143,35 @@ function parseFallback(urlString: string, parseQueryString?: boolean): UrlObject
             result.auth = rest.slice(0, atIdx);
             rest = rest.slice(atIdx + 1);
         }
-        // Host
+        // Host — handle IPv6 brackets
         const hostEnd = rest.indexOf('/');
         const hostStr = hostEnd === -1 ? rest : rest.slice(0, hostEnd);
         rest = hostEnd === -1 ? '' : rest.slice(hostEnd);
-        const colonIdx = hostStr.lastIndexOf(':');
-        if (colonIdx !== -1) {
-            result.hostname = hostStr.slice(0, colonIdx);
-            result.port = hostStr.slice(colonIdx + 1);
-            result.host = hostStr;
+
+        if (hostStr.startsWith('[')) {
+            // IPv6 literal: [::1] or [::1]:port
+            const bracketEnd = hostStr.indexOf(']');
+            if (bracketEnd !== -1) {
+                result.hostname = hostStr.slice(0, bracketEnd + 1);
+                const afterBracket = hostStr.slice(bracketEnd + 1);
+                if (afterBracket.startsWith(':')) {
+                    result.port = afterBracket.slice(1);
+                }
+                result.host = hostStr;
+            } else {
+                result.hostname = hostStr;
+                result.host = hostStr;
+            }
         } else {
-            result.hostname = hostStr;
-            result.host = hostStr;
+            const colonIdx = hostStr.lastIndexOf(':');
+            if (colonIdx !== -1) {
+                result.hostname = hostStr.slice(0, colonIdx);
+                result.port = hostStr.slice(colonIdx + 1);
+                result.host = hostStr;
+            } else {
+                result.hostname = hostStr;
+                result.host = hostStr;
+            }
         }
     }
 
@@ -167,8 +207,12 @@ export function format(urlObj: UrlObject): string {
     } else if (urlObj.query) {
         const q = typeof urlObj.query === 'string'
             ? urlObj.query
-            : Object.entries(urlObj.query).map(([k, v]) =>
-                encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
+            : Object.entries(urlObj.query).map(([k, v]) => {
+                if (Array.isArray(v)) {
+                    return v.map((item) => encodeURIComponent(k) + '=' + encodeURIComponent(item)).join('&');
+                }
+                return encodeURIComponent(k) + '=' + encodeURIComponent(v);
+            }).join('&');
         result += '?' + q;
     }
     if (urlObj.hash) {
@@ -178,7 +222,15 @@ export function format(urlObj: UrlObject): string {
 }
 
 export function resolve(from: string, to: string): string {
-    return new globalThis.URL(to, from).href;
+    // WHATWG URL requires an absolute base; if from is relative, prepend a
+    // dummy origin so the resolution still works, then strip it afterward.
+    try {
+        return new globalThis.URL(to, from).href;
+    } catch {
+        const dummy = 'http://__rex_dummy__';
+        const resolved = new globalThis.URL(to, dummy + from).href;
+        return resolved.slice(dummy.length);
+    }
 }
 
 // Re-export WHATWG globals for convenience

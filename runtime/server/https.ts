@@ -1,9 +1,11 @@
 // Node.js `https` module polyfill for Rex server bundles.
-// Re-exports http — the global fetch() handles both HTTP and HTTPS natively.
+// Wraps http module but defaults protocol to 'https:'.
 
-export {
-    request,
-    get,
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+import {
+    request as httpRequest,
+    get as httpGet,
     createServer,
     ClientRequest,
     IncomingMessage,
@@ -11,4 +13,25 @@ export {
     STATUS_CODES,
 } from './http';
 
-export { default } from './http';
+function ensureHttps(args: any[]): any[] {
+    const first = args[0];
+    if (typeof first === 'object' && !(first instanceof URL) && !first.protocol) {
+        args[0] = { ...first, protocol: 'https:' };
+    }
+    return args;
+}
+
+export function request(...args: any[]): ClientRequest {
+    return (httpRequest as any)(...ensureHttps(args));
+}
+
+export function get(...args: any[]): ClientRequest {
+    return (httpGet as any)(...ensureHttps(args));
+}
+
+export { createServer, ClientRequest, IncomingMessage, METHODS, STATUS_CODES };
+
+export default {
+    request, get, createServer, ClientRequest, IncomingMessage,
+    METHODS, STATUS_CODES,
+};

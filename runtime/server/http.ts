@@ -54,9 +54,10 @@ export class IncomingMessage extends EventEmitter {
 export class ClientRequest extends EventEmitter {
     private _options: RequestOptions;
     private _callback?: (res: IncomingMessage) => void;
-    private _body: string[] = [];
+    private _body: (string | Uint8Array)[] = [];
     private _headers: Record<string, string> = {};
     private _ended: boolean = false;
+    private _abortController: AbortController = new AbortController();
 
     constructor(options: RequestOptions, callback?: (res: IncomingMessage) => void) {
         super();
@@ -82,21 +83,23 @@ export class ClientRequest extends EventEmitter {
     }
 
     write(data: string | Uint8Array): boolean {
-        if (typeof data === 'string') {
-            this._body.push(data);
-        } else {
-            this._body.push(new TextDecoder().decode(data));
-        }
+        this._body.push(data);
         return true;
     }
 
-    end(data?: string | Uint8Array | (() => void), _encoding?: string, callback?: () => void): void {
+    end(
+        data?: string | Uint8Array | (() => void),
+        encodingOrCallback?: string | (() => void),
+        callback?: () => void,
+    ): void {
         if (this._ended) return;
         this._ended = true;
 
         if (typeof data === 'function') {
             callback = data;
             data = undefined;
+        } else if (typeof encodingOrCallback === 'function') {
+            callback = encodingOrCallback;
         }
         if (data) this.write(data);
 
@@ -106,6 +109,28 @@ export class ClientRequest extends EventEmitter {
         }).catch((err: any) => {
             this.emit('error', err);
         });
+    }
+
+    private _buildBody(): string | Uint8Array | undefined {
+        if (this._body.length === 0) return undefined;
+        // All strings — join them
+        if (this._body.every((c) => typeof c === 'string')) {
+            return (this._body as string[]).join('');
+        }
+        // Mix of strings and Uint8Arrays — concatenate as bytes
+        const encoder = new TextEncoder();
+        const buffers = this._body.map((c) =>
+            typeof c === 'string' ? encoder.encode(c) : c,
+        );
+        let totalLen = 0;
+        for (const b of buffers) totalLen += b.byteLength;
+        const merged = new Uint8Array(totalLen);
+        let offset = 0;
+        for (const b of buffers) {
+            merged.set(b, offset);
+            offset += b.byteLength;
+        }
+        return merged;
     }
 
     private async _execute(): Promise<void> {
@@ -120,9 +145,11 @@ export class ClientRequest extends EventEmitter {
         const fetchInit: RequestInit = {
             method,
             headers: this._headers,
+            signal: this._abortController.signal,
         };
-        if (this._body.length > 0 && method !== 'GET' && method !== 'HEAD') {
-            fetchInit.body = this._body.join('');
+        const body = this._buildBody();
+        if (body !== undefined && method !== 'GET' && method !== 'HEAD') {
+            fetchInit.body = body as any;
         }
 
         const response = await fetch(url, fetchInit);
@@ -133,16 +160,17 @@ export class ClientRequest extends EventEmitter {
         }
         this.emit('response', msg);
 
-        // Read body and emit data/end events
-        const text = await response.text();
-        if (text.length > 0) {
-            msg.emit('data', text);
+        // Read body as raw bytes and emit as Uint8Array to preserve binary data
+        const buffer = await response.arrayBuffer();
+        if (buffer.byteLength > 0) {
+            msg.emit('data', new Uint8Array(buffer));
         }
         msg.complete = true;
         msg.emit('end');
     }
 
     abort(): void {
+        this._abortController.abort();
         this.emit('abort');
     }
 
@@ -182,7 +210,7 @@ function normalizeArgs(
             callback = maybeCallback;
         }
     } else {
-        options = urlOrOptions;
+        options = { ...urlOrOptions };
         if (typeof optionsOrCallback === 'function') {
             callback = optionsOrCallback;
         } else {

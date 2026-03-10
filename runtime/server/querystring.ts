@@ -8,7 +8,11 @@ export function escape(str: string): string {
 }
 
 export function unescape(str: string): string {
-    return decodeURIComponent(str.replace(/\+/g, ' '));
+    try {
+        return decodeURIComponent(str.replace(/\+/g, ' '));
+    } catch {
+        return str;
+    }
 }
 
 export function stringify(

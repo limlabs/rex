@@ -25,6 +25,7 @@ export class EventEmitter {
             this.removeListener(event, wrapper);
             listener.apply(this, args);
         };
+        (wrapper as any)._originalListener = listener;
         return this.on(event, wrapper);
     }
 
@@ -35,7 +36,9 @@ export class EventEmitter {
     removeListener(event: string, listener: (...args: any[]) => void): this {
         const listeners = this._events.get(event);
         if (listeners) {
-            const idx = listeners.indexOf(listener);
+            const idx = listeners.findIndex(
+                (fn) => fn === listener || (fn as any)._originalListener === listener,
+            );
             if (idx !== -1) listeners.splice(idx, 1);
             if (listeners.length === 0) this._events.delete(event);
         }
