@@ -13,6 +13,13 @@ pub struct ExportConfig {
     pub force: bool,
     /// Base path prefix for asset URLs (e.g. "/rex" for GitHub Pages at user.github.io/rex/).
     pub base_path: String,
+    /// Append `.html` extensions to internal navigation links.
+    ///
+    /// Most static hosts (GitHub Pages, Netlify, Vercel, Cloudflare Pages) serve
+    /// `about.html` for requests to `/about`, so this is **off by default** for
+    /// clean URLs.  Enable with `--html-extensions` for hosts that require the
+    /// explicit extension (e.g. S3, basic nginx).
+    pub html_extensions: bool,
 }
 
 /// Result of a static export.
@@ -126,7 +133,13 @@ pub async fn export_site(
 
     for (pattern, html) in &prerendered_pages {
         let file_path = route_to_file_path(output, pattern);
-        let html = rewrite_asset_paths(html, &config.base_path);
+        let html = if config.html_extensions {
+            rewrite_nav_links_to_html(html)
+        } else {
+            html.to_string()
+        };
+        let html = inject_static_export_flag(&html, config.html_extensions);
+        let html = rewrite_asset_paths(&html, &config.base_path);
         write_html_file(&file_path, &html)?;
         debug!(pattern, path = %file_path.display(), "Exported page");
         result.pages_exported += 1;
@@ -153,7 +166,13 @@ pub async fn export_site(
 
     for (pattern, rendered) in &prerendered_app {
         let file_path = route_to_file_path(output, pattern);
-        let html = rewrite_asset_paths(&rendered.html, &config.base_path);
+        let html = if config.html_extensions {
+            rewrite_nav_links_to_html(&rendered.html)
+        } else {
+            rendered.html.clone()
+        };
+        let html = inject_static_export_flag(&html, config.html_extensions);
+        let html = rewrite_asset_paths(&html, &config.base_path);
         write_html_file(&file_path, &html)?;
         debug!(pattern, path = %file_path.display(), "Exported app route");
         result.pages_exported += 1;
@@ -266,7 +285,14 @@ async fn export_404_page(
         false,
         Some(ctx.manifest_json),
     );
-    let html = rewrite_asset_paths(&format!("{shell}{tail}"), &config.base_path);
+    let combined = format!("{shell}{tail}");
+    let html = if config.html_extensions {
+        rewrite_nav_links_to_html(&combined)
+    } else {
+        combined
+    };
+    let html = inject_static_export_flag(&html, config.html_extensions);
+    let html = rewrite_asset_paths(&html, &config.base_path);
 
     let path = config.output_dir.join("404.html");
     if let Err(e) = std::fs::write(&path, &html) {
@@ -309,6 +335,126 @@ fn copy_client_assets(client_build_dir: &Path, static_dir: &Path) -> anyhow::Res
         "Copied client assets"
     );
     Ok(())
+}
+
+/// Rewrite internal navigation links to use `.html` extensions for static file hosting.
+///
+/// Handles both HTML attributes (`href="/about"`) and JSON in RSC flight data
+/// (`"href":"/about"`), so links survive React hydration.
+///
+/// Preserves:
+/// - Root link: `"/"` (served by `index.html`)
+/// - Asset links: `"/_rex/..."` (JS, CSS)
+/// - External links: `"https://..."`, `"http://..."`
+/// - Anchor links: `"#section"`
+/// - Links with existing extensions: `"/file.css"`
+fn rewrite_nav_links_to_html(html: &str) -> String {
+    // Two patterns to match:
+    //   HTML attrs: href="/path"
+    //   JSON props: "href":"/path"
+    const PATTERNS: &[&str] = &["href=\"/", "\"href\":\"/"];
+
+    let mut result = String::with_capacity(html.len() + 512);
+    let mut remaining = html;
+
+    loop {
+        // Find the earliest match of any pattern
+        let mut best: Option<(usize, &str)> = None;
+        for pat in PATTERNS {
+            if let Some(idx) = remaining.find(pat) {
+                if best.is_none_or(|(best_idx, _)| idx < best_idx) {
+                    best = Some((idx, pat));
+                }
+            }
+        }
+
+        let (idx, pat) = match best {
+            Some(b) => b,
+            None => break,
+        };
+
+        // Push everything before this match
+        result.push_str(&remaining[..idx]);
+        remaining = &remaining[idx..];
+
+        // The pattern includes the leading `/`. Everything from after `/` to the
+        // closing `"` is the rest of the path value.
+        let slash_pos = pat.len() - 1; // index of `/` in `remaining`
+        let after_slash = &remaining[pat.len()..];
+
+        let close = match after_slash.find('"') {
+            Some(i) => i,
+            None => {
+                result.push_str(&remaining[..pat.len()]);
+                remaining = &remaining[pat.len()..];
+                continue;
+            }
+        };
+
+        // Full path = "/" + after_slash[..close]
+        let path = &remaining[slash_pos..pat.len() + close];
+
+        // Split off fragment first (comes after query string in a URL)
+        let (path_and_query, fragment) = match path.find('#') {
+            Some(i) => (&path[..i], &path[i..]),
+            None => (path, ""),
+        };
+        // Split off query string from the path
+        let (base, query) = match path_and_query.find('?') {
+            Some(i) => (&path_and_query[..i], &path_and_query[i..]),
+            None => (path_and_query, ""),
+        };
+
+        // Decide if this path needs .html
+        // Check only the final path segment for extensions
+        let needs_html = path != "/"
+            && !path.starts_with("/_rex/")
+            && !path.starts_with("//")
+            && !base.ends_with('/')
+            && !base
+                .rsplit_once('/')
+                .map_or(base, |(_, last)| last)
+                .contains('.');
+
+        if needs_html {
+            // Write everything up to the path value (prefix + opening quote)
+            result.push_str(&remaining[..slash_pos]);
+            result.push_str(base);
+            result.push_str(".html");
+            result.push_str(query);
+            result.push_str(fragment);
+            result.push('"');
+        } else {
+            // Keep as-is through closing quote
+            result.push_str(&remaining[..pat.len() + close + 1]);
+        }
+
+        remaining = &remaining[pat.len() + close + 1..];
+    }
+
+    result.push_str(remaining);
+    result
+}
+
+/// Inject `window.__REX_STATIC_EXPORT=true` so the client-side Link component
+/// falls back to full-page navigation instead of RSC flight data fetching.
+///
+/// When `html_extensions` is true, also sets `window.__REX_STATIC_HTML_EXT=true`
+/// so the Link component appends `.html` to internal hrefs at runtime.
+fn inject_static_export_flag(html: &str, html_extensions: bool) -> String {
+    let tag = "<head>";
+    if let Some(pos) = html.find(tag) {
+        let insert_at = pos + tag.len();
+        let ext_part = if html_extensions {
+            ";window.__REX_STATIC_HTML_EXT=true"
+        } else {
+            ""
+        };
+        let script = format!("<script>window.__REX_STATIC_EXPORT=true{ext_part}</script>");
+        format!("{}{}{}", &html[..insert_at], script, &html[insert_at..])
+    } else {
+        html.to_string()
+    }
 }
 
 /// Rewrite asset paths and internal links in HTML/JS content to include the base path prefix.
@@ -372,174 +518,5 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn route_to_file_path_root() {
-        let output = Path::new("/out");
-        assert_eq!(
-            route_to_file_path(output, "/"),
-            PathBuf::from("/out/index.html")
-        );
-    }
-
-    #[test]
-    fn route_to_file_path_simple() {
-        let output = Path::new("/out");
-        assert_eq!(
-            route_to_file_path(output, "/about"),
-            PathBuf::from("/out/about.html")
-        );
-    }
-
-    #[test]
-    fn route_to_file_path_nested() {
-        let output = Path::new("/out");
-        assert_eq!(
-            route_to_file_path(output, "/docs/intro"),
-            PathBuf::from("/out/docs/intro.html")
-        );
-    }
-
-    #[test]
-    fn validate_exportability_all_static() {
-        let mut manifest = AssetManifest::new("test".into());
-        manifest.add_page("/", "index.js", DataStrategy::None, false);
-        manifest.add_page("/about", "about.js", DataStrategy::GetStaticProps, false);
-
-        let warnings = validate_exportability(&manifest, false).unwrap();
-        assert!(warnings.is_empty());
-    }
-
-    #[test]
-    fn validate_exportability_gssp_fails() {
-        let mut manifest = AssetManifest::new("test".into());
-        manifest.add_page("/", "index.js", DataStrategy::None, false);
-        manifest.add_page("/dash", "dash.js", DataStrategy::GetServerSideProps, false);
-
-        let err = validate_exportability(&manifest, false).unwrap_err();
-        assert!(err.to_string().contains("getServerSideProps"));
-    }
-
-    #[test]
-    fn validate_exportability_gssp_force() {
-        let mut manifest = AssetManifest::new("test".into());
-        manifest.add_page("/", "index.js", DataStrategy::None, false);
-        manifest.add_page("/dash", "dash.js", DataStrategy::GetServerSideProps, false);
-
-        let warnings = validate_exportability(&manifest, true).unwrap();
-        assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("getServerSideProps"));
-    }
-
-    #[test]
-    fn validate_exportability_dynamic_fails() {
-        let mut manifest = AssetManifest::new("test".into());
-        manifest.add_page("/blog/:slug", "slug.js", DataStrategy::None, true);
-
-        let err = validate_exportability(&manifest, false).unwrap_err();
-        assert!(err.to_string().contains("dynamic segments"));
-    }
-
-    #[test]
-    fn write_html_creates_parent_dirs() {
-        let tmp = std::env::temp_dir().join("rex_export_test");
-        let _ = std::fs::remove_dir_all(&tmp);
-        let path = tmp.join("nested").join("page.html");
-        write_html_file(&path, "<html></html>").unwrap();
-        assert!(path.exists());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "<html></html>");
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn rewrite_asset_paths_empty_base() {
-        let html = r#"<script src="/_rex/static/app.js"></script>"#;
-        assert_eq!(rewrite_asset_paths(html, ""), html);
-    }
-
-    #[test]
-    fn rewrite_asset_paths_with_base() {
-        let html =
-            r#"<link href="/_rex/static/style.css" /><script src="/_rex/router.js"></script>"#;
-        let result = rewrite_asset_paths(html, "/rex");
-        assert!(result.contains(r#"href="/rex/_rex/static/style.css""#));
-        assert!(result.contains(r#"src="/rex/_rex/router.js""#));
-    }
-
-    #[test]
-    fn rewrite_asset_paths_multiple_occurrences() {
-        let html = "/_rex/static/a.js /_rex/static/b.js /_rex/data/c.json";
-        let result = rewrite_asset_paths(html, "/docs");
-        assert!(result.contains("/docs/_rex/static/a.js"));
-        assert!(result.contains("/docs/_rex/static/b.js"));
-        assert!(result.contains("/docs/_rex/data/c.json"));
-    }
-
-    #[test]
-    fn rewrite_asset_paths_rewrites_nav_links() {
-        let html = r#"<a href="/about">About</a><a href="/getting-started">Start</a>"#;
-        let result = rewrite_asset_paths(html, "/rex");
-        assert!(result.contains(r#"href="/rex/about""#));
-        assert!(result.contains(r#"href="/rex/getting-started""#));
-    }
-
-    #[test]
-    fn rewrite_asset_paths_preserves_external_links() {
-        let html = r#"<a href="https://github.com">GH</a>"#;
-        let result = rewrite_asset_paths(html, "/rex");
-        // No <head> tag, so no script injection — external link preserved as-is
-        assert!(result.contains(r#"href="https://github.com""#));
-    }
-
-    #[test]
-    fn rewrite_asset_paths_no_double_prefix() {
-        let html = r#"<link href="/_rex/static/s.css" /><a href="/about">A</a>"#;
-        let result = rewrite_asset_paths(html, "/rex");
-        assert!(result.contains(r#"href="/rex/_rex/static/s.css""#));
-        assert!(result.contains(r#"href="/rex/about""#));
-        assert!(!result.contains("/rex/rex/"));
-    }
-
-    #[test]
-    fn rewrite_asset_paths_injects_base_path_global() {
-        let html = r#"<html><head><meta charset="utf-8" /></head><body></body></html>"#;
-        let result = rewrite_asset_paths(html, "/rex");
-        assert!(result.contains(r#"<script>window.__REX_BASE_PATH="/rex"</script>"#));
-        // Script is injected right after <head>
-        let head_pos = result.find("<head>").unwrap();
-        let script_pos = result.find("__REX_BASE_PATH").unwrap();
-        assert!(script_pos > head_pos);
-    }
-
-    #[test]
-    fn rewrite_asset_paths_no_injection_without_head() {
-        // JS files (e.g. router.js) don't have <head> — no injection
-        let js = r#"var x = "/_rex/data/test.json";"#;
-        let result = rewrite_asset_paths(js, "/rex");
-        assert!(!result.contains("__REX_BASE_PATH"));
-    }
-
-    #[test]
-    fn inject_base_path_global_into_rsc_html() {
-        let html =
-            "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\" /></head><body></body></html>";
-        let result = inject_base_path_global(html, "/docs");
-        assert!(result.contains(r#"<head><script>window.__REX_BASE_PATH="/docs"</script><meta"#));
-    }
-
-    #[test]
-    fn inject_base_path_global_escapes_special_chars() {
-        let html = "<html><head></head><body></body></html>";
-        let malicious = r#"/rex";</script><script>alert(1)//"#;
-        let result = inject_base_path_global(html, malicious);
-        assert!(result.contains("__REX_BASE_PATH="));
-        // The </script> inside the value must be escaped so the HTML parser
-        // doesn't close the script tag prematurely and execute injected code.
-        // Count that there's exactly one <script> open and one </script> close.
-        assert_eq!(result.matches("<script>").count(), 1);
-        assert_eq!(result.matches("</script>").count(), 1);
-    }
-}
+#[path = "export_tests.rs"]
+mod export_tests;

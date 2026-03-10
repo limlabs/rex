@@ -26,9 +26,38 @@ function withBasePath(href: string): string {
   return bp + href;
 }
 
+// In static export mode, internal links need .html extensions since there's
+// no server to handle clean URL routing.
+function withHtmlExtension(href: string): string {
+  if (
+    typeof window === "undefined" ||
+    !window.__REX_STATIC_HTML_EXT ||
+    href === "/" ||
+    !href.startsWith("/") ||
+    href.startsWith("/_rex/") ||
+    href.startsWith("//")
+  )
+    return href;
+  // Don't add if already has an extension
+  const path = href.split("#")[0].split("?")[0];
+  if (path.includes(".")) return href;
+  // Insert .html before hash/query
+  const hashIdx = href.indexOf("#");
+  const queryIdx = href.indexOf("?");
+  const suffixIdx =
+    hashIdx >= 0 && queryIdx >= 0
+      ? Math.min(hashIdx, queryIdx)
+      : hashIdx >= 0
+        ? hashIdx
+        : queryIdx >= 0
+          ? queryIdx
+          : href.length;
+  return href.slice(0, suffixIdx) + ".html" + href.slice(suffixIdx);
+}
+
 export default function Link(props: LinkProps): React.ReactElement {
   const { href, replace = false, children, target } = props;
-  const resolvedHref = withBasePath(href);
+  const resolvedHref = withBasePath(withHtmlExtension(href));
 
   const aProps: Record<string, unknown> = { href: resolvedHref };
   if (props.className) aProps.className = props.className;
@@ -51,6 +80,12 @@ export default function Link(props: LinkProps): React.ReactElement {
     }
 
     e.preventDefault();
+
+    // Static export: always do full-page navigation (no server for RSC/data)
+    if (window.__REX_STATIC_EXPORT) {
+      window.location.href = resolvedHref;
+      return;
+    }
 
     // RSC app router navigation (fetches flight data, re-renders in place)
     const rscNavigate = window.__REX_RSC_NAVIGATE;
