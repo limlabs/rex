@@ -1,4 +1,5 @@
 use crate::css_collect::extract_css_imports;
+use crate::{tailwind_optimize, tailwind_scan, tailwind_v8};
 use anyhow::Result;
 use rex_core::RexConfig;
 use rex_router::ScanResult;
@@ -27,7 +28,33 @@ pub fn find_tailwind_bin(project_root: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Run a one-shot Tailwind CSS compilation.
+/// Check if the project's package.json explicitly depends on tailwindcss or @tailwindcss/cli.
+///
+/// This ensures the CLI path only activates when the user explicitly opted in,
+/// not just because Tailwind happens to be in node_modules (e.g., from a parent workspace).
+fn has_tailwind_in_package_json(project_root: &Path) -> bool {
+    let pkg_path = project_root.join("package.json");
+    let content = match fs::read_to_string(&pkg_path) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let json: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    for section in ["dependencies", "devDependencies"] {
+        if let Some(deps) = json.get(section).and_then(|d| d.as_object()) {
+            if deps.contains_key("tailwindcss") || deps.contains_key("@tailwindcss/cli") {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Run a one-shot Tailwind CSS compilation via the CLI binary.
 fn run_tailwind(bin: &Path, input: &Path, output: &Path, project_root: &Path) -> Result<()> {
     let status = Command::new(bin)
         .arg("-i")
@@ -73,16 +100,25 @@ pub fn collect_all_css_import_paths(scan: &ScanResult) -> Result<Vec<PathBuf>> {
 }
 
 /// Pre-process Tailwind CSS files. Returns a map of original CSS path → processed output path.
-/// If no Tailwind CSS files are found, returns an empty map.
+///
+/// Uses the built-in V8 compiler by default. Falls back to the external CLI only
+/// when the user explicitly depends on `tailwindcss` or `@tailwindcss/cli` in their
+/// `package.json` AND the CLI binary exists in `node_modules/.bin/`.
 pub fn process_tailwind_css(
     config: &RexConfig,
     scan: &ScanResult,
     output_dir: &Path,
 ) -> Result<HashMap<PathBuf, PathBuf>> {
     let all_css = collect_all_css_import_paths(scan)?;
-    let tw_bin = find_tailwind_bin(&config.project_root);
+
+    // Decide whether to use CLI (user explicitly opted in) or built-in V8 compiler
+    let use_cli = has_tailwind_in_package_json(&config.project_root)
+        && find_tailwind_bin(&config.project_root).is_some();
 
     let mut mappings = HashMap::new();
+
+    // Scan candidates once if we'll need them (built-in path)
+    let mut candidates_cache: Option<Vec<String>> = None;
 
     for css_path in &all_css {
         if !css_path.exists() {
@@ -92,18 +128,35 @@ pub fn process_tailwind_css(
         if !needs_tailwind(&content) {
             continue;
         }
-        let bin = tw_bin.as_ref().ok_or_else(|| {
-            anyhow::anyhow!(
-                "CSS file {} uses Tailwind directives but tailwindcss is not installed.\n\
-                 Install it: npm install @tailwindcss/cli",
-                css_path.display()
-            )
-        })?;
 
         let stem = css_path.file_stem().unwrap_or_default().to_string_lossy();
         let tw_output = output_dir.join(format!("{stem}.tailwind.css"));
-        info!(input = %css_path.display(), "Processing Tailwind CSS");
-        run_tailwind(bin, css_path, &tw_output, &config.project_root)?;
+
+        if use_cli {
+            // User explicitly depends on @tailwindcss/cli — use their version
+            let bin =
+                find_tailwind_bin(&config.project_root).expect("CLI should exist (checked above)");
+            info!(input = %css_path.display(), "Processing Tailwind CSS (CLI)");
+            run_tailwind(&bin, css_path, &tw_output, &config.project_root)?;
+        } else {
+            // Built-in V8 compiler (default — no npm install needed)
+            info!(input = %css_path.display(), "Processing Tailwind CSS (built-in)");
+
+            // Lazily scan candidates on first Tailwind CSS file
+            let candidates = match &candidates_cache {
+                Some(c) => c,
+                None => {
+                    let c = tailwind_scan::scan_candidates(config, scan)?;
+                    candidates_cache = Some(c);
+                    candidates_cache.as_ref().expect("just set")
+                }
+            };
+
+            let compiled = tailwind_v8::compile_tailwind_v8(&content, candidates)?;
+            let optimized = tailwind_optimize::optimize_css(&compiled, !config.dev)?;
+            fs::write(&tw_output, &optimized)?;
+        }
+
         mappings.insert(css_path.clone(), tw_output);
     }
 
@@ -132,6 +185,45 @@ mod tests {
     fn test_find_tailwind_bin_not_found() {
         let tmp = TempDir::new().expect("test setup");
         assert!(find_tailwind_bin(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn test_has_tailwind_in_package_json() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(
+            tmp.path().join("package.json"),
+            r#"{"dependencies":{"tailwindcss":"^4"}}"#,
+        )
+        .unwrap();
+        assert!(has_tailwind_in_package_json(tmp.path()));
+    }
+
+    #[test]
+    fn test_has_tailwind_cli_in_package_json() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(
+            tmp.path().join("package.json"),
+            r#"{"dependencies":{"@tailwindcss/cli":"^4"}}"#,
+        )
+        .unwrap();
+        assert!(has_tailwind_in_package_json(tmp.path()));
+    }
+
+    #[test]
+    fn test_no_tailwind_in_package_json() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(
+            tmp.path().join("package.json"),
+            r#"{"dependencies":{"react":"^19"}}"#,
+        )
+        .unwrap();
+        assert!(!has_tailwind_in_package_json(tmp.path()));
+    }
+
+    #[test]
+    fn test_no_package_json() {
+        let tmp = TempDir::new().unwrap();
+        assert!(!has_tailwind_in_package_json(tmp.path()));
     }
 
     #[test]
@@ -382,8 +474,10 @@ mod tests {
         }
     }
 
+    /// When no CLI is installed and no package.json dependency, the built-in
+    /// V8 compiler should handle Tailwind CSS automatically.
     #[test]
-    fn test_process_tailwind_css_no_bin_errors() {
+    fn test_process_tailwind_css_builtin_compiler() {
         let tmp = TempDir::new().unwrap();
         let pages_dir = tmp.path().join("pages");
         fs::create_dir_all(&pages_dir).unwrap();
@@ -395,7 +489,7 @@ mod tests {
         fs::write(
             &app,
             format!(
-                "import '{}';\nexport default function App() {{}}\n",
+                "import '{}';\nexport default function App() {{ return <div className=\"p-4 bg-blue-500\">Hi</div>; }}\n",
                 css_file.display()
             ),
         )
@@ -432,15 +526,21 @@ mod tests {
             app_scan: None,
         };
 
+        // This should succeed using the built-in V8 compiler (no CLI needed)
         let result = process_tailwind_css(&config, &scan, &output_dir);
-        assert!(
-            result.is_err(),
-            "should error when tailwindcss binary not found"
-        );
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("tailwindcss is not installed") || err.contains("@tailwindcss/cli"),
-            "error should mention missing binary"
-        );
+        assert!(result.is_ok(), "built-in compiler should work: {result:?}");
+
+        let mappings = result.unwrap();
+        assert!(!mappings.is_empty(), "should produce CSS output");
+
+        for output in mappings.values() {
+            assert!(output.exists(), "output CSS file should exist");
+            let content = fs::read_to_string(output).unwrap();
+            assert!(!content.is_empty(), "compiled CSS should not be empty");
+            assert!(
+                !content.contains("@import \"tailwindcss\""),
+                "Tailwind directives should be compiled away"
+            );
+        }
     }
 }

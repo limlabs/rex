@@ -4,6 +4,7 @@ use std::process::Command;
 
 const REACT_VERSION: &str = "19.2.4";
 const SCHEDULER_VERSION: &str = "0.27.0";
+const TAILWIND_VERSION: &str = "4.2.1";
 
 const PACKAGES: &[(&str, &str)] = &[
     ("react", REACT_VERSION),
@@ -91,10 +92,12 @@ fn main() {
     // Compile server runtime TS → JS
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
     compile_server_runtime(Path::new(&manifest_dir), out_dir);
-    let node_modules = out_dir.join("node_modules");
-    let stamp = out_dir.join(".react-version");
 
-    let expected = format!("react@{REACT_VERSION} scheduler@{SCHEDULER_VERSION}");
+    let node_modules = out_dir.join("node_modules");
+    let stamp = out_dir.join(".vendor-stamp");
+
+    let expected =
+        format!("react@{REACT_VERSION} scheduler@{SCHEDULER_VERSION} tailwind@{TAILWIND_VERSION}");
 
     // Skip download on incremental rebuilds when stamp matches
     if stamp.exists() {
@@ -110,30 +113,107 @@ fn main() {
         fs::remove_dir_all(&node_modules).expect("failed to remove old node_modules");
     }
 
+    // Download React packages
     for &(name, version) in PACKAGES {
-        let pkg_dir = node_modules.join(name);
-        fs::create_dir_all(&pkg_dir).expect("failed to create package dir");
-
-        let url = format!("https://registry.npmjs.org/{name}/-/{name}-{version}.tgz");
-
-        let status = Command::new("sh")
-            .arg("-c")
-            .arg(format!(
-                "curl -sfL '{url}' | tar xz --strip-components=1 -C '{}'",
-                pkg_dir.display()
-            ))
-            .status()
-            .unwrap_or_else(|e| panic!("failed to spawn curl|tar for {name}: {e}"));
-
-        assert!(
-            status.success(),
-            "failed to download {name}@{version} from {url}"
-        );
-
-        trim_package(&pkg_dir, name);
+        download_npm_package(&node_modules, name, version);
+        trim_package(&node_modules.join(name), name);
     }
 
+    // Download Tailwind CSS and bundle compiler for V8
+    download_npm_package(&node_modules, "tailwindcss", TAILWIND_VERSION);
+    bundle_tailwind_compiler(out_dir);
+
     fs::write(&stamp, &expected).expect("failed to write stamp");
+}
+
+/// Download an npm package tarball and extract to node_modules/{name}.
+fn download_npm_package(node_modules: &Path, name: &str, version: &str) {
+    let pkg_dir = node_modules.join(name);
+    fs::create_dir_all(&pkg_dir).expect("failed to create package dir");
+
+    let url = format!("https://registry.npmjs.org/{name}/-/{name}-{version}.tgz");
+
+    let status = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "curl -sfL '{url}' | tar xz --strip-components=1 -C '{}'",
+            pkg_dir.display()
+        ))
+        .status()
+        .unwrap_or_else(|e| panic!("failed to spawn curl|tar for {name}: {e}"));
+
+    assert!(
+        status.success(),
+        "failed to download {name}@{version} from {url}"
+    );
+}
+
+/// Escape a string for embedding as a JS string literal (double-quoted).
+fn js_string_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            // U+2028 and U+2029 are line terminators in JS but not caught by is_control()
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            c if c.is_control() => {
+                let _ = std::fmt::Write::write_fmt(&mut out, format_args!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Bundle the Tailwind CSS compiler into a self-contained JS file for V8.
+///
+/// Tailwind v4's npm package ships `dist/lib.js` — a fully self-contained CJS
+/// module with zero `require()` calls (~270KB). We wrap it with a `module.exports`
+/// shim and embed the CSS files needed by `loadStylesheet` resolution.
+fn bundle_tailwind_compiler(out_dir: &Path) {
+    let tw_dir = out_dir.join("node_modules/tailwindcss");
+
+    let lib_js = fs::read_to_string(tw_dir.join("dist/lib.js"))
+        .unwrap_or_else(|e| panic!("failed to read tailwindcss/dist/lib.js: {e}"));
+
+    let css_index = fs::read_to_string(tw_dir.join("index.css"))
+        .unwrap_or_else(|e| panic!("failed to read tailwindcss/index.css: {e}"));
+    let css_preflight = fs::read_to_string(tw_dir.join("preflight.css"))
+        .unwrap_or_else(|e| panic!("failed to read tailwindcss/preflight.css: {e}"));
+    let css_theme = fs::read_to_string(tw_dir.join("theme.css"))
+        .unwrap_or_else(|e| panic!("failed to read tailwindcss/theme.css: {e}"));
+    let css_utilities = fs::read_to_string(tw_dir.join("utilities.css"))
+        .unwrap_or_else(|e| panic!("failed to read tailwindcss/utilities.css: {e}"));
+
+    let wrapper = format!(
+        r#"(function() {{
+  var module = {{ exports: {{}} }};
+  var exports = module.exports;
+{lib_js}
+  globalThis.__tw_compile = module.exports.compile;
+  globalThis.__tw_css = {{
+    index: {index},
+    preflight: {preflight},
+    theme: {theme},
+    utilities: {utilities},
+  }};
+}})();
+"#,
+        index = js_string_literal(&css_index),
+        preflight = js_string_literal(&css_preflight),
+        theme = js_string_literal(&css_theme),
+        utilities = js_string_literal(&css_utilities),
+    );
+
+    fs::write(out_dir.join("tailwind-compiler.js"), wrapper)
+        .unwrap_or_else(|e| panic!("failed to write tailwind-compiler.js: {e}"));
 }
 
 /// Remove files we don't need in the embedded binary.

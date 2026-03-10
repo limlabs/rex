@@ -11,6 +11,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  packages: read
 
 concurrency:
   group: pages
@@ -22,20 +23,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: ./.github/actions/setup
+      - uses: actions/setup-node@v4
         with:
-          save-cache: "true"
+          node-version: 22
 
       - name: Install docs dependencies
         run: npm install
         working-directory: docs
 
-      - name: Build Rex (export-only, skips dev/lint)
-        run: cargo build -p rex_cli --no-default-features --features build --release
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Export docs site
-        run: ../target/release/rex export --force --base-path /rex
-        working-directory: docs
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/work" \
+            -w /work/docs \
+            ghcr.io/limlabs/rex:latest-build \
+            rex export --force --base-path /rex
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

@@ -18,6 +18,9 @@ pub(crate) mod font_google;
 pub(crate) mod mdx;
 pub(crate) mod server_bundle;
 pub mod tailwind;
+pub mod tailwind_optimize;
+pub(crate) mod tailwind_scan;
+pub(crate) mod tailwind_v8;
 
 // Internal modules extracted from rsc_bundler.rs
 pub(crate) mod rsc_build_config;
