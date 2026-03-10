@@ -1,0 +1,66 @@
+# Live Mode
+
+Live mode serves React projects directly from source with on-demand compilation. There is no build step — Rex compiles on the first request, caches the result, and automatically recompiles when source files change.
+
+## Quick start
+
+```bash
+rex live -m /=./my-app
+```
+
+This starts a server on port 4000 that serves `my-app` at the root path. The first request triggers compilation; subsequent requests use the cached build until source files change.
+
+## Mounting multiple projects
+
+Mount several projects under different URL prefixes to serve them from a single server:
+
+```bash
+rex live \
+  -m /=./marketing-site \
+  -m /dashboard=./admin-app \
+  -m /docs=./docs-site
+```
+
+Requests are matched by longest prefix first, so `/dashboard/settings` routes to the admin app while `/about` routes to the marketing site.
+
+Each mounted project is fully isolated — it gets its own build cache, V8 isolate pool, route trie, and file watcher.
+
+## Options
+
+| Option | Description |
+|--------|-------------|
+| `-m, --mount <prefix>=<path>` | Mount a project (repeatable) |
+| `-p, --port <port>` | Port to listen on (default: 4000) |
+| `-H, --host <addr>` | Host to bind to (default: 127.0.0.1) |
+| `--workers <n>` | V8 worker threads per project (default: 4) |
+
+## How it works
+
+1. **First request** — Rex scans the project's `pages/` or `app/` directory, bundles with Rolldown, initializes a V8 isolate pool, and serves the response. The compilation result is cached.
+
+2. **Subsequent requests** — Rex checks source file timestamps. If nothing changed, the cached build is used immediately. If a file changed, Rex recompiles before serving.
+
+3. **File watcher** — A background file watcher proactively invalidates the build cache when source files change, so the next request triggers a fresh build without waiting for a timestamp check.
+
+## Cache invalidation
+
+Live mode uses **timestamp-based invalidation** by default. On every request, Rex walks the source directories and compares file modification times against the cached build. This is zero-config and works with any deployment method.
+
+The file watcher acts as a belt-and-suspenders mechanism — it invalidates the cache immediately on file changes so the next request doesn't need to wait for the timestamp walk.
+
+## Use cases
+
+- **Agent-friendly deployments** — push source files to a directory and they're live immediately, no CI/CD pipeline needed
+- **Multi-tenant serving** — mount different teams' apps under isolated prefixes on a single server
+- **Rapid prototyping** — skip the build step during development without running a full dev server
+- **Micro-frontend replacement** — serve multiple independent React apps from one server without the complexity of module federation
+
+## Comparison with other modes
+
+| | `rex dev` | `rex build` + `rex start` | `rex live` |
+|---|---|---|---|
+| **Build step** | Automatic (watcher) | Manual (`rex build`) | On-demand |
+| **HMR** | Yes | No | No |
+| **Multi-project** | No | No | Yes |
+| **Production-ready** | No | Yes | Yes |
+| **TUI dashboard** | Yes | No | No |

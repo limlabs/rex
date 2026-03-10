@@ -81,6 +81,29 @@ Requires `rex build` to have been run first. Static pages are pre-rendered at st
 
 > Note: `rex start` defaults to `0.0.0.0` (all interfaces) while `rex dev` defaults to `127.0.0.1` (localhost only).
 
+## rex live
+
+Start a live mode server that compiles and serves projects on-demand from source.
+
+```bash
+rex live [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-m, --mount <prefix>=<path>` | Mount a project at a URL prefix (repeatable) |
+| `--port <port>`, `-p` | Port to listen on (default: 4000) |
+| `--host <addr>`, `-H` | Host to bind to (default: 127.0.0.1) |
+| `--workers <n>` | V8 worker threads per project (default: 4) |
+
+Projects are compiled on the first request and cached. Source file changes automatically invalidate the cache. Mount multiple projects under different prefixes:
+
+```bash
+rex live -m /=./my-app -m /admin=./admin-app
+```
+
+See [Live Mode](/features/live-mode) for details.
+
 ## rex typecheck
 
 Run the TypeScript compiler to check for type errors.

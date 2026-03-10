@@ -37,6 +37,7 @@ const navigation: NavSection[] = [
       { title: "Middleware", href: "/features/middleware" },
       { title: "Custom Server", href: "/features/custom-server" },
       { title: "MDX", href: "/features/mdx" },
+      { title: "Live Mode", href: "/features/live-mode" },
     ],
   },
   {
