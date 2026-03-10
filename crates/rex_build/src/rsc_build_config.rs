@@ -65,7 +65,7 @@ impl<'a> RscBuildContext<'a> {
     pub fn non_js_empty_module_types(&self) -> rustc_hash::FxHashMap<String, rolldown::ModuleType> {
         let mut m = rustc_hash::FxHashMap::default();
         // Text-based non-JS assets → empty
-        for ext in &[".css", ".scss", ".sass", ".less", ".mdx", ".svg"] {
+        for ext in &[".css", ".scss", ".sass", ".less", ".mdx", ".svg", ".wasm"] {
             m.insert((*ext).to_string(), rolldown::ModuleType::Empty);
         }
         // Binary assets → binary (prevents UTF-8 read errors)

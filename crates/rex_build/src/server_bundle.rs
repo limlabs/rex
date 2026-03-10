@@ -5,7 +5,54 @@ use rex_router::ScanResult;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tracing::debug;
+
+/// Rolldown plugin that intercepts specific bare-specifier imports that aliases
+/// miss when the import originates from within node_modules (pnpm symlinks).
+#[derive(Debug)]
+pub(crate) struct NodePolyfillResolvePlugin {
+    /// Maps bare specifier prefixes → absolute path of stub file.
+    redirects: Vec<(String, String)>,
+}
+
+impl NodePolyfillResolvePlugin {
+    pub fn new(redirects: Vec<(String, String)>) -> Self {
+        Self { redirects }
+    }
+}
+
+impl rolldown::plugin::Plugin for NodePolyfillResolvePlugin {
+    fn name(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("rex:node-polyfill-resolve")
+    }
+
+    fn resolve_id(
+        &self,
+        _ctx: &rolldown::plugin::PluginContext,
+        args: &rolldown::plugin::HookResolveIdArgs<'_>,
+    ) -> impl std::future::Future<Output = rolldown::plugin::HookResolveIdReturn> + Send {
+        let specifier = args.specifier;
+        let result = self.redirects.iter().find_map(|(prefix, target)| {
+            if specifier == prefix
+                || (specifier.len() > prefix.len()
+                    && specifier.starts_with(prefix)
+                    && specifier.as_bytes()[prefix.len()] == b'/')
+            {
+                Some(rolldown::plugin::HookResolveIdOutput::from_id(
+                    target.clone(),
+                ))
+            } else {
+                None
+            }
+        });
+        async move { Ok(result) }
+    }
+
+    fn register_hook_usage(&self) -> rolldown::plugin::HookUsage {
+        rolldown::plugin::HookUsage::ResolveId
+    }
+}
 
 /// V8 polyfills for bare V8 environment (React 19 needs these).
 /// Injected as a rolldown banner so they run before any bundled code.
@@ -34,7 +81,7 @@ const APP_ROUTE_RUNTIME: &str = include_str!(concat!(env!("OUT_DIR"), "/app-rout
 ///
 /// Produces a self-contained IIFE that includes React, all pages, and SSR
 /// runtime functions. Runs in bare V8 with no module loader.
-pub async fn build_server_bundle(
+pub(crate) async fn build_server_bundle(
     config: &RexConfig,
     scan: &ScanResult,
     output_dir: &Path,
@@ -183,7 +230,7 @@ pub async fn build_server_bundle(
 
     // Non-JS assets → empty/binary modules (server doesn't need these)
     let mut module_types = rustc_hash::FxHashMap::default();
-    for ext in &[".css", ".scss", ".sass", ".less", ".mdx", ".svg"] {
+    for ext in &[".css", ".scss", ".sass", ".less", ".mdx", ".svg", ".wasm"] {
         module_types.insert((*ext).to_string(), rolldown::ModuleType::Empty);
     }
     for ext in &[
@@ -199,367 +246,26 @@ pub async fn build_server_bundle(
         None
     };
 
-    // Rex built-in aliases first, then user aliases (first match wins in rolldown)
-    let mut aliases = vec![
+    // Rex built-in aliases, then Node.js polyfills, then user aliases
+    let make_alias = |spec: &str, file: &str| {
         (
-            "rex/head".to_string(),
-            vec![Some(
-                runtime_dir.join("head.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "rex/link".to_string(),
-            vec![Some(
-                runtime_dir.join("link.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "rex/router".to_string(),
-            vec![Some(
-                runtime_dir.join("router.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "rex/document".to_string(),
-            vec![Some(
-                runtime_dir
-                    .join("document.ts")
-                    .to_string_lossy()
-                    .to_string(),
-            )],
-        ),
-        (
-            "rex/image".to_string(),
-            vec![Some(
-                runtime_dir.join("image.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "rex/middleware".to_string(),
-            vec![Some(
-                runtime_dir
-                    .join("middleware.ts")
-                    .to_string_lossy()
-                    .to_string(),
-            )],
-        ),
-        // Next.js compatibility shims
-        (
-            "next/head".to_string(),
-            vec![Some(
-                runtime_dir.join("head.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "next/link".to_string(),
-            vec![Some(
-                runtime_dir.join("link.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "next/router".to_string(),
-            vec![Some(
-                runtime_dir.join("router.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "next/document".to_string(),
-            vec![Some(
-                runtime_dir
-                    .join("document.ts")
-                    .to_string_lossy()
-                    .to_string(),
-            )],
-        ),
-        (
-            "next/image".to_string(),
-            vec![Some(
-                runtime_dir.join("image.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        // Node.js fs module polyfill (server-only)
-        (
-            "fs".to_string(),
-            vec![Some(
-                runtime_dir.join("fs.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "node:fs".to_string(),
-            vec![Some(
-                runtime_dir.join("fs.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "fs/promises".to_string(),
-            vec![Some(
-                runtime_dir
-                    .join("fs-promises.ts")
-                    .to_string_lossy()
-                    .to_string(),
-            )],
-        ),
-        (
-            "node:fs/promises".to_string(),
-            vec![Some(
-                runtime_dir
-                    .join("fs-promises.ts")
-                    .to_string_lossy()
-                    .to_string(),
-            )],
-        ),
-        // Node.js path module polyfill (server-only)
-        (
-            "path".to_string(),
-            vec![Some(
-                runtime_dir.join("path.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "node:path".to_string(),
-            vec![Some(
-                runtime_dir.join("path.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        // Node.js buffer module polyfill (re-exports globalThis.Buffer from banner)
-        (
-            "buffer".to_string(),
-            vec![Some(
-                runtime_dir.join("buffer.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "node:buffer".to_string(),
-            vec![Some(
-                runtime_dir.join("buffer.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        // Node.js crypto module polyfill (re-exports globalThis.crypto from banner)
-        (
-            "crypto".to_string(),
-            vec![Some(
-                runtime_dir.join("crypto.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "node:crypto".to_string(),
-            vec![Some(
-                runtime_dir.join("crypto.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        // Node.js http/https module polyfill (wraps fetch)
-        (
-            "http".to_string(),
-            vec![Some(
-                runtime_dir.join("http.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "node:http".to_string(),
-            vec![Some(
-                runtime_dir.join("http.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "https".to_string(),
-            vec![Some(
-                runtime_dir.join("https.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "node:https".to_string(),
-            vec![Some(
-                runtime_dir.join("https.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        // Node.js querystring module polyfill
-        (
-            "querystring".to_string(),
-            vec![Some(
-                runtime_dir
-                    .join("querystring.ts")
-                    .to_string_lossy()
-                    .to_string(),
-            )],
-        ),
-        (
-            "node:querystring".to_string(),
-            vec![Some(
-                runtime_dir
-                    .join("querystring.ts")
-                    .to_string_lossy()
-                    .to_string(),
-            )],
-        ),
-        // Node.js events module polyfill (EventEmitter)
-        (
-            "events".to_string(),
-            vec![Some(
-                runtime_dir.join("events.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "node:events".to_string(),
-            vec![Some(
-                runtime_dir.join("events.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        // Node.js net module stub (empty — triggers pg-cloudflare fallback)
-        (
-            "net".to_string(),
-            vec![Some(
-                runtime_dir.join("net.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "node:net".to_string(),
-            vec![Some(
-                runtime_dir.join("net.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        // Node.js tls module stub
-        (
-            "tls".to_string(),
-            vec![Some(
-                runtime_dir.join("tls.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "node:tls".to_string(),
-            vec![Some(
-                runtime_dir.join("tls.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        // Node.js dns module stub (hostname passthrough)
-        (
-            "dns".to_string(),
-            vec![Some(
-                runtime_dir.join("dns.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "node:dns".to_string(),
-            vec![Some(
-                runtime_dir.join("dns.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        // Node.js os module stub
-        (
-            "os".to_string(),
-            vec![Some(
-                runtime_dir.join("os.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "node:os".to_string(),
-            vec![Some(
-                runtime_dir.join("os.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        // Node.js stream module polyfill (EventEmitter-based)
-        (
-            "stream".to_string(),
-            vec![Some(
-                runtime_dir.join("stream.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "node:stream".to_string(),
-            vec![Some(
-                runtime_dir.join("stream.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        // Node.js string_decoder module stub
-        (
-            "string_decoder".to_string(),
-            vec![Some(
-                runtime_dir
-                    .join("string_decoder.ts")
-                    .to_string_lossy()
-                    .to_string(),
-            )],
-        ),
-        (
-            "node:string_decoder".to_string(),
-            vec![Some(
-                runtime_dir
-                    .join("string_decoder.ts")
-                    .to_string_lossy()
-                    .to_string(),
-            )],
-        ),
-        // Node.js util module stub
-        (
-            "util".to_string(),
-            vec![Some(
-                runtime_dir.join("util.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        (
-            "node:util".to_string(),
-            vec![Some(
-                runtime_dir.join("util.ts").to_string_lossy().to_string(),
-            )],
-        ),
-        // Node.js url module polyfill (fileURLToPath, pathToFileURL)
-        (
-            "url".to_string(),
-            vec![Some(
-                runtime_dir
-                    .join("url-module.ts")
-                    .to_string_lossy()
-                    .to_string(),
-            )],
-        ),
-        (
-            "node:url".to_string(),
-            vec![Some(
-                runtime_dir
-                    .join("url-module.ts")
-                    .to_string_lossy()
-                    .to_string(),
-            )],
-        ),
-        // Node.js stream/web polyfill (re-exports Web Streams from globalThis)
-        (
-            "stream/web".to_string(),
-            vec![Some(
-                runtime_dir
-                    .join("stream-web.ts")
-                    .to_string_lossy()
-                    .to_string(),
-            )],
-        ),
-        (
-            "node:stream/web".to_string(),
-            vec![Some(
-                runtime_dir
-                    .join("stream-web.ts")
-                    .to_string_lossy()
-                    .to_string(),
-            )],
-        ),
-        // Cloudflare sockets polyfill (TCP via Rust callbacks, used by pg-cloudflare)
-        (
-            "cloudflare:sockets".to_string(),
-            vec![Some(
-                runtime_dir
-                    .join("cloudflare-sockets.ts")
-                    .to_string_lossy()
-                    .to_string(),
-            )],
-        ),
-        // file-type stub (Node.js-only APIs not available in V8)
-        (
-            "file-type".to_string(),
-            vec![Some(
-                runtime_dir
-                    .join("file-type.ts")
-                    .to_string_lossy()
-                    .to_string(),
-            )],
-        ),
+            spec.to_string(),
+            vec![Some(runtime_dir.join(file).to_string_lossy().to_string())],
+        )
+    };
+    let rex_aliases = [
+        ("rex/head", "head.ts"),
+        ("rex/link", "link.ts"),
+        ("rex/router", "router.ts"),
+        ("rex/document", "document.ts"),
+        ("rex/image", "image.ts"),
+        ("rex/middleware", "middleware.ts"),
+        ("next/document", "document.ts"),
     ];
+    let mut aliases: Vec<_> = rex_aliases.iter().map(|(s, f)| make_alias(s, f)).collect();
+    // Node.js polyfills + next/* shims from shared helper
+    aliases.extend(crate::build_utils::node_polyfill_aliases(&runtime_dir));
+
     // Append user-defined aliases from rex.config build.alias
     aliases.extend(project_config.build.resolved_aliases(&config.project_root));
     // tsconfig auto-resolution is disabled (to prevent rex/* overrides), so we
@@ -590,9 +296,13 @@ pub async fn build_server_bundle(
         // server-safe stubs with the client-only package source, causing
         // "window is not defined" at SSR time.
         tsconfig: Some(rolldown_common::TsConfig::Auto(false)),
+        shim_missing_exports: Some(true),
         treeshake: crate::rsc_build_config::react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(aliases),
+            // Use "node" condition so packages with conditional exports (e.g. file-type)
+            // resolve to their Node.js entry point with full API surface.
+            condition_names: Some(vec!["require".to_string(), "default".to_string()]),
             extensions: Some(vec![
                 ".tsx".to_string(),
                 ".ts".to_string(),
@@ -610,13 +320,39 @@ pub async fn build_server_bundle(
         ..Default::default()
     };
 
-    let mut bundler = rolldown::Bundler::new(options)
-        .map_err(|e| anyhow::anyhow!("Failed to create rolldown bundler: {e}"))?;
+    // Plugin to intercept imports that resolve.alias misses (e.g. from within
+    // node_modules via pnpm symlinks). Aliases only match project-root imports;
+    // this plugin catches the rest.
+    let stub = runtime_dir
+        .join("file-type.ts")
+        .to_string_lossy()
+        .to_string();
+    let empty_stub = runtime_dir.join("empty.ts").to_string_lossy().to_string();
+    let polyfill_plugin = Arc::new(NodePolyfillResolvePlugin {
+        redirects: vec![
+            ("file-type".to_string(), stub),
+            ("@vercel/og".to_string(), empty_stub),
+        ],
+    });
 
-    bundler
-        .write()
-        .await
-        .map_err(|e| anyhow::anyhow!("Server bundle failed: {e:?}"))?;
+    let mut bundler = rolldown::Bundler::with_plugins(
+        options,
+        vec![polyfill_plugin as Arc<dyn rolldown::plugin::Pluginable>],
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to create rolldown bundler: {e}"))?;
+
+    if let Err(e) = bundler.write().await {
+        let debug = format!("{e:?}");
+        // Allow MissingExport diagnostics when shim_missing_exports is on
+        let all_missing_export = e.iter().all(|d| {
+            let ds = format!("{d:?}");
+            ds.contains("MissingExport")
+        });
+        if !all_missing_export {
+            return Err(anyhow::anyhow!("Server bundle failed: {debug}"));
+        }
+        tracing::warn!("Server bundle had {} shimmed missing export(s)", e.len());
+    }
 
     let _ = fs::remove_dir_all(&entries_dir);
 

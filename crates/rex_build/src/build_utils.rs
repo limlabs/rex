@@ -213,8 +213,7 @@ pub(crate) fn runtime_client_dir() -> Result<PathBuf> {
     crate::embedded_runtime::client_dir()
 }
 
-/// Maps Node.js built-in modules + `cloudflare:sockets` to server-side polyfill stubs.
-/// Used by both the pages-router server bundle and RSC server/SSR bundles.
+/// Node.js polyfill aliases for server-side bundles (pages-router + RSC).
 pub(crate) fn node_polyfill_aliases(runtime_dir: &Path) -> Vec<(String, Vec<Option<String>>)> {
     let modules: &[(&str, &str)] = &[
         ("process", "process.ts"),
@@ -229,8 +228,8 @@ pub(crate) fn node_polyfill_aliases(runtime_dir: &Path) -> Vec<(String, Vec<Opti
         ("node:buffer", "buffer.ts"),
         ("crypto", "crypto.ts"),
         ("node:crypto", "crypto.ts"),
-        ("events", "events.ts"),
-        ("node:events", "events.ts"),
+        ("events", "events.cjs"),
+        ("node:events", "events.cjs"),
         ("net", "net.ts"),
         ("node:net", "net.ts"),
         ("tls", "tls.ts"),
@@ -266,14 +265,13 @@ pub(crate) fn node_polyfill_aliases(runtime_dir: &Path) -> Vec<(String, Vec<Opti
         ("http2", "http2.ts"),
         ("node:http2", "http2.ts"),
         ("cloudflare:sockets", "cloudflare-sockets.ts"),
-        // file-type stub — Node.js condition entry has fileTypeFromFile but
-        // causes issues with other packages. Provide stub for server bundles.
+        ("querystring", "querystring.ts"),
+        ("node:querystring", "querystring.ts"),
         ("file-type", "file-type.ts"),
-        // sharp — native image library, needs C++ bindings not available in V8
+        ("file-type/core", "file-type.ts"),
+        ("file-type/core.js", "file-type.ts"),
         ("sharp", "sharp.ts"),
     ];
-
-    // next/* → Rex equivalents for Next.js projects (only if files exist)
     let next_mappings: &[(&str, &str)] = &[
         ("next/link", "next-link.ts"),
         ("next/image", "next-image.ts"),
@@ -286,19 +284,22 @@ pub(crate) fn node_polyfill_aliases(runtime_dir: &Path) -> Vec<(String, Vec<Opti
         ("next/font/google", "next-font.ts"),
         ("next/font/local", "next-font.ts"),
         ("next/dynamic", "next-dynamic.ts"),
+        ("@vercel/og", "empty.ts"),
+        ("next/og", "empty.ts"),
     ];
-    let make_alias = |spec: &str, file: &str| {
+    let mk = |s: &str, f: &str| {
         (
-            spec.to_string(),
-            vec![Some(runtime_dir.join(file).to_string_lossy().to_string())],
+            s.to_string(),
+            vec![Some(runtime_dir.join(f).to_string_lossy().to_string())],
         )
     };
-    let mut aliases: Vec<_> = modules.iter().map(|(s, f)| make_alias(s, f)).collect();
-    for (specifier, file) in next_mappings {
-        if runtime_dir.join(file).exists() {
-            aliases.push(make_alias(specifier, file));
-        }
-    }
+    let mut aliases: Vec<_> = modules.iter().map(|(s, f)| mk(s, f)).collect();
+    aliases.extend(
+        next_mappings
+            .iter()
+            .filter(|(_, f)| runtime_dir.join(f).exists())
+            .map(|(s, f)| mk(s, f)),
+    );
     aliases
 }
 

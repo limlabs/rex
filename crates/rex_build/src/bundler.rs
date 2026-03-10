@@ -111,7 +111,14 @@ pub async fn build_bundles(
     } else {
         "\"production\""
     };
-    let define = vec![("process.env.NODE_ENV".to_string(), node_env.to_string())];
+    let define = vec![
+        ("process.env.NODE_ENV".to_string(), node_env.to_string()),
+        // Ensure Next.js resolves to node runtime, not edge (avoids wasm?module imports)
+        (
+            "process.env.NEXT_RUNTIME".to_string(),
+            "\"nodejs\"".to_string(),
+        ),
+    ];
 
     // Resolve module directories once for all bundle steps
     let module_dirs = resolve_modules_dirs(config)?;
@@ -430,7 +437,7 @@ globalThis.__rex_resolve_api = function() {
 
     let runtime_dir = runtime_server_dir()?;
     let mut module_types = rustc_hash::FxHashMap::default();
-    for ext in &[".css", ".scss", ".sass", ".less", ".mdx", ".svg"] {
+    for ext in &[".css", ".scss", ".sass", ".less", ".mdx", ".svg", ".wasm"] {
         module_types.insert((*ext).to_string(), rolldown::ModuleType::Empty);
     }
     for ext in &[
@@ -438,6 +445,28 @@ globalThis.__rex_resolve_api = function() {
     ] {
         module_types.insert((*ext).to_string(), rolldown::ModuleType::Binary);
     }
+
+    let make_alias = |spec: &str, file: &str| {
+        (
+            spec.to_string(),
+            vec![Some(runtime_dir.join(file).to_string_lossy().to_string())],
+        )
+    };
+    let rex_aliases = [
+        ("rex/head", "head.ts"),
+        ("rex/link", "link.ts"),
+        ("rex/router", "router.ts"),
+        ("rex/document", "document.ts"),
+        ("rex/image", "image.ts"),
+        ("rex/middleware", "middleware.ts"),
+        ("next/document", "document.ts"),
+    ];
+    let mut aliases: Vec<_> = rex_aliases.iter().map(|(s, f)| make_alias(s, f)).collect();
+    aliases.extend(crate::build_utils::node_polyfill_aliases(&runtime_dir));
+    aliases.extend(project_config.build.resolved_aliases(&config.project_root));
+    aliases.extend(crate::build_utils::tsconfig_path_aliases(
+        &config.project_root,
+    ));
 
     let options = rolldown::BundlerOptions {
         input: Some(vec![rolldown::InputItem {
@@ -455,8 +484,11 @@ globalThis.__rex_resolve_api = function() {
             V8_POLYFILLS.to_string(),
         ))),
         tsconfig: Some(rolldown_common::TsConfig::Auto(false)),
+        shim_missing_exports: Some(true),
         treeshake: crate::rsc_build_config::react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
+            alias: Some(aliases),
+            condition_names: Some(vec!["require".to_string(), "default".to_string()]),
             extensions: Some(vec![
                 ".tsx".to_string(),
                 ".ts".to_string(),
@@ -464,26 +496,6 @@ globalThis.__rex_resolve_api = function() {
                 ".js".to_string(),
             ]),
             modules: Some(module_dirs.to_vec()),
-            alias: Some(vec![
-                (
-                    "rex/head".to_string(),
-                    vec![Some(
-                        runtime_dir.join("head.ts").to_string_lossy().to_string(),
-                    )],
-                ),
-                (
-                    "rex/link".to_string(),
-                    vec![Some(
-                        runtime_dir.join("link.ts").to_string_lossy().to_string(),
-                    )],
-                ),
-                (
-                    "rex/router".to_string(),
-                    vec![Some(
-                        runtime_dir.join("router.ts").to_string_lossy().to_string(),
-                    )],
-                ),
-            ]),
             ..Default::default()
         }),
         sourcemap: if project_config.build.sourcemap {
@@ -494,12 +506,30 @@ globalThis.__rex_resolve_api = function() {
         ..Default::default()
     };
 
-    let mut bundler = rolldown::Bundler::new(options)
+    // Use the same polyfill resolve plugin as server_bundle.rs
+    let stub = runtime_dir
+        .join("file-type.ts")
+        .to_string_lossy()
+        .to_string();
+    let empty_stub = runtime_dir.join("empty.ts").to_string_lossy().to_string();
+    let polyfill_plugin: std::sync::Arc<dyn rolldown::plugin::Pluginable> =
+        std::sync::Arc::new(crate::server_bundle::NodePolyfillResolvePlugin::new(vec![
+            ("file-type".to_string(), stub),
+            ("@vercel/og".to_string(), empty_stub),
+        ]));
+    let mut bundler = rolldown::Bundler::with_plugins(options, vec![polyfill_plugin])
         .map_err(|e| anyhow::anyhow!("Failed to create server bundler: {e}"))?;
-    bundler
-        .write()
-        .await
-        .map_err(|e| anyhow::anyhow!("Server bundle failed: {e:?}"))?;
+
+    if let Err(e) = bundler.write().await {
+        let all_missing_export = e.iter().all(|d| format!("{d:?}").contains("MissingExport"));
+        if !all_missing_export {
+            return Err(anyhow::anyhow!("Server bundle failed: {e:?}"));
+        }
+        tracing::warn!(
+            "Minimal server bundle had {} shimmed missing export(s)",
+            e.len()
+        );
+    }
 
     let _ = fs::remove_dir_all(&entry_dir);
 
