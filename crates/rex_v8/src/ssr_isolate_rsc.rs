@@ -133,8 +133,23 @@ impl SsrIsolate {
                 result.to_rust_string_lossy(scope)
             };
 
-            let parsed: RscRenderResult =
-                serde_json::from_str(&finalized).context("Failed to parse RSC finalize result")?;
+            // React's flight protocol can produce lone surrogates as JSON hex
+            // escapes (\uD800-\uDFFF) which serde_json rejects. Replace them
+            // with the Unicode replacement character escape (\uFFFD).
+            let finalized = sanitize_json_surrogates(&finalized);
+            let parsed: RscRenderResult = match serde_json::from_str(&finalized) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!(
+                        len = finalized.len(),
+                        err = %e,
+                        line = e.line(),
+                        col = e.column(),
+                        "Failed to parse RSC finalize result"
+                    );
+                    return Err(anyhow::anyhow!("Failed to parse RSC finalize result: {e}"));
+                }
+            };
             return Ok(parsed);
         }
 
@@ -238,7 +253,61 @@ impl SsrIsolate {
             Ok(result_str)
         }
     }
+}
 
+/// Replace lone surrogate JSON hex escapes (`\uD800`–`\uDFFF`) with `\uFFFD`.
+/// React's flight protocol can emit unpaired surrogates that are valid in JS
+/// strings but rejected by serde_json (strict RFC 8259).
+fn sanitize_json_surrogates(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    let mut out = String::with_capacity(len);
+    let mut i = 0;
+    while i < len {
+        if bytes[i] == b'\\' && i + 5 < len && bytes[i + 1] == b'u' {
+            if let Ok(hex) =
+                u16::from_str_radix(std::str::from_utf8(&bytes[i + 2..i + 6]).unwrap_or(""), 16)
+            {
+                if (0xD800..=0xDBFF).contains(&hex) {
+                    // High surrogate — check if followed by a low surrogate
+                    if i + 11 < len
+                        && bytes[i + 6] == b'\\'
+                        && bytes[i + 7] == b'u'
+                        && u16::from_str_radix(
+                            std::str::from_utf8(&bytes[i + 8..i + 12]).unwrap_or(""),
+                            16,
+                        )
+                        .is_ok_and(|low| (0xDC00..=0xDFFF).contains(&low))
+                    {
+                        // Valid surrogate pair — keep both
+                        out.push_str(&s[i..i + 12]);
+                        i += 12;
+                        continue;
+                    }
+                    // Lone high surrogate — replace
+                    out.push_str("\\uFFFD");
+                    i += 6;
+                    continue;
+                } else if (0xDC00..=0xDFFF).contains(&hex) {
+                    // Lone low surrogate — replace
+                    out.push_str("\\uFFFD");
+                    i += 6;
+                    continue;
+                }
+            }
+        }
+        // Advance by one UTF-8 character (the string is known-valid UTF-8).
+        if let Some(ch) = s[i..].chars().next() {
+            out.push(ch);
+            i += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    out
+}
+
+impl SsrIsolate {
     /// Set request context (headers/cookies) in V8 globals before action execution.
     pub fn set_request_context(&mut self, headers_json: &str, cookies_json: &str) -> Result<()> {
         v8::scope_with_context!(scope, &mut self.isolate, &self.context);
