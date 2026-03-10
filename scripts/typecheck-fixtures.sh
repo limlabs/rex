@@ -21,31 +21,37 @@ if [[ ! -d "$REX_PKG/node_modules" ]]; then
   (cd "$REX_PKG" && npm install --no-package-lock --ignore-scripts --no-audit --no-fund)
 fi
 
+TMPDIR_BASE="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR_BASE"' EXIT
+
 check_fixture() {
   local dir="$1"
   local name
   name="$(basename "$dir")"
+  local logfile="$TMPDIR_BASE/$name.log"
 
   if [[ ! -f "$dir/tsconfig.json" ]]; then
     return 0
   fi
 
-  echo "--- Checking $name ---"
+  {
+    echo "--- Checking $name ---"
 
-  if [[ ! -d "$dir/node_modules" ]]; then
-    echo "  Installing dependencies..."
-    (cd "$dir" && npm install --no-package-lock --ignore-scripts --no-audit --no-fund) || {
-      echo "  WARN: npm install failed for $name, skipping"
+    if [[ ! -d "$dir/node_modules" ]]; then
+      echo "  Installing dependencies..."
+      (cd "$dir" && npm install --no-package-lock --ignore-scripts --no-audit --no-fund) || {
+        echo "  WARN: npm install failed for $name, skipping"
+        return 0
+      }
+    fi
+
+    if (cd "$dir" && npx tsc --noEmit); then
+      echo "  OK"
       return 0
-    }
-  fi
-
-  if (cd "$dir" && npx tsc --noEmit); then
-    echo "  OK"
-    return 0
-  else
-    return 1
-  fi
+    else
+      return 1
+    fi
+  } > "$logfile" 2>&1
 }
 
 # Single fixture mode
@@ -55,30 +61,48 @@ if [[ $# -ge 1 ]]; then
   exit $?
 fi
 
-# All fixtures mode
-FAILED=()
+# All fixtures mode — run checks in parallel
+PIDS=()
+NAMES=()
+
+should_skip() {
+  local name="$1"
+  for skip in "${SKIP[@]}"; do
+    [[ "$name" == "$skip" ]] && return 0
+  done
+  return 1
+}
 
 for dir in "$FIXTURES_DIR"/*/; do
   name="$(basename "$dir")"
-
-  for skip in "${SKIP[@]}"; do
-    [[ "$name" == "$skip" ]] && continue 2
-  done
-
-  if ! check_fixture "$dir"; then
-    FAILED+=("$name")
-  fi
+  should_skip "$name" && continue
+  check_fixture "$dir" &
+  PIDS+=($!)
+  NAMES+=("$name")
 done
 
 for dir in "$BENCHMARKS_DIR"/*/; do
   name="$(basename "$dir")"
+  should_skip "$name" && continue
+  check_fixture "$dir" &
+  PIDS+=($!)
+  NAMES+=("benchmarks/$name")
+done
 
-  for skip in "${SKIP[@]}"; do
-    [[ "$name" == "$skip" ]] && continue 2
-  done
+# Wait for all and collect failures
+FAILED=()
+for i in "${!PIDS[@]}"; do
+  if ! wait "${PIDS[$i]}"; then
+    FAILED+=("${NAMES[$i]}")
+  fi
+done
 
-  if ! check_fixture "$dir"; then
-    FAILED+=("benchmarks/$name")
+# Print all logs in order
+for i in "${!NAMES[@]}"; do
+  name="${NAMES[$i]}"
+  logfile="$TMPDIR_BASE/$(basename "$name").log"
+  if [[ -f "$logfile" ]]; then
+    cat "$logfile"
   fi
 done
 
