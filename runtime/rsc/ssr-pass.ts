@@ -8,6 +8,11 @@
 //   - __rex_createFromReadableStream: from react-server-dom-webpack/client
 //   - __rex_renderToReadableStream_ssr: from react-dom/server
 //   - __rex_webpack_ssr_manifest: client-side module map for resolving client refs
+//
+// IMPORTANT: createFromReadableStream returns a thenable React root element.
+// This must be passed DIRECTLY to renderToReadableStream — React's server
+// renderer handles thenables natively (suspends until resolved). Awaiting
+// the thenable first yields raw tree data without proper $$typeof symbols.
 
 var _ssrPending = false;
 var _ssrResult: string | null = null;
@@ -15,7 +20,6 @@ var _ssrResult: string | null = null;
 function _ssrSafeErrorString(e: unknown): string {
     try {
         if (e instanceof Error) {
-            // Include stack for debugging
             if (e.stack) return e.stack;
             return e.message || 'Unknown error';
         }
@@ -78,31 +82,26 @@ function _drainHtmlStream(
     drain();
 }
 
-// Render a React tree to HTML using the streaming renderToReadableStream API.
-// renderToReadableStream returns Promise<ReadableStream> where the stream has
-// an `allReady` Promise that resolves when all Suspense boundaries are ready.
-function _renderTreeToHtml(tree: unknown, flightString: string): void {
+// Render a React element to HTML using the streaming renderToReadableStream API.
+// The element may be a thenable (from createFromReadableStream) — React's server
+// renderer handles this natively by suspending until it resolves.
+function _renderToHtml(element: unknown, flightString: string): void {
     try {
-        // renderToReadableStream returns a Promise<ReadableStream>
-        var streamPromise = __rex_renderToReadableStream_ssr(tree, {
+        var streamPromise = __rex_renderToReadableStream_ssr(element, {
             onError: function(err: unknown) {
-                // Log to console for server-side debugging
                 if (typeof console !== 'undefined') {
-                    console.error('[Rex SSR onError]', err);
+                    console.error('[Rex SSR onError]', _ssrSafeErrorString(err));
                 }
             }
         });
         Promise.resolve(streamPromise).then(function(htmlStream: any) {
-            // Wait for allReady (all Suspense boundaries resolved)
             htmlStream.allReady.then(function() {
                 _drainHtmlStream(htmlStream.getReader(), flightString);
             }, function(err: unknown) {
-                if (typeof console !== 'undefined') console.error('[Rex SSR allReady]', err instanceof Error ? err.stack : err);
                 _ssrResult = _ssrError('SSR allReady error: ' + _ssrSafeErrorString(err), flightString);
                 _ssrPending = false;
             });
         }, function(err: unknown) {
-            if (typeof console !== 'undefined') console.error('[Rex SSR render]', err instanceof Error ? err.stack : err);
             _ssrResult = _ssrError('SSR render error: ' + _ssrSafeErrorString(err), flightString);
             _ssrPending = false;
         });
@@ -147,7 +146,6 @@ globalThis.__rex_rsc_flight_to_html = function(flightString: string): string {
     var treeResult: unknown;
     try {
         treeResult = __rex_createFromReadableStream(stream, {
-            // React 19.2+ uses serverConsumerManifest, older uses ssrManifest
             serverConsumerManifest: {
                 moduleMap: ssrManifest,
                 serverModuleMap: {},
@@ -160,23 +158,11 @@ globalThis.__rex_rsc_flight_to_html = function(flightString: string): string {
         return _ssrResult;
     }
 
-    // createFromReadableStream returns a thenable
-    if (treeResult && typeof (treeResult as PromiseLike<unknown>).then === 'function') {
-        (treeResult as PromiseLike<unknown>).then(function(tree: unknown) {
-            _renderTreeToHtml(tree, flightString);
-        }, function(err: unknown) {
-            _ssrResult = _ssrError('SSR error: ' + _ssrSafeErrorString(err), flightString);
-            _ssrPending = false;
-        });
-
-        if (!_ssrPending) {
-            return _ssrResult!;
-        }
-        return '__REX_SSR_ASYNC__';
-    }
-
-    // Synchronous result — render via streaming API
-    _renderTreeToHtml(treeResult, flightString);
+    // Pass the thenable directly to renderToReadableStream. React's server
+    // renderer handles thenables natively — it suspends until the flight data
+    // resolves, then renders the tree. Do NOT .then() this first, as the
+    // resolved value is raw tree data without $$typeof symbols.
+    _renderToHtml(treeResult, flightString);
     if (!_ssrPending) {
         return _ssrResult!;
     }
