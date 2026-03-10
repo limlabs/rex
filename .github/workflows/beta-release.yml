@@ -179,7 +179,7 @@ jobs:
   docker:
     name: Docker (beta)
     needs: check-release-pr
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
