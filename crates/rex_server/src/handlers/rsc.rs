@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tracing::error;
 
 use super::{AppState, HotState};
-use crate::document::{assemble_rsc_body_tail, assemble_rsc_head_shell};
+use crate::rsc_document::{assemble_rsc_body_tail, assemble_rsc_head_shell};
 use crate::state::snapshot;
 
 /// RSC flight data endpoint: GET /_rex/rsc/{buildId}/{path}
