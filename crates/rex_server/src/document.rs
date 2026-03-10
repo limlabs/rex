@@ -174,6 +174,15 @@ fn escape_attr(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// Sanitize a raw tag attribute string for safe insertion into an HTML opening tag.
+///
+/// `extract_*_tag_attrs` already stops at the first `>`, so by construction the
+/// string cannot contain `>`. This is a defense-in-depth measure that strips any
+/// `>` character to prevent premature tag closure.
+fn sanitize_tag_attrs(s: &str) -> String {
+    s.replace('>', "")
+}
+
 /// Assemble the HTML head shell — everything from doctype through opening `<body>` tag.
 ///
 /// This is flushed to the browser immediately so it can start fetching CSS/JS
@@ -413,7 +422,7 @@ fn assemble_rsc_head_shell_with_attrs(
         html.push_str("<!DOCTYPE html>\n<html><head>");
     } else {
         html.push_str("<!DOCTYPE html>\n<html ");
-        html.push_str(html_attrs);
+        html.push_str(&sanitize_tag_attrs(html_attrs));
         html.push_str("><head>");
     }
     html.push_str("<meta charset=\"utf-8\" />");
@@ -442,7 +451,7 @@ fn assemble_rsc_head_shell_with_attrs(
         html.push_str("</head><body>");
     } else {
         html.push_str("</head><body ");
-        html.push_str(body_attrs);
+        html.push_str(&sanitize_tag_attrs(body_attrs));
         html.push('>');
     }
 
@@ -502,15 +511,15 @@ pub fn assemble_rsc_body_tail(
     if !html_attrs.is_empty() || !body_attrs.is_empty() {
         html.push_str("<script>");
         if !html_attrs.is_empty() {
-            let escaped = escape_js_string(html_attrs);
+            let escaped = escape_script_content(&escape_js_string(html_attrs));
             html.push_str(&format!(
-                "!function(){{var d=document.createElement('div');d.innerHTML='<span {escaped}>';var a=d.firstChild.attributes;for(var i=0;i<a.length;i++)document.documentElement.setAttribute(a[i].name,a[i].value)}}();"
+                "!function(){{var d=document.createElement('div');d.innerHTML='\\u003cspan {escaped}>';var a=d.firstChild.attributes;for(var i=0;i<a.length;i++)document.documentElement.setAttribute(a[i].name,a[i].value)}}();"
             ));
         }
         if !body_attrs.is_empty() {
-            let escaped = escape_js_string(body_attrs);
+            let escaped = escape_script_content(&escape_js_string(body_attrs));
             html.push_str(&format!(
-                "!function(){{var d=document.createElement('div');d.innerHTML='<span {escaped}>';var a=d.firstChild.attributes;for(var i=0;i<a.length;i++)document.body.setAttribute(a[i].name,a[i].value)}}();"
+                "!function(){{var d=document.createElement('div');d.innerHTML='\\u003cspan {escaped}>';var a=d.firstChild.attributes;for(var i=0;i<a.length;i++)document.body.setAttribute(a[i].name,a[i].value)}}();"
             ));
         }
         html.push_str("</script>");
