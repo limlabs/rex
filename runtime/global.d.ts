@@ -81,6 +81,7 @@ declare global {
       props: Record<string, unknown>,
     ) => void;
     __REX_NAVIGATING__?: boolean;
+    __REX_BASE_PATH?: string;
     __REX_RSC_NAVIGATE?: (pathname: string) => Promise<void>;
     __REX_RSC_INIT?: () => void;
     __REX_RSC_PARSE_FLIGHT?: (flight: string) => ReactElement | null;
