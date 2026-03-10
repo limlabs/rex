@@ -151,3 +151,38 @@ async fn status_handler() -> axum::Json<serde_json::Value> {
         "mode": "live"
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_adds_leading_slash() {
+        assert_eq!(normalize_prefix("admin"), "/admin");
+    }
+
+    #[test]
+    fn normalize_removes_trailing_slash() {
+        assert_eq!(normalize_prefix("/admin/"), "/admin");
+    }
+
+    #[test]
+    fn normalize_preserves_root() {
+        assert_eq!(normalize_prefix("/"), "/");
+    }
+
+    #[test]
+    fn normalize_already_correct() {
+        assert_eq!(normalize_prefix("/dashboard"), "/dashboard");
+    }
+
+    #[test]
+    fn normalize_nested_prefix() {
+        assert_eq!(normalize_prefix("/admin/settings/"), "/admin/settings");
+    }
+
+    #[test]
+    fn normalize_bare_slash() {
+        assert_eq!(normalize_prefix(""), "/");
+    }
+}
