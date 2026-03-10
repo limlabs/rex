@@ -156,6 +156,16 @@ fn escape_style_content(s: &str) -> String {
     s.replace('<', "\\u003c")
 }
 
+/// Escape a string for safe embedding inside a JavaScript single-quoted string literal.
+/// Handles backslashes, single quotes, newlines, and `</script>` sequences.
+fn escape_js_string(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace("</script", "<\\/script")
+}
+
 /// Escape a string for use as an HTML attribute value.
 fn escape_attr(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -336,6 +346,10 @@ pub struct RscDocumentParams<'a> {
     pub css_contents: &'a HashMap<String, String>,
     pub is_dev: bool,
     pub manifest_json: Option<&'a str>,
+    /// Raw attribute string for `<html>` tag (e.g. `lang="en"`)
+    pub html_attrs: &'a str,
+    /// Raw attribute string for `<body>` tag (e.g. `class="bg-white"`)
+    pub body_attrs: &'a str,
 }
 
 /// Assemble an RSC HTML document (non-streaming path).
@@ -343,11 +357,13 @@ pub struct RscDocumentParams<'a> {
 /// Delegates to the streaming functions for consistency.
 pub fn assemble_rsc_document(params: &RscDocumentParams<'_>) -> String {
     let mut html = String::new();
-    html.push_str(&assemble_rsc_head_shell(
+    html.push_str(&assemble_rsc_head_shell_with_attrs(
         params.client_chunks,
         params.client_manifest_json,
         params.css_files,
         params.css_contents,
+        params.html_attrs,
+        params.body_attrs,
     ));
     html.push_str(&assemble_rsc_body_tail(
         params.ssr_html,
@@ -372,8 +388,34 @@ pub fn assemble_rsc_head_shell(
     css_files: &[String],
     css_contents: &HashMap<String, String>,
 ) -> String {
+    assemble_rsc_head_shell_with_attrs(
+        client_chunks,
+        client_manifest_json,
+        css_files,
+        css_contents,
+        "",
+        "",
+    )
+}
+
+/// Like `assemble_rsc_head_shell` but allows passing through `<html>` and `<body>` attributes
+/// extracted from the SSR output so the served HTML matches the RSC flight data.
+fn assemble_rsc_head_shell_with_attrs(
+    client_chunks: &[String],
+    client_manifest_json: &str,
+    css_files: &[String],
+    css_contents: &HashMap<String, String>,
+    html_attrs: &str,
+    body_attrs: &str,
+) -> String {
     let mut html = String::with_capacity(2048);
-    html.push_str("<!DOCTYPE html>\n<html><head>");
+    if html_attrs.is_empty() {
+        html.push_str("<!DOCTYPE html>\n<html><head>");
+    } else {
+        html.push_str("<!DOCTYPE html>\n<html ");
+        html.push_str(html_attrs);
+        html.push_str("><head>");
+    }
     html.push_str("<meta charset=\"utf-8\" />");
     html.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />");
 
@@ -396,7 +438,13 @@ pub fn assemble_rsc_head_shell(
         ));
     }
 
-    html.push_str("</head><body>");
+    if body_attrs.is_empty() {
+        html.push_str("</head><body>");
+    } else {
+        html.push_str("</head><body ");
+        html.push_str(body_attrs);
+        html.push('>');
+    }
 
     // Module map — must be available before client chunks load
     let escaped_manifest = escape_script_content(client_manifest_json);
@@ -445,6 +493,29 @@ pub fn assemble_rsc_body_tail(
 
     let mut html = String::with_capacity(body_content.len() + 2048);
 
+    // Patch <html> and <body> attributes to match the RSC flight data.
+    // In the streaming path the head shell was flushed before V8 rendered,
+    // so the attributes are not yet on the DOM. This sync script applies them
+    // before React hydration runs, preventing hydration mismatches.
+    let html_attrs = extract_html_tag_attrs(ssr_html);
+    let body_attrs = extract_body_tag_attrs(ssr_html);
+    if !html_attrs.is_empty() || !body_attrs.is_empty() {
+        html.push_str("<script>");
+        if !html_attrs.is_empty() {
+            let escaped = escape_js_string(html_attrs);
+            html.push_str(&format!(
+                "!function(){{var d=document.createElement('div');d.innerHTML='<span {escaped}>';var a=d.firstChild.attributes;for(var i=0;i<a.length;i++)document.documentElement.setAttribute(a[i].name,a[i].value)}}();"
+            ));
+        }
+        if !body_attrs.is_empty() {
+            let escaped = escape_js_string(body_attrs);
+            html.push_str(&format!(
+                "!function(){{var d=document.createElement('div');d.innerHTML='<span {escaped}>';var a=d.firstChild.attributes;for(var i=0;i<a.length;i++)document.body.setAttribute(a[i].name,a[i].value)}}();"
+            ));
+        }
+        html.push_str("</script>");
+    }
+
     // Metadata head elements (title, meta, link, etc.) from generateMetadata / metadata exports.
     // Emitted at the top of the body — browsers relocate these to <head> automatically.
     // This is the standard approach for streaming SSR (used by Next.js and others).
@@ -489,6 +560,36 @@ pub fn assemble_rsc_body_tail(
 
     html.push_str("</body></html>");
     html
+}
+
+/// Extract the raw attribute string from the `<html ...>` tag in SSR HTML.
+/// Returns an empty string if no attributes are found.
+pub fn extract_html_tag_attrs(ssr_html: &str) -> &str {
+    if let Some(start) = ssr_html.find("<html") {
+        let after = &ssr_html[start + 5..]; // skip "<html"
+        if let Some(end) = after.find('>') {
+            let attrs = after[..end].trim();
+            if !attrs.is_empty() {
+                return attrs;
+            }
+        }
+    }
+    ""
+}
+
+/// Extract the raw attribute string from the `<body ...>` tag in SSR HTML.
+/// Returns an empty string if no attributes are found.
+pub fn extract_body_tag_attrs(ssr_html: &str) -> &str {
+    if let Some(start) = ssr_html.find("<body") {
+        let after = &ssr_html[start + 5..]; // skip "<body"
+        if let Some(end) = after.find('>') {
+            let attrs = after[..end].trim();
+            if !attrs.is_empty() {
+                return attrs;
+            }
+        }
+    }
+    ""
 }
 
 /// Extract the content between `<body>` and `</body>` from SSR HTML.

@@ -1,6 +1,6 @@
 use crate::document::{
-    assemble_body_tail, assemble_head_shell, assemble_rsc_document, DocumentDescriptor,
-    RscDocumentParams,
+    assemble_body_tail, assemble_head_shell, assemble_rsc_document, extract_body_tag_attrs,
+    extract_html_tag_attrs, DocumentDescriptor, RscDocumentParams,
 };
 use rex_core::{AppRouteAssets, AssetManifest, PageAssets, RenderMode, Route};
 use rex_v8::IsolatePool;
@@ -170,6 +170,11 @@ pub async fn prerender_static_app_routes(
             }
         };
 
+        // Extract <html> and <body> attributes from the SSR output so the
+        // served HTML matches the RSC flight data (prevents hydration mismatch).
+        let html_attrs = extract_html_tag_attrs(&rsc_result.body).to_string();
+        let body_attrs = extract_body_tag_attrs(&rsc_result.body).to_string();
+
         let html = assemble_rsc_document(&RscDocumentParams {
             ssr_html: &rsc_result.body,
             head_html: &rsc_result.head,
@@ -180,6 +185,8 @@ pub async fn prerender_static_app_routes(
             css_contents: &manifest.css_contents,
             is_dev: false,
             manifest_json: Some(manifest_json),
+            html_attrs: &html_attrs,
+            body_attrs: &body_attrs,
         });
 
         debug!(

@@ -219,6 +219,50 @@ fn rsc_body_tail_empty_metadata_head() {
     let ssr = "<html><head></head><body><div>Content</div></body></html>";
     let html = assemble_rsc_body_tail(ssr, "", "0:{}", &[], "{}", false, None);
 
-    // No metadata head — body content should be first
+    // No metadata head and no attrs — body content should be first
     assert!(html.starts_with("<div>Content</div>"));
+}
+
+#[test]
+fn extract_html_tag_attrs_with_lang() {
+    let ssr = r#"<html lang="en"><head></head><body>hi</body></html>"#;
+    assert_eq!(extract_html_tag_attrs(ssr), r#"lang="en""#);
+}
+
+#[test]
+fn extract_html_tag_attrs_none() {
+    let ssr = "<html><head></head><body>hi</body></html>";
+    assert_eq!(extract_html_tag_attrs(ssr), "");
+}
+
+#[test]
+fn extract_body_tag_attrs_with_class() {
+    let ssr = r#"<html><head></head><body class="bg-white">hi</body></html>"#;
+    assert_eq!(extract_body_tag_attrs(ssr), r#"class="bg-white""#);
+}
+
+#[test]
+fn extract_body_tag_attrs_none() {
+    let ssr = "<html><head></head><body>hi</body></html>";
+    assert_eq!(extract_body_tag_attrs(ssr), "");
+}
+
+#[test]
+fn rsc_document_includes_html_and_body_attrs() {
+    let params = RscDocumentParams {
+        ssr_html: r#"<html lang="en"><head></head><body class="dark">Hello</body></html>"#,
+        head_html: "",
+        flight_data: "0:\"hi\"",
+        client_chunks: &[],
+        client_manifest_json: "{}",
+        css_files: &[],
+        css_contents: &HashMap::new(),
+        is_dev: false,
+        manifest_json: None,
+        html_attrs: r#"lang="en""#,
+        body_attrs: r#"class="dark""#,
+    };
+    let html = assemble_rsc_document(&params);
+    assert!(html.contains(r#"<html lang="en"><head>"#));
+    assert!(html.contains(r#"<body class="dark">"#));
 }
