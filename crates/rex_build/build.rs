@@ -9,6 +9,7 @@ const TAILWIND_VERSION: &str = "4.2.1";
 const PACKAGES: &[(&str, &str)] = &[
     ("react", REACT_VERSION),
     ("react-dom", REACT_VERSION),
+    ("react-server-dom-webpack", REACT_VERSION),
     ("scheduler", SCHEDULER_VERSION),
 ];
 
@@ -96,8 +97,9 @@ fn main() {
     let node_modules = out_dir.join("node_modules");
     let stamp = out_dir.join(".vendor-stamp");
 
-    let expected =
-        format!("react@{REACT_VERSION} scheduler@{SCHEDULER_VERSION} tailwind@{TAILWIND_VERSION}");
+    let expected = format!(
+        "react@{REACT_VERSION} rsdw@{REACT_VERSION} scheduler@{SCHEDULER_VERSION} tailwind@{TAILWIND_VERSION}"
+    );
 
     // Skip download on incremental rebuilds when stamp matches
     if stamp.exists() {
@@ -257,6 +259,23 @@ fn trim_package(dir: &Path, name: &str) {
                 let _ = fs::remove_file(dir.join(f));
             }
             remove_cjs_matching(dir, &["unstable", "native"]);
+        }
+        "react-server-dom-webpack" => {
+            // Remove files we don't use: plugin, node-register, node-loader, static variants
+            for f in [
+                "plugin.js",
+                "node-register.js",
+                "static.js",
+                "static.browser.js",
+                "static.edge.js",
+                "static.node.js",
+            ] {
+                let _ = fs::remove_file(dir.join(f));
+            }
+            // Remove unused CJS bundles: plugin, node-register, static
+            remove_cjs_matching(dir, &["plugin", "node-register", "static"]);
+            // Remove ESM loader (Node-only)
+            let _ = fs::remove_dir_all(dir.join("esm"));
         }
         _ => {} // react is already lean
     }
