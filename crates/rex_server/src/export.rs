@@ -394,23 +394,25 @@ fn rewrite_nav_links_to_html(html: &str) -> String {
         // Full path = "/" + after_slash[..close]
         let path = &remaining[slash_pos..pat.len() + close];
 
+        // Split off fragment first (comes after query string in a URL)
+        let (path_and_query, fragment) = match path.find('#') {
+            Some(i) => (&path[..i], &path[i..]),
+            None => (path, ""),
+        };
+        // Split off query string from the path
+        let (base, query) = match path_and_query.find('?') {
+            Some(i) => (&path_and_query[..i], &path_and_query[i..]),
+            None => (path_and_query, ""),
+        };
+
         // Decide if this path needs .html
+        // Check base (not path) to avoid false positives from dots in query/fragment
         let needs_html = path != "/"
             && !path.starts_with("/_rex/")
             && !path.starts_with("//")
-            && !path.contains('.');
+            && !base.contains('.');
 
         if needs_html {
-            // Split off fragment first (comes after query string in a URL)
-            let (path_and_query, fragment) = match path.find('#') {
-                Some(i) => (&path[..i], &path[i..]),
-                None => (path, ""),
-            };
-            // Split off query string from the path
-            let (base, query) = match path_and_query.find('?') {
-                Some(i) => (&path_and_query[..i], &path_and_query[i..]),
-                None => (path_and_query, ""),
-            };
             // Write everything up to the path value (prefix + opening quote)
             result.push_str(&remaining[..slash_pos]);
             result.push_str(base);
