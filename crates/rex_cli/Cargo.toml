@@ -13,7 +13,9 @@ path = "src/main.rs"
 
 [features]
 default = ["full"]
-full = ["build", "dev", "lint"]
+full = ["build", "dev", "lint", "live"]
+## Adds `rex live` (pulls in live mode server with on-demand compilation).
+live = ["build", "dep:rex_live"]
 ## Runtime only: `rex start` and `rex init`. No bundler, no dev server, no linter.
 runtime = []
 ## Adds `rex build` (pulls in rolldown + OXC bundler).
@@ -38,6 +40,7 @@ rex_v8 = { path = "../rex_v8" }
 rex_server = { path = "../rex_server", default-features = false }
 rex_build = { path = "../rex_build", optional = true }
 rex_dev = { path = "../rex_dev", optional = true }
+rex_live = { path = "../rex_live", optional = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

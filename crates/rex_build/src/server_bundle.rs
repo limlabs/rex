@@ -34,7 +34,7 @@ const APP_ROUTE_RUNTIME: &str = include_str!(concat!(env!("OUT_DIR"), "/app-rout
 ///
 /// Produces a self-contained IIFE that includes React, all pages, and SSR
 /// runtime functions. Runs in bare V8 with no module loader.
-pub(crate) async fn build_server_bundle(
+pub async fn build_server_bundle(
     config: &RexConfig,
     scan: &ScanResult,
     output_dir: &Path,

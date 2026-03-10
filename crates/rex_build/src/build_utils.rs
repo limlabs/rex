@@ -215,7 +215,7 @@ pub(crate) fn runtime_client_dir() -> Result<PathBuf> {
 
 /// Get the path to the server runtime files.
 /// These are embedded in the source tree at runtime/server/.
-pub(crate) fn runtime_server_dir() -> Result<PathBuf> {
+pub fn runtime_server_dir() -> Result<PathBuf> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let runtime_dir = manifest_dir.join("../../runtime/server");
     if runtime_dir.exists() {

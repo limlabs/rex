@@ -4609,6 +4609,7 @@ dependencies = [
  "rex_build",
  "rex_core",
  "rex_dev",
+ "rex_live",
  "rex_router",
  "rex_server",
  "rex_v8",
@@ -4673,6 +4674,30 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "rex_live"
+version = "0.15.1"
+dependencies = [
+ "anyhow",
+ "axum",
+ "dashmap 6.1.0",
+ "hex",
+ "notify",
+ "notify-debouncer-mini",
+ "rex_build",
+ "rex_core",
+ "rex_router",
+ "rex_server",
+ "rex_v8",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tower-http",
  "tracing",
 ]
 
