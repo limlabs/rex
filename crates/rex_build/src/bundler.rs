@@ -256,6 +256,49 @@ pub async fn build_bundles(
                 .insert(action_id.clone(), entry.export_name.clone());
         }
 
+        // Collect CSS imports from app/ layout and page files into global_css.
+        // In the app router, layout CSS applies to all child routes, so we treat
+        // it as global. Tailwind outputs (already compiled above) are used when available.
+        {
+            let hash = &build_id[..8];
+            let mut seen_files = std::collections::HashSet::new();
+            for route in &app_scan.routes {
+                let mut source_files = vec![route.page_path.clone()];
+                source_files.extend(route.layout_chain.iter().cloned());
+                for src in source_files {
+                    if !seen_files.insert(src.clone()) {
+                        continue;
+                    }
+                    let css_paths = match crate::css_collect::extract_css_imports(&src) {
+                        Ok(p) => p,
+                        Err(_) => continue,
+                    };
+                    for css_path in css_paths {
+                        if !css_path.exists() {
+                            continue;
+                        }
+                        let stem = css_path.file_stem().unwrap_or_default().to_string_lossy();
+                        let filename = format!("{stem}-{hash}.css");
+                        if manifest.css_contents.contains_key(&filename) {
+                            // Already collected (e.g. by font processing)
+                            continue;
+                        }
+                        let dest = client_dir.join(&filename);
+                        if let Some(tw_output) = tailwind_outputs.get(&css_path) {
+                            let content = fs::read_to_string(tw_output)?;
+                            fs::write(&dest, &content)?;
+                            manifest.css_contents.insert(filename.clone(), content);
+                        } else {
+                            let content = fs::read_to_string(&css_path)?;
+                            fs::write(&dest, &content)?;
+                            manifest.css_contents.insert(filename.clone(), content);
+                        }
+                        manifest.global_css.push(filename);
+                    }
+                }
+            }
+        }
+
         debug!(app_routes = manifest.app_routes.len(), "RSC bundles built");
     }
 

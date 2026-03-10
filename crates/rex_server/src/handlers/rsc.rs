@@ -146,9 +146,16 @@ pub(super) async fn render_app_route(
 
     let is_dev = state.is_dev;
     let manifest_json = hot.manifest_json.clone();
+    let css_files = hot.manifest.global_css.clone();
+    let css_contents = hot.manifest.css_contents.clone();
 
     // Flush head shell immediately so browser starts fetching resources
-    let shell = assemble_rsc_head_shell(&client_chunks, &client_manifest_json);
+    let shell = assemble_rsc_head_shell(
+        &client_chunks,
+        &client_manifest_json,
+        &css_files,
+        &css_contents,
+    );
 
     let shell_chunk = stream::once(async { Ok::<_, std::convert::Infallible>(shell) });
 

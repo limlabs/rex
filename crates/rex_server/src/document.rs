@@ -319,6 +319,10 @@ pub struct RscDocumentParams<'a> {
     pub client_chunks: &'a [String],
     /// Client reference manifest JSON (maps ref IDs to chunk URLs)
     pub client_manifest_json: &'a str,
+    /// CSS filenames to include (global + per-route)
+    pub css_files: &'a [String],
+    /// CSS file contents for inlining (filename -> content)
+    pub css_contents: &'a HashMap<String, String>,
     pub is_dev: bool,
     pub manifest_json: Option<&'a str>,
 }
@@ -331,6 +335,8 @@ pub fn assemble_rsc_document(params: &RscDocumentParams<'_>) -> String {
     html.push_str(&assemble_rsc_head_shell(
         params.client_chunks,
         params.client_manifest_json,
+        params.css_files,
+        params.css_contents,
     ));
     html.push_str(&assemble_rsc_body_tail(
         params.ssr_html,
@@ -346,14 +352,32 @@ pub fn assemble_rsc_document(params: &RscDocumentParams<'_>) -> String {
 
 /// Assemble the RSC head shell — flushed to the browser immediately while V8 renders.
 ///
-/// Emits the full `<head>` (meta, modulepreloads) and opens `<body>` with the
+/// Emits the full `<head>` (meta, CSS, modulepreloads) and opens `<body>` with the
 /// module map and webpack shims. This lets the browser start fetching client
 /// chunks while V8 is still rendering the body HTML.
-pub fn assemble_rsc_head_shell(client_chunks: &[String], client_manifest_json: &str) -> String {
+pub fn assemble_rsc_head_shell(
+    client_chunks: &[String],
+    client_manifest_json: &str,
+    css_files: &[String],
+    css_contents: &HashMap<String, String>,
+) -> String {
     let mut html = String::with_capacity(2048);
     html.push_str("<!DOCTYPE html>\n<html><head>");
     html.push_str("<meta charset=\"utf-8\" />");
     html.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />");
+
+    // CSS: inline content to avoid render-blocking network requests
+    for css in css_files {
+        if let Some(content) = css_contents.get(css) {
+            html.push_str("<style>");
+            html.push_str(content);
+            html.push_str("</style>");
+        } else {
+            html.push_str(&format!(
+                "<link rel=\"stylesheet\" href=\"/_rex/static/{css}\" />"
+            ));
+        }
+    }
 
     for chunk in client_chunks {
         html.push_str(&format!(
@@ -512,7 +536,7 @@ mod tests {
     fn rsc_head_shell_emits_doctype_and_head() {
         let chunks = vec!["rsc/chunk-react-abc123.js".to_string()];
         let manifest = r#"{"refs":{}}"#;
-        let html = assemble_rsc_head_shell(&chunks, manifest);
+        let html = assemble_rsc_head_shell(&chunks, manifest, &[], &HashMap::new());
 
         assert!(html.contains("<!DOCTYPE html>"));
         assert!(html.contains("<html><head>"));
@@ -594,10 +618,31 @@ mod tests {
     #[test]
     fn rsc_head_shell_includes_module_map() {
         let manifest = r#"{"entries":{"abc":{"chunk_url":"/c.js","export_name":"default"}}}"#;
-        let html = assemble_rsc_head_shell(&[], manifest);
+        let html = assemble_rsc_head_shell(&[], manifest, &[], &HashMap::new());
 
         assert!(html.contains("__REX_RSC_MODULE_MAP__"));
         assert!(html.contains("abc"));
+    }
+
+    #[test]
+    fn rsc_head_shell_inlines_css() {
+        let css_files = vec!["globals-abc12345.css".to_string()];
+        let mut css_contents = HashMap::new();
+        css_contents.insert(
+            "globals-abc12345.css".to_string(),
+            "body{margin:0}".to_string(),
+        );
+        let html = assemble_rsc_head_shell(&[], "{}", &css_files, &css_contents);
+
+        assert!(html.contains("<style>body{margin:0}</style>"));
+    }
+
+    #[test]
+    fn rsc_head_shell_falls_back_to_link_tag() {
+        let css_files = vec!["missing.css".to_string()];
+        let html = assemble_rsc_head_shell(&[], "{}", &css_files, &HashMap::new());
+
+        assert!(html.contains(r#"<link rel="stylesheet" href="/_rex/static/missing.css" />"#));
     }
 
     #[test]
