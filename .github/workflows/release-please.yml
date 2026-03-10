@@ -38,6 +38,7 @@ jobs:
         with:
           ref: ${{ needs.release-please.outputs.pr_branch }}
           token: ${{ secrets.RELEASE_PAT }}
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -71,9 +72,11 @@ jobs:
           if [ -n "$(git diff --cached --name-only)" ]; then
             git commit -m "chore: update lockfiles"
             # Push with GITHUB_TOKEN so this commit does NOT re-trigger workflows.
-            # The checkout step uses RELEASE_PAT (needed to write to the PR branch),
-            # but PAT-based pushes trigger workflow runs, causing beta-release to
-            # double-fire. GITHUB_TOKEN pushes are deliberately ignored by Actions.
+            # The checkout uses RELEASE_PAT (needed for the initial fetch) but sets
+            # persist-credentials: false so the PAT's extraheader isn't saved in
+            # git config. Without that, the extraheader would override the URL token
+            # below, causing the push to authenticate as the PAT — which triggers
+            # workflow runs and makes beta-release double-fire.
             git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}"
             git push
           fi
