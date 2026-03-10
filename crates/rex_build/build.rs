@@ -272,8 +272,8 @@ fn trim_package(dir: &Path, name: &str) {
             ] {
                 let _ = fs::remove_file(dir.join(f));
             }
-            // Remove unused CJS bundles: plugin, node-register, static, and development builds
-            remove_cjs_matching(dir, &["plugin", "node-register", "static", "development"]);
+            // Remove unused CJS bundles: plugin, node-register, static
+            remove_cjs_matching(dir, &["plugin", "node-register", "static"]);
             // Remove ESM loader (Node-only)
             let _ = fs::remove_dir_all(dir.join("esm"));
         }
