@@ -159,6 +159,9 @@ fn js_string_literal(s: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
+            // U+2028 and U+2029 are line terminators in JS but not caught by is_control()
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
             c if c.is_control() => {
                 let _ = std::fmt::Write::write_fmt(&mut out, format_args!("\\u{:04x}", c as u32));
             }

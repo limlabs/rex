@@ -1,11 +1,11 @@
 use anyhow::Result;
 use lightningcss::stylesheet::{MinifyOptions, ParserOptions, PrinterOptions, StyleSheet};
 
-/// Optimize CSS output with vendor prefixing and optional minification.
+/// Optimize CSS output with optional minification.
 ///
-/// Uses lightningcss (Rust-native) to:
-/// - Add vendor prefixes for broad browser compatibility
-/// - Minify CSS (whitespace removal, shorthand merging) when `minify` is true
+/// Uses lightningcss (Rust-native) to minify CSS (whitespace removal,
+/// shorthand merging) when `minify` is true. No vendor prefixing is
+/// performed — modern browsers don't need it for Tailwind's output.
 pub fn optimize_css(css: &str, minify: bool) -> Result<String> {
     let mut stylesheet = StyleSheet::parse(css, ParserOptions::default())
         .map_err(|e| anyhow::anyhow!("lightningcss parse error: {e}"))?;
