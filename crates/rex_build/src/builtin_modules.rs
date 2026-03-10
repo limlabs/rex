@@ -100,6 +100,7 @@ mod tests {
         // Should contain react/package.json
         assert!(nm.join("react/package.json").exists());
         assert!(nm.join("react-dom/package.json").exists());
+        assert!(nm.join("react-server-dom-webpack/package.json").exists());
         assert!(nm.join("scheduler/package.json").exists());
 
         // Should have version marker
