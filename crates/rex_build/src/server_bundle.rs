@@ -347,6 +347,76 @@ pub(crate) async fn build_server_bundle(
                 runtime_dir.join("crypto.ts").to_string_lossy().to_string(),
             )],
         ),
+        // Node.js http/https module polyfill (wraps fetch)
+        (
+            "http".to_string(),
+            vec![Some(
+                runtime_dir.join("http.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "node:http".to_string(),
+            vec![Some(
+                runtime_dir.join("http.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "https".to_string(),
+            vec![Some(
+                runtime_dir.join("https.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "node:https".to_string(),
+            vec![Some(
+                runtime_dir.join("https.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        // Node.js url module polyfill (wraps WHATWG URL)
+        (
+            "url".to_string(),
+            vec![Some(
+                runtime_dir.join("url.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "node:url".to_string(),
+            vec![Some(
+                runtime_dir.join("url.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        // Node.js querystring module polyfill
+        (
+            "querystring".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("querystring.ts")
+                    .to_string_lossy()
+                    .to_string(),
+            )],
+        ),
+        (
+            "node:querystring".to_string(),
+            vec![Some(
+                runtime_dir
+                    .join("querystring.ts")
+                    .to_string_lossy()
+                    .to_string(),
+            )],
+        ),
+        // Node.js events module polyfill (EventEmitter)
+        (
+            "events".to_string(),
+            vec![Some(
+                runtime_dir.join("events.ts").to_string_lossy().to_string(),
+            )],
+        ),
+        (
+            "node:events".to_string(),
+            vec![Some(
+                runtime_dir.join("events.ts").to_string_lossy().to_string(),
+            )],
+        ),
     ];
     // Append user-defined aliases from rex.config build.alias
     aliases.extend(project_config.build.resolved_aliases(&config.project_root));
