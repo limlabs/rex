@@ -225,6 +225,29 @@ fn rewrite_nav_links_mixed_html_and_flight() {
 }
 
 #[test]
+fn rewrite_nav_links_preserves_trailing_slash() {
+    let html = r#"<a href="/about/">About</a>"#;
+    let result = rewrite_nav_links_to_html(html);
+    // Trailing slash paths should be preserved as-is, not become /about/.html
+    assert!(result.contains(r#"href="/about/""#));
+    assert!(!result.contains("/about/.html"));
+}
+
+#[test]
+fn rewrite_nav_links_with_query_string() {
+    let html = r#"<a href="/search?q=test">Search</a>"#;
+    let result = rewrite_nav_links_to_html(html);
+    assert!(result.contains(r#"href="/search.html?q=test""#));
+}
+
+#[test]
+fn rewrite_nav_links_dot_in_directory() {
+    let html = r#"<a href="/foo/bar.baz/qux">Page</a>"#;
+    let result = rewrite_nav_links_to_html(html);
+    assert!(result.contains(r#"href="/foo/bar.baz/qux.html""#));
+}
+
+#[test]
 fn inject_base_path_global_escapes_special_chars() {
     let html = "<html><head></head><body></body></html>";
     let malicious = r#"/rex";</script><script>alert(1)//"#;

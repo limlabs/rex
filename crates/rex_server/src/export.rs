@@ -410,7 +410,11 @@ fn rewrite_nav_links_to_html(html: &str) -> String {
         let needs_html = path != "/"
             && !path.starts_with("/_rex/")
             && !path.starts_with("//")
-            && !base.rsplit_once('/').map_or(base, |(_, last)| last).contains('.');
+            && !base.ends_with('/')
+            && !base
+                .rsplit_once('/')
+                .map_or(base, |(_, last)| last)
+                .contains('.');
 
         if needs_html {
             // Write everything up to the path value (prefix + opening quote)
