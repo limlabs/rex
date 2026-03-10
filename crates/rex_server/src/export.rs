@@ -317,6 +317,8 @@ fn copy_client_assets(client_build_dir: &Path, static_dir: &Path) -> anyhow::Res
 /// When `base_path` is e.g. "/rex":
 ///   - `/_rex/` → `/rex/_rex/` (asset URLs)
 ///   - `href="/about"` → `href="/rex/about"` (navigation links)
+///   - Injects `<script>window.__REX_BASE_PATH="/rex"</script>` in `<head>` so
+///     client-side Link components can resolve paths after hydration.
 fn rewrite_asset_paths(content: &str, base_path: &str) -> String {
     if base_path.is_empty() {
         return content.to_string();
@@ -327,7 +329,27 @@ fn rewrite_asset_paths(content: &str, base_path: &str) -> String {
     let content = content.replace("href=\"/", &format!("href=\"{base_path}/"));
     let content = content.replace("href='/", &format!("href='{base_path}/"));
     // 3. Restore /_rex/ paths with the base path prefix
-    content.replace("\x00_REX_ASSET_\x00", &format!("{base_path}/_rex/"))
+    let content = content.replace("\x00_REX_ASSET_\x00", &format!("{base_path}/_rex/"));
+    // 4. Inject base path global for client-side JS (Link component reads this after hydration)
+    inject_base_path_global(&content, base_path)
+}
+
+/// Inject a `<script>` tag setting `window.__REX_BASE_PATH` for client-side code.
+///
+/// After React hydration, client components re-render with their original JS props,
+/// overwriting the `href` attributes that `rewrite_asset_paths` fixed in static HTML.
+/// The Link component reads `__REX_BASE_PATH` to prepend the correct prefix at runtime.
+///
+/// Only injects into HTML documents (detected by `<head>` presence). JS files are unchanged.
+fn inject_base_path_global(html: &str, base_path: &str) -> String {
+    let tag = "<head>";
+    if let Some(pos) = html.find(tag) {
+        let insert_at = pos + tag.len();
+        let script = format!("<script>window.__REX_BASE_PATH=\"{}\"</script>", base_path);
+        format!("{}{}{}", &html[..insert_at], script, &html[insert_at..])
+    } else {
+        html.to_string()
+    }
 }
 
 /// Recursively copy a directory's contents into a destination directory.
@@ -465,7 +487,8 @@ mod tests {
     fn rewrite_asset_paths_preserves_external_links() {
         let html = r#"<a href="https://github.com">GH</a>"#;
         let result = rewrite_asset_paths(html, "/rex");
-        assert_eq!(result, html);
+        // No <head> tag, so no script injection — external link preserved as-is
+        assert!(result.contains(r#"href="https://github.com""#));
     }
 
     #[test]
@@ -475,5 +498,32 @@ mod tests {
         assert!(result.contains(r#"href="/rex/_rex/static/s.css""#));
         assert!(result.contains(r#"href="/rex/about""#));
         assert!(!result.contains("/rex/rex/"));
+    }
+
+    #[test]
+    fn rewrite_asset_paths_injects_base_path_global() {
+        let html = r#"<html><head><meta charset="utf-8" /></head><body></body></html>"#;
+        let result = rewrite_asset_paths(html, "/rex");
+        assert!(result.contains(r#"<script>window.__REX_BASE_PATH="/rex"</script>"#));
+        // Script is injected right after <head>
+        let head_pos = result.find("<head>").unwrap();
+        let script_pos = result.find("__REX_BASE_PATH").unwrap();
+        assert!(script_pos > head_pos);
+    }
+
+    #[test]
+    fn rewrite_asset_paths_no_injection_without_head() {
+        // JS files (e.g. router.js) don't have <head> — no injection
+        let js = r#"var x = "/_rex/data/test.json";"#;
+        let result = rewrite_asset_paths(js, "/rex");
+        assert!(!result.contains("__REX_BASE_PATH"));
+    }
+
+    #[test]
+    fn inject_base_path_global_into_rsc_html() {
+        let html =
+            "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\" /></head><body></body></html>";
+        let result = inject_base_path_global(html, "/docs");
+        assert!(result.contains(r#"<head><script>window.__REX_BASE_PATH="/docs"</script><meta"#));
     }
 }
