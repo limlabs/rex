@@ -1,7 +1,7 @@
 //! RSC SSR bundle builder.
 //!
 //! Produces an IIFE bundle (standard conditions) that consumes flight data and
-//! produces HTML using `createFromReadableStream` and `renderToString`.
+//! produces HTML using `createFromReadableStream` and `renderToReadableStream`.
 //! Also includes all `"use client"` components for SSR rendering.
 
 use crate::client_manifest::ClientReferenceManifest;
@@ -17,7 +17,7 @@ use tracing::debug;
 ///
 /// This bundle consumes flight data and produces HTML using:
 /// - `createFromReadableStream` from `react-server-dom-webpack/client`
-/// - `renderToString` from `react-dom/server`
+/// - `renderToReadableStream` from `react-dom/server`
 ///
 /// It also includes all `"use client"` components for SSR rendering.
 pub(crate) async fn build_rsc_ssr_bundle(

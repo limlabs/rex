@@ -158,11 +158,12 @@ pub(crate) fn generate_ssr_entry(
     let mut entry = String::new();
 
     // React imports — standard (non-react-server) conditions
+    // Use renderToReadableStream (streaming, Suspense-aware) instead of renderToString
     entry.push_str("import { createElement } from 'react';\n");
-    entry.push_str("import { renderToString } from 'react-dom/server';\n");
+    entry.push_str("import { renderToReadableStream } from 'react-dom/server';\n");
     entry.push_str("import { createFromReadableStream } from 'react-server-dom-webpack/client';\n");
     entry.push_str("var __rex_createElement = createElement;\n");
-    entry.push_str("var __rex_renderToString = renderToString;\n");
+    entry.push_str("var __rex_renderToReadableStream_ssr = renderToReadableStream;\n");
     entry.push_str("var __rex_createFromReadableStream = createFromReadableStream;\n\n");
 
     // Import all "use client" components for SSR rendering
@@ -444,7 +445,7 @@ mod tests {
         let entry = generate_ssr_entry(&graph, &manifest, Path::new("/project"), "build1");
 
         assert!(entry.contains("import { createElement } from 'react'"));
-        assert!(entry.contains("import { renderToString } from 'react-dom/server'"));
+        assert!(entry.contains("import { renderToReadableStream } from 'react-dom/server'"));
         assert!(entry.contains("import { createFromReadableStream }"));
     }
 

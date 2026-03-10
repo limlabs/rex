@@ -17,6 +17,7 @@
 
 // --- State ---
 let _chunks: (string | Uint8Array)[] = [];
+let _rawChunks: Uint8Array[] = []; // Raw bytes for SSR pass (avoids UTF-8 round-trip)
 let _streamDone = false;
 let _flightString: string | null = null;
 let _wantHtml = false;
@@ -134,11 +135,18 @@ function _startReading(reader: ReadableStreamDefaultReader<Uint8Array>): void {
                 if (result.done) {
                     _streamDone = true;
                     _flightString = _assembleChunks();
+                    // Store raw bytes on globalThis for SSR pass (avoids UTF-8 round-trip
+                    // that corrupts binary flight chunks like TypedArrays)
+                    globalThis.__rex_flight_raw_chunks = _rawChunks;
                     if (_wantHtml) {
                         _startHtmlPass();
                     }
                 } else {
                     _chunks.push(result.value);
+                    // Keep a copy of raw bytes for the SSR pass
+                    if (result.value instanceof Uint8Array) {
+                        _rawChunks.push(result.value);
+                    }
                     if (sync) {
                         loop = true; // continue the while loop instead of recursing
                     } else {
@@ -191,6 +199,7 @@ globalThis.__rex_render_flight = function(routeKey: string, propsJson: string): 
 
     // Reset state
     _chunks = [];
+    _rawChunks = [];
     _streamDone = false;
     _flightString = null;
     _wantHtml = false;
@@ -232,6 +241,7 @@ globalThis.__rex_render_rsc_to_html = function(routeKey: string, propsJson: stri
 
     // Reset state
     _chunks = [];
+    _rawChunks = [];
     _streamDone = false;
     _flightString = null;
     _wantHtml = true;

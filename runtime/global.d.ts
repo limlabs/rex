@@ -113,6 +113,10 @@ declare global {
     stream: ReadableStream<Uint8Array>,
     options: { ssrManifest: { moduleMap: Record<string, unknown>; moduleLoading: null } },
   ) => unknown;
+  var __rex_renderToReadableStream_ssr: (
+    element: unknown,
+    options?: Record<string, unknown>,
+  ) => unknown;
   var __rex_renderToString: (element: unknown) => string;
 
   // RSC globalThis properties (V8 environment)
@@ -140,6 +144,9 @@ declare global {
   var __rex_rsc_flight_to_html: (flightString: string) => string;
   var __rex_resolve_ssr_pending: () => "pending" | "done";
   var __rex_finalize_ssr: () => string;
+
+  // Raw flight bytes for SSR pass (avoids UTF-8 round-trip corruption)
+  var __rex_flight_raw_chunks: Uint8Array[] | undefined;
 
   // Server action globals (V8 environment — set by flight.ts runtime)
   var __rex_server_actions: Record<string, (...args: unknown[]) => unknown>;
