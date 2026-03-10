@@ -345,7 +345,10 @@ fn inject_base_path_global(html: &str, base_path: &str) -> String {
     let tag = "<head>";
     if let Some(pos) = html.find(tag) {
         let insert_at = pos + tag.len();
-        let script = format!("<script>window.__REX_BASE_PATH=\"{}\"</script>", base_path);
+        let encoded = serde_json::to_string(base_path).unwrap_or_default();
+        // Prevent </script> or <script> inside the JSON value from breaking the HTML
+        let safe = encoded.replace('<', r"\u003c");
+        let script = format!("<script>window.__REX_BASE_PATH={safe}</script>");
         format!("{}{}{}", &html[..insert_at], script, &html[insert_at..])
     } else {
         html.to_string()
@@ -525,5 +528,18 @@ mod tests {
             "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\" /></head><body></body></html>";
         let result = inject_base_path_global(html, "/docs");
         assert!(result.contains(r#"<head><script>window.__REX_BASE_PATH="/docs"</script><meta"#));
+    }
+
+    #[test]
+    fn inject_base_path_global_escapes_special_chars() {
+        let html = "<html><head></head><body></body></html>";
+        let malicious = r#"/rex";</script><script>alert(1)//"#;
+        let result = inject_base_path_global(html, malicious);
+        assert!(result.contains("__REX_BASE_PATH="));
+        // The </script> inside the value must be escaped so the HTML parser
+        // doesn't close the script tag prematurely and execute injected code.
+        // Count that there's exactly one <script> open and one </script> close.
+        assert_eq!(result.matches("<script>").count(), 1);
+        assert_eq!(result.matches("</script>").count(), 1);
     }
 }

@@ -22,7 +22,7 @@ function getBasePath(): string {
 
 function withBasePath(href: string): string {
   const bp = getBasePath();
-  if (!bp || !href.startsWith("/")) return href;
+  if (!bp || !href.startsWith("/") || href.startsWith("//")) return href;
   return bp + href;
 }
 
