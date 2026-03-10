@@ -15,6 +15,7 @@ mod app_router_tests;
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::path::PathBuf;
     use std::process::{Child, Command, Stdio};
@@ -41,15 +42,15 @@ mod tests {
             .unwrap()
             .to_path_buf();
 
-        // Prefer release build, fall back to debug
-        let release = workspace_root.join("target/release/rex");
-        if release.exists() {
-            return release;
-        }
-
+        // Prefer debug (matches `cargo build` default and pre-push hook)
         let debug = workspace_root.join("target/debug/rex");
         if debug.exists() {
             return debug;
+        }
+
+        let release = workspace_root.join("target/release/rex");
+        if release.exists() {
+            return release;
         }
 
         panic!(
@@ -93,19 +94,31 @@ mod tests {
                 .spawn()
                 .unwrap_or_else(|e| panic!("Failed to start rex: {e}\nBinary: {}", bin.display()));
 
-            // Wait for server to be ready (TCP connect)
+            // Poll with HTTP GET until the server returns a valid response (not
+            // just TCP connect, since rex dev binds the port before the build).
             let deadline = Instant::now() + Duration::from_secs(30);
             let addr = format!("127.0.0.1:{port}");
             loop {
                 if Instant::now() > deadline {
                     panic!("[e2e] Server failed to start within 30s on port {port}");
                 }
-                if TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(100))
-                    .is_ok()
+                if let Ok(mut stream) =
+                    TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(500))
                 {
-                    break;
+                    stream
+                        .set_read_timeout(Some(Duration::from_millis(500)))
+                        .ok();
+                    let req = format!("GET / HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+                    if stream.write_all(req.as_bytes()).is_ok() {
+                        let mut buf = [0u8; 32];
+                        if let Ok(n) = stream.read(&mut buf) {
+                            if n > 0 && String::from_utf8_lossy(&buf[..n]).contains("HTTP/") {
+                                break;
+                            }
+                        }
+                    }
                 }
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(Duration::from_millis(200));
             }
 
             eprintln!("[e2e] Server ready on port {port}");
@@ -824,20 +837,32 @@ mod tests {
             }
         });
 
-        // Wait for server to be ready
-        let addr = format!("127.0.0.1:{port}");
+        // Poll with HTTP GET until the server returns a valid response (not
+        // just TCP connect, since rex dev binds the port before the build).
         let deadline = Instant::now() + Duration::from_secs(30);
+        let addr = format!("127.0.0.1:{port}");
         loop {
             if Instant::now() > deadline {
                 child.kill().ok();
                 panic!("Console test: server failed to start");
             }
-            if TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(100))
-                .is_ok()
+            if let Ok(mut stream) =
+                TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(500))
             {
-                break;
+                stream
+                    .set_read_timeout(Some(Duration::from_millis(500)))
+                    .ok();
+                let req = format!("GET / HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+                if stream.write_all(req.as_bytes()).is_ok() {
+                    let mut buf = [0u8; 32];
+                    if let Ok(n) = stream.read(&mut buf) {
+                        if n > 0 && String::from_utf8_lossy(&buf[..n]).contains("HTTP/") {
+                            break;
+                        }
+                    }
+                }
             }
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(200));
         }
 
         // Hit /about which has console.log("hello limothy")
