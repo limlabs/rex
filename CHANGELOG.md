@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/limlabs/rex/compare/v0.15.0...v0.15.1) (2026-03-10)
+
+
+### Bug Fixes
+
+* **security:** prevent XSS via case-insensitive script/style tag injection ([#156](https://github.com/limlabs/rex/issues/156)) ([9ffdd91](https://github.com/limlabs/rex/commit/9ffdd91a683aab11fda0d68b1fe5027cb59c5f56))
+
 ## [0.15.0](https://github.com/limlabs/rex/compare/v0.14.0...v0.15.0) (2026-03-10)
 
 
