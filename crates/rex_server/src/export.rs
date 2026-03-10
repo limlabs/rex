@@ -401,14 +401,21 @@ fn rewrite_nav_links_to_html(html: &str) -> String {
             && !path.contains('.');
 
         if needs_html {
-            let (base, fragment) = match path.find('#') {
+            // Split off fragment first (comes after query string in a URL)
+            let (path_and_query, fragment) = match path.find('#') {
                 Some(i) => (&path[..i], &path[i..]),
                 None => (path, ""),
+            };
+            // Split off query string from the path
+            let (base, query) = match path_and_query.find('?') {
+                Some(i) => (&path_and_query[..i], &path_and_query[i..]),
+                None => (path_and_query, ""),
             };
             // Write everything up to the path value (prefix + opening quote)
             result.push_str(&remaining[..slash_pos]);
             result.push_str(base);
             result.push_str(".html");
+            result.push_str(query);
             result.push_str(fragment);
             result.push('"');
         } else {
