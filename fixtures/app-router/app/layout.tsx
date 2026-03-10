@@ -11,8 +11,8 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html>
-      <body>
+    <html lang="en">
+      <body className="app-root">
         <div>
           <nav>
             <Link href="/">Home</Link>
