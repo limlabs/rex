@@ -406,11 +406,11 @@ fn rewrite_nav_links_to_html(html: &str) -> String {
         };
 
         // Decide if this path needs .html
-        // Check base (not path) to avoid false positives from dots in query/fragment
+        // Check only the final path segment for extensions
         let needs_html = path != "/"
             && !path.starts_with("/_rex/")
             && !path.starts_with("//")
-            && !base.contains('.');
+            && !base.rsplit_once('/').map_or(base, |(_, last)| last).contains('.');
 
         if needs_html {
             // Write everything up to the path value (prefix + opening quote)
