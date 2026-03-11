@@ -47,6 +47,11 @@ function getBinaryPath() {
   }
 }
 
+// ANSI helpers (matching Rust display helpers)
+const bold = (s) => `\x1b[1m${s}\x1b[0m`;
+const dim = (s) => `\x1b[2m${s}\x1b[0m`;
+const greenBold = (s) => `\x1b[1;32m${s}\x1b[0m`;
+
 function isRexGloballyInstalled() {
   try {
     execSync("rex --version", { stdio: "ignore" });
@@ -69,22 +74,46 @@ try {
   throw e;
 }
 
-// After init, install rex globally if not already available so `rex dev` works
-if (isInit && !isRexGloballyInstalled()) {
-  const dim = (s) => `\x1b[2m${s}\x1b[0m`;
-  const greenBold = (s) => `\x1b[1;32m${s}\x1b[0m`;
+// Post-init: install dependencies, ensure rex is globally available, print instructions
+if (isInit && args.length >= 2) {
+  const projectName = args[1];
+  const projectDir = path.resolve(projectName);
 
-  process.stderr.write(`  Installing rex globally...\n\n`);
+  // Install project dependencies (react, react-dom)
+  process.stderr.write(`  Installing dependencies...\n\n`);
   try {
-    execSync("npm install -g @limlabs/rex", {
+    execSync("npm install --silent", {
+      cwd: projectDir,
       stdio: ["ignore", "ignore", "inherit"],
     });
     process.stderr.write(
-      `  ${greenBold("✓")} ${greenBold("Rex installed globally")}\n\n`
+      `  ${greenBold("✓")} ${greenBold("Dependencies installed")}\n\n`
     );
   } catch {
     process.stderr.write(
-      `  ${dim("Could not install rex globally. Run 'npm install -g @limlabs/rex' manually.")}\n\n`
+      `  ${dim("Could not install dependencies. Run 'npm install' in the project directory.")}\n\n`
     );
   }
+
+  // Install rex globally if not already available
+  if (!isRexGloballyInstalled()) {
+    process.stderr.write(`  Installing rex globally...\n\n`);
+    try {
+      execSync("npm install -g @limlabs/rex", {
+        stdio: ["ignore", "ignore", "inherit"],
+      });
+      process.stderr.write(
+        `  ${greenBold("✓")} ${greenBold("Rex installed globally")}\n\n`
+      );
+    } catch {
+      process.stderr.write(
+        `  ${dim("Could not install rex globally. Run 'npm install -g @limlabs/rex' manually.")}\n\n`
+      );
+    }
+  }
+
+  // Print get started instructions (zero-config: no npm commands)
+  process.stderr.write(`  ${dim("Get started:")}\n\n`);
+  process.stderr.write(`    ${bold("cd")} ${bold(projectName)}\n`);
+  process.stderr.write(`    ${bold("rex dev")}\n\n`);
 }
