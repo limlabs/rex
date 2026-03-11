@@ -209,7 +209,8 @@ function navigateRsc(pathname: string): Promise<void> {
 
   if (window.__REX_STATIC_EXPORT) {
     // Static export: flight data stored as .rsc files
-    url = basePath + '/_rex/rsc/' + buildId + pathname + '.rsc';
+    const suffix = pathname === '/' ? '/index' : pathname;
+    url = basePath + '/_rex/rsc/' + buildId + suffix + '.rsc';
   } else {
     // Live server: root path "/" becomes empty to hit /_rex/rsc/{buildId}
     const suffix = pathname === '/' ? '' : pathname;
