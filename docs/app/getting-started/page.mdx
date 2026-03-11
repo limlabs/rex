@@ -1,32 +1,29 @@
 # Quickstart
 
-Get a Rex app running in under a minute.
+Get a Rex app running in under a minute. No `package.json` or `npm install` required — Rex embeds React and extracts it automatically.
 
 ## Create a new project
-
-The fastest way to start is with `rex init`:
 
 ```bash
 npx @limlabs/rex init my-app
 cd my-app
-npm install
+rex dev
 ```
 
-Or set up manually:
+That's it. Rex scaffolds a starter page, installs itself globally, and the dev server handles the rest.
+
+## Start from scratch
+
+You can also create a project by hand — just add a page:
 
 ```bash
 mkdir my-app && cd my-app
-npm init -y
-npm install @limlabs/rex react react-dom
+mkdir pages
 ```
-
-## Add your first page
 
 Create `pages/index.tsx`:
 
 ```tsx
-import React from "react";
-
 export default function Home() {
   return (
     <div>
@@ -40,7 +37,7 @@ export default function Home() {
 ## Start the dev server
 
 ```bash
-npx rex dev
+rex dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) to see your page.

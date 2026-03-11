@@ -21,8 +21,9 @@ This installs the Rex CLI and runtime. The CLI binary is platform-specific and d
 
 ### Prerequisites
 
-- **Node.js 18+** — required for `npm install` and fixture setup
-- **React 18 or 19** — React 19 is recommended for Server Components support; React 18 works for Pages Router
+- **Node.js 18+** — required only for the initial `npx @limlabs/rex init` (or `npm install -g @limlabs/rex`). Not needed at runtime.
+
+Rex embeds React 19 and extracts it automatically — no `npm install` or `package.json` required for zero-config projects. Add a `package.json` when you need a lockfile or extra dependencies.
 
 ## Docker
 

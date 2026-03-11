@@ -545,54 +545,10 @@ fn cmd_init(name: String) -> Result<()> {
     eprintln!("  {} {}", magenta_bold("◆ rex"), dim("creating project..."));
     eprintln!();
 
-    // Create directory structure
-    std::fs::create_dir_all(project_dir.join("pages/api"))?;
-    std::fs::create_dir_all(project_dir.join("styles"))?;
+    // Create directory structure — no package.json needed.
+    // Rex embeds React and extracts it automatically on first run.
+    std::fs::create_dir_all(project_dir.join("pages"))?;
     std::fs::create_dir_all(project_dir.join("public"))?;
-
-    // package.json
-    std::fs::write(
-        project_dir.join("package.json"),
-        format!(
-            r#"{{
-  "name": "{name}",
-  "version": "0.1.0",
-  "private": true,
-  "dependencies": {{
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
-  }},
-  "devDependencies": {{
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0"
-  }}
-}}
-"#
-        ),
-    )?;
-
-    // tsconfig.json
-    std::fs::write(
-        project_dir.join("tsconfig.json"),
-        r#"{
-  "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "jsx": "react-jsx",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true
-  },
-  "include": ["pages/**/*"],
-  "exclude": ["node_modules", ".rex"]
-}
-"#,
-    )?;
 
     // .gitignore
     std::fs::write(
@@ -622,50 +578,12 @@ export async function getServerSideProps() {
 "#,
     )?;
 
-    // pages/_app.tsx
-    std::fs::write(
-        project_dir.join("pages/_app.tsx"),
-        r#"import '../styles/globals.css';
-
-export default function App({ Component, pageProps }: { Component: any; pageProps: any }) {
-  return <Component {...pageProps} />;
-}
-"#,
-    )?;
-
-    // pages/api/hello.ts
-    std::fs::write(
-        project_dir.join("pages/api/hello.ts"),
-        r#"export default function handler(req: any, res: any) {
-  res.status(200).json({ message: "Hello from Rex API!" });
-}
-"#,
-    )?;
-
-    // styles/globals.css
-    std::fs::write(
-        project_dir.join("styles/globals.css"),
-        r#"*,
-*::before,
-*::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-body {
-  font-family: system-ui, -apple-system, sans-serif;
-  -webkit-font-smoothing: antialiased;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-"#,
-    )?;
-
     eprintln!("  {} {}", green_bold("✓"), green_bold("Project created"));
+    eprintln!();
+    eprintln!("  {}", dim("Get started:"));
+    eprintln!();
+    eprintln!("    {} {}", bold("cd"), bold(&name));
+    eprintln!("    {} {}", bold("rex dev"), dim(""));
     eprintln!();
 
     Ok(())
