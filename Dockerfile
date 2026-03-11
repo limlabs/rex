@@ -23,6 +23,10 @@ RUN --mount=type=secret,id=ACTIONS_CACHE_URL \
       export SCCACHE_GHA_ENABLED=true \
              ACTIONS_CACHE_URL=$(cat /run/secrets/ACTIONS_CACHE_URL) \
              ACTIONS_RUNTIME_TOKEN=$(cat /run/secrets/ACTIONS_RUNTIME_TOKEN); \
+      if ! sccache --show-stats >/dev/null 2>&1; then \
+        echo "sccache: GHA cache unavailable, building without cache"; \
+        unset SCCACHE_GHA_ENABLED RUSTC_WRAPPER; \
+      fi; \
     fi && \
     cargo chef cook --release -p rex_cli --features build --recipe-path recipe.json
 
@@ -40,6 +44,10 @@ RUN --mount=type=secret,id=ACTIONS_CACHE_URL \
       export SCCACHE_GHA_ENABLED=true \
              ACTIONS_CACHE_URL=$(cat /run/secrets/ACTIONS_CACHE_URL) \
              ACTIONS_RUNTIME_TOKEN=$(cat /run/secrets/ACTIONS_RUNTIME_TOKEN); \
+      if ! sccache --show-stats >/dev/null 2>&1; then \
+        echo "sccache: GHA cache unavailable, building without cache"; \
+        unset SCCACHE_GHA_ENABLED RUSTC_WRAPPER; \
+      fi; \
     fi && \
     cargo build --release --bin rex -p rex_cli --features build && \
     cp target/release/rex /usr/local/bin/rex-builder && \
