@@ -86,7 +86,15 @@ pub(crate) async fn build_rsc_ssr_bundle(
         ..Default::default()
     };
 
-    let mut bundler = rolldown::Bundler::new(options)
+    // Use the polyfill resolve plugin to stub out packages that can't run in V8
+    let runtime_dir = crate::build_utils::runtime_server_dir()?;
+    let empty_stub = runtime_dir.join("empty.ts").to_string_lossy().to_string();
+    let polyfill_plugin: std::sync::Arc<dyn rolldown::plugin::Pluginable> =
+        std::sync::Arc::new(crate::server_bundle::NodePolyfillResolvePlugin::new(vec![
+            ("@vercel/og".to_string(), empty_stub.clone()),
+            ("next/dist/compiled/@vercel/og".to_string(), empty_stub),
+        ]));
+    let mut bundler = rolldown::Bundler::with_plugins(options, vec![polyfill_plugin])
         .map_err(|e| anyhow::anyhow!("Failed to create RSC SSR bundler: {e}"))?;
 
     bundler

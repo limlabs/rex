@@ -12,15 +12,15 @@
 globalThis.__rex_client_modules__ = globalThis.__rex_client_modules__ || {};
 globalThis.__rex_ssr_modules__ = globalThis.__rex_ssr_modules__ || {};
 
-globalThis.__webpack_require__ = function(id: string) {
+globalThis.__webpack_require__ = function(id) {
     return globalThis.__rex_client_modules__[id] || globalThis.__rex_ssr_modules__[id] || {};
 };
 
 // Chunk filename resolver — react-server-dom-webpack wraps this
-globalThis.__webpack_require__.u = function(chunkId: string) {
+globalThis.__webpack_require__.u = function(chunkId) {
     return chunkId;
 };
 
-globalThis.__webpack_chunk_load__ = function(_chunkId: string) {
+globalThis.__webpack_chunk_load__ = function(_chunkId) {
     return Promise.resolve();
 };

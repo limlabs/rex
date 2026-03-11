@@ -108,12 +108,25 @@ async fn test_minimal_server_bundle_app_route_handlers() {
         .await
         .unwrap();
     let bundle = fs::read_to_string(&result.server_bundle_path).unwrap();
+    // App route handlers are NOT in the minimal server bundle — they go into
+    // the RSC server bundle instead (which has full polyfill coverage).
     assert!(
-        bundle.contains("__rex_app_route_handlers"),
-        "minimal bundle should register app route handlers"
+        !bundle.contains("__rex_app_route_handlers"),
+        "minimal bundle should NOT contain app route handlers"
+    );
+
+    // Verify handlers are in the RSC server bundle
+    let rsc_bundle_path = result
+        .manifest
+        .rsc_server_bundle
+        .expect("RSC server bundle should exist");
+    let rsc_bundle = fs::read_to_string(rsc_bundle_path).unwrap();
+    assert!(
+        rsc_bundle.contains("__rex_app_route_handlers"),
+        "RSC server bundle should register app route handlers"
     );
     assert!(
-        bundle.contains("/api/data"),
-        "minimal bundle should contain route pattern"
+        rsc_bundle.contains("/api/data"),
+        "RSC server bundle should contain route pattern"
     );
 }

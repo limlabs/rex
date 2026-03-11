@@ -331,7 +331,8 @@ pub(crate) async fn build_server_bundle(
     let polyfill_plugin = Arc::new(NodePolyfillResolvePlugin {
         redirects: vec![
             ("file-type".to_string(), stub),
-            ("@vercel/og".to_string(), empty_stub),
+            ("@vercel/og".to_string(), empty_stub.clone()),
+            ("next/dist/compiled/@vercel/og".to_string(), empty_stub),
         ],
     });
 

@@ -184,7 +184,9 @@ impl Rex {
         // Initialize V8
         init_v8();
 
-        let mut server_bundle = std::fs::read_to_string(config.server_bundle_path())?;
+        // App-router-only projects may not have a pages-router server bundle.
+        let mut server_bundle =
+            std::fs::read_to_string(config.server_bundle_path()).unwrap_or_default();
 
         // If RSC bundles exist, append them
         if let Some(rsc_path) = &manifest.rsc_server_bundle {

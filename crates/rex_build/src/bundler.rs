@@ -12,10 +12,6 @@ use std::fs;
 use std::path::Path;
 use tracing::{debug, info, info_span, Instrument};
 
-/// App route handler runtime — compiled from `runtime/server/app-route-runtime.ts` at build time.
-/// Used in both full server bundles (via server_bundle.rs) and minimal bundles (app-only projects).
-const APP_ROUTE_RUNTIME: &str = include_str!(concat!(env!("OUT_DIR"), "/app-route-runtime.js"));
-
 // Re-exports for crate::rsc_bundler compatibility
 pub(crate) use crate::build_utils::runtime_client_dir;
 pub use crate::server_bundle::V8_POLYFILLS;
@@ -346,11 +342,7 @@ async fn build_minimal_server_bundle(
     fs::create_dir_all(&entry_dir)?;
 
     let mut entry = String::from(
-        r#"import { createElement } from 'react';
-import { renderToString } from 'react-dom/server';
-globalThis.__rex_pages = {};
-var __rex_createElement = createElement;
-var __rex_renderToString = renderToString;
+        r#"globalThis.__rex_pages = {};
 
 // Stub render functions for V8 isolate compatibility (app-only project)
 globalThis.__rex_render_page = function() { return JSON.stringify({ body: '', head: '' }); };
@@ -413,24 +405,11 @@ globalThis.__rex_resolve_api = function() {
         );
     }
 
-    // App router route handlers (app/**/route.ts)
-    if let Some(app_scan) = &scan.app_scan {
-        if !app_scan.api_routes.is_empty() {
-            entry.push_str("\nglobalThis.__rex_app_route_handlers = {};\n");
-            for (i, route) in app_scan.api_routes.iter().enumerate() {
-                let handler_path = route.handler_path.to_string_lossy().replace('\\', "/");
-                let pattern = &route.pattern;
-                entry.push_str(&format!(
-                    "import * as __app_route{i} from '{handler_path}';\n"
-                ));
-                entry.push_str(&format!(
-                    "globalThis.__rex_app_route_handlers['{pattern}'] = __app_route{i};\n"
-                ));
-            }
-            // Add the app route handler runtime (method dispatch, async support)
-            entry.push_str(APP_ROUTE_RUNTIME);
-        }
-    }
+    // App router route handlers (app/**/route.ts) are NOT included in the
+    // minimal bundle. They are bundled into the RSC server bundle instead
+    // (see rsc_entries.rs), which has full Node.js polyfills and proper
+    // react-server conditions. The minimal bundle only needs stub render
+    // functions for V8 isolate compatibility.
 
     let entry_path = entry_dir.join("server-entry.js");
     fs::write(&entry_path, entry)?;
@@ -515,7 +494,8 @@ globalThis.__rex_resolve_api = function() {
     let polyfill_plugin: std::sync::Arc<dyn rolldown::plugin::Pluginable> =
         std::sync::Arc::new(crate::server_bundle::NodePolyfillResolvePlugin::new(vec![
             ("file-type".to_string(), stub),
-            ("@vercel/og".to_string(), empty_stub),
+            ("@vercel/og".to_string(), empty_stub.clone()),
+            ("next/dist/compiled/@vercel/og".to_string(), empty_stub),
         ]));
     let mut bundler = rolldown::Bundler::with_plugins(options, vec![polyfill_plugin])
         .map_err(|e| anyhow::anyhow!("Failed to create server bundler: {e}"))?;

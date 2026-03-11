@@ -153,17 +153,25 @@ pub(crate) async fn build_rsc_server_bundle(
         ..Default::default()
     };
 
-    let mut bundler = rolldown::Bundler::new(options)
+    // Use the polyfill resolve plugin to stub out packages that can't run in V8
+    // (e.g. @vercel/og with its WASM imports).
+    let empty_stub = runtime_dir.join("empty.ts").to_string_lossy().to_string();
+    let polyfill_plugin: std::sync::Arc<dyn rolldown::plugin::Pluginable> =
+        std::sync::Arc::new(crate::server_bundle::NodePolyfillResolvePlugin::new(vec![
+            ("@vercel/og".to_string(), empty_stub.clone()),
+            ("next/dist/compiled/@vercel/og".to_string(), empty_stub),
+        ]));
+    let mut bundler = rolldown::Bundler::with_plugins(options, vec![polyfill_plugin])
         .map_err(|e| anyhow::anyhow!("Failed to create RSC server bundler: {e}"))?;
 
-    bundler
-        .write()
-        .await
-        .map_err(|e| anyhow::anyhow!("RSC server bundle failed: {e:?}"))?;
-
-    let _ = fs::remove_dir_all(&entries_dir);
+    if let Err(e) = bundler.write().await {
+        tracing::error!("RSC server bundle diagnostics: {e:?}");
+        return Err(anyhow::anyhow!("RSC server bundle failed: {e:?}"));
+    }
 
     let bundle_path = output_dir.join("rsc-server-bundle.js");
+
+    let _ = fs::remove_dir_all(&entries_dir);
 
     // Patch __toCommonJS to handle ESM→CJS interop for default exports.
     // rolldown's __toCommonJS wraps ESM modules into namespace objects, but

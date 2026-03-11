@@ -132,6 +132,27 @@ pub(crate) fn generate_server_entry(
         );
     }
 
+    // App router route handlers (app/**/route.ts) — registered here so the
+    // RSC server bundle includes them (they need the same react-server condition
+    // and polyfills). For projects with pages/, the full server bundle handles
+    // these instead.
+    if !app_scan.api_routes.is_empty() {
+        entry.push_str("\n// --- App Route Handlers ---\n");
+        entry.push_str("globalThis.__rex_app_route_handlers = {};\n");
+        for (i, route) in app_scan.api_routes.iter().enumerate() {
+            let handler_path = route.handler_path.to_string_lossy().replace('\\', "/");
+            let pattern = &route.pattern;
+            entry.push_str(&format!(
+                "import * as __app_route{i} from '{handler_path}';\n"
+            ));
+            entry.push_str(&format!(
+                "globalThis.__rex_app_route_handlers['{pattern}'] = __app_route{i};\n"
+            ));
+        }
+        let app_route_runtime = include_str!(concat!(env!("OUT_DIR"), "/app-route-runtime.js"));
+        entry.push_str(app_route_runtime);
+    }
+
     // Metadata runtime: resolveMetadata + metadataToHtml
     let metadata_runtime = include_str!("../../../runtime/server/metadata.ts");
     entry.push_str("\n// --- Metadata Runtime ---\n");
