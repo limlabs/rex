@@ -30,6 +30,8 @@ jobs:
         run: |
           VERSION="${INPUT_VERSION#v}"
           cd "fixtures/${{ matrix.fixture }}"
+          # Remove lockfile so npm resolves from registry, not stale file: references
+          rm -f package-lock.json
           node -e "
             const fs = require('fs');
             const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
@@ -66,21 +68,24 @@ jobs:
 
       - name: Install dependencies
         run: |
+          VERSION="${INPUT_VERSION#v}"
           cd "fixtures/${{ matrix.fixture }}"
           npm install
           # Verify the platform binary was installed (optional deps can be silently skipped)
           if ! node -e "require.resolve('@limlabs/rex-linux-x64/package.json')" 2>/dev/null; then
             echo "Platform package missing after install, installing explicitly..."
-            npm install @limlabs/rex-linux-x64
+            npm install @limlabs/rex-linux-x64@"$VERSION"
           fi
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
 
       - name: rex build
-        run: npx rex build
+        run: ./node_modules/.bin/rex build
         working-directory: fixtures/${{ matrix.fixture }}
 
       - name: rex start (verify HTTP 200)
         run: |
-          npx rex start --port 3000 &
+          ./node_modules/.bin/rex start --port 3000 &
           REX_PID=$!
 
           # Wait for server to be ready
