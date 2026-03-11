@@ -213,7 +213,7 @@ function navigateRsc(pathname: string): Promise<void> {
   } else {
     // Live server: root path "/" becomes empty to hit /_rex/rsc/{buildId}
     const suffix = pathname === '/' ? '' : pathname;
-    url = '/_rex/rsc/' + buildId + suffix;
+    url = basePath + '/_rex/rsc/' + buildId + suffix;
   }
 
   const ssrManifest = buildSSRManifest();
