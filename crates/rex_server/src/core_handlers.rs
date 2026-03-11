@@ -160,9 +160,9 @@ async fn handle_page_inner(
     };
 
     // Automatic static optimization: serve pre-rendered HTML without V8
-    if let Some(html) = hot.prerendered.get(&route_match.route.pattern) {
+    if let Some(page) = hot.prerendered.get(&route_match.route.pattern) {
         debug!(path, "Serving pre-rendered static page (core)");
-        let mut resp = RexResponse::html(200, html.clone());
+        let mut resp = RexResponse::html(200, page.html.clone());
         resp.headers
             .push(("x-rex-render-mode".to_string(), "static".to_string()));
         return resp;

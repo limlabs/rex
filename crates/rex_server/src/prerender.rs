@@ -7,7 +7,16 @@ use rex_v8::IsolatePool;
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
 
-/// Pre-render all statically optimized pages and return a map of route pattern -> full HTML.
+/// Pre-rendered page: contains the full HTML and the page props JSON.
+#[derive(Debug, Clone)]
+pub struct PrerenderedPage {
+    /// Full HTML document (for initial page load)
+    pub html: String,
+    /// Page props JSON (for client-side navigation data files)
+    pub props_json: String,
+}
+
+/// Pre-render all statically optimized pages and return a map of route pattern -> result.
 ///
 /// Pages are eligible for static optimization when their `render_mode` is `Static`:
 /// - No `getServerSideProps` export
@@ -19,7 +28,7 @@ pub async fn prerender_static_pages(
     routes: &[Route],
     manifest_json: &str,
     doc_descriptor: Option<&DocumentDescriptor>,
-) -> HashMap<String, String> {
+) -> HashMap<String, PrerenderedPage> {
     let mut prerendered = HashMap::new();
 
     // Build a lookup from route pattern -> Route so we can use module_name()
@@ -103,7 +112,7 @@ pub async fn prerender_static_pages(
             doc_descriptor,
         );
         debug!(pattern, bytes = html.len(), "Pre-rendered static page");
-        prerendered.insert(pattern.clone(), html);
+        prerendered.insert(pattern.clone(), PrerenderedPage { html, props_json });
     }
 
     if !prerendered.is_empty() {

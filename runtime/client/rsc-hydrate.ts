@@ -204,9 +204,20 @@ function navigateRsc(pathname: string): Promise<void> {
   if (!manifest) return Promise.reject(new Error('No manifest'));
 
   const buildId = manifest.build_id;
-  // Root path "/" becomes empty to hit /_rex/rsc/{buildId} (no trailing slash)
-  const suffix = pathname === '/' ? '' : pathname;
-  const url = '/_rex/rsc/' + buildId + suffix;
+  const basePath = (window.__REX_BASE_PATH || '').replace(/\/+$/, '');
+  let url: string;
+
+  if (window.__REX_STATIC_EXPORT) {
+    // Static export: flight data stored as .rsc files
+    // Root uses index.rsc to avoid dotfile that static servers skip
+    const suffix = pathname === '/' ? '/index' : pathname;
+    url = basePath + '/_rex/rsc/' + buildId + suffix + '.rsc';
+  } else {
+    // Live server: root path "/" becomes empty to hit /_rex/rsc/{buildId}
+    const suffix = pathname === '/' ? '' : pathname;
+    url = basePath + '/_rex/rsc/' + buildId + suffix;
+  }
+
   const ssrManifest = buildSSRManifest();
 
   const treePromise = Promise.resolve(
