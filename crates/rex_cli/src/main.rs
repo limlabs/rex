@@ -667,12 +667,6 @@ a {
 
     eprintln!("  {} {}", green_bold("✓"), green_bold("Project created"));
     eprintln!();
-    eprintln!("  {}", dim("Get started:"));
-    eprintln!();
-    eprintln!("    {} {}", bold("cd"), bold(&name));
-    eprintln!("    {} {}", bold("npm install"), dim(""));
-    eprintln!("    {} {}", bold("rex dev"), dim(""));
-    eprintln!();
 
     Ok(())
 }
