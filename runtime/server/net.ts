@@ -215,7 +215,10 @@ export class Socket extends EventEmitter {
         if (this._connId !== null) {
             _g.__rex_tcp_disable_polling(this._connId);
             _socketRegistry.delete(this._connId);
+            this._connId = null;
         }
+        this.writable = false;
+        this.destroyed = true;
         this.emit('end');
         this.emit('close');
     }

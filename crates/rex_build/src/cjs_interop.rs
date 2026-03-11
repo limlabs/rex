@@ -27,3 +27,36 @@ pub(crate) fn patch_to_common_js(bundle_path: &Path) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn patches_to_common_js_pattern() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("bundle.js");
+        std::fs::write(&file, format!("var x = 1;\n{OLD_PATTERN}\nvar y = 2;")).unwrap();
+
+        patch_to_common_js(&file).unwrap();
+
+        let result = std::fs::read_to_string(&file).unwrap();
+        assert!(!result.contains(OLD_PATTERN));
+        assert!(result.contains(NEW_PATTERN));
+        assert!(result.contains("var x = 1;"));
+        assert!(result.contains("var y = 2;"));
+    }
+
+    #[test]
+    fn no_op_when_pattern_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("bundle.js");
+        let content = "var x = 1; var y = 2;";
+        std::fs::write(&file, content).unwrap();
+
+        patch_to_common_js(&file).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), content);
+    }
+}

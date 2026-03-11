@@ -214,7 +214,7 @@ pub(crate) fn runtime_client_dir() -> Result<PathBuf> {
 }
 
 /// Node.js polyfill aliases for server-side bundles (pages-router + RSC).
-pub(crate) fn node_polyfill_aliases(runtime_dir: &Path) -> Vec<(String, Vec<Option<String>>)> {
+pub fn node_polyfill_aliases(runtime_dir: &Path) -> Vec<(String, Vec<Option<String>>)> {
     let modules: &[(&str, &str)] = &[
         ("process", "process.ts"),
         ("node:process", "process.ts"),
