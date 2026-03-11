@@ -259,3 +259,57 @@ fn inject_base_path_global_escapes_special_chars() {
     assert_eq!(result.matches("<script>").count(), 1);
     assert_eq!(result.matches("</script>").count(), 1);
 }
+
+#[test]
+fn route_to_data_path_root() {
+    let data_dir = Path::new("/out/_rex/data/abc123");
+    assert_eq!(
+        route_to_data_path(data_dir, "/"),
+        PathBuf::from("/out/_rex/data/abc123/.json")
+    );
+}
+
+#[test]
+fn route_to_data_path_simple() {
+    let data_dir = Path::new("/out/_rex/data/abc123");
+    assert_eq!(
+        route_to_data_path(data_dir, "/about"),
+        PathBuf::from("/out/_rex/data/abc123/about.json")
+    );
+}
+
+#[test]
+fn route_to_data_path_nested() {
+    let data_dir = Path::new("/out/_rex/data/abc123");
+    assert_eq!(
+        route_to_data_path(data_dir, "/docs/intro"),
+        PathBuf::from("/out/_rex/data/abc123/docs/intro.json")
+    );
+}
+
+#[test]
+fn route_to_rsc_path_root() {
+    let rsc_dir = Path::new("/out/_rex/rsc/abc123");
+    assert_eq!(
+        route_to_rsc_path(rsc_dir, "/"),
+        PathBuf::from("/out/_rex/rsc/abc123/.rsc")
+    );
+}
+
+#[test]
+fn route_to_rsc_path_simple() {
+    let rsc_dir = Path::new("/out/_rex/rsc/abc123");
+    assert_eq!(
+        route_to_rsc_path(rsc_dir, "/about"),
+        PathBuf::from("/out/_rex/rsc/abc123/about.rsc")
+    );
+}
+
+#[test]
+fn route_to_rsc_path_nested() {
+    let rsc_dir = Path::new("/out/_rex/rsc/abc123");
+    assert_eq!(
+        route_to_rsc_path(rsc_dir, "/docs/intro"),
+        PathBuf::from("/out/_rex/rsc/abc123/docs/intro.rsc")
+    );
+}

@@ -30,9 +30,9 @@ pub struct HotState {
     pub app_api_route_trie: Option<RouteTrie>,
     /// Whether mcp/ directory has tool files.
     pub has_mcp_tools: bool,
-    /// Pre-rendered HTML for statically optimized pages (route pattern → full HTML).
+    /// Pre-rendered pages for statically optimized routes (route pattern → HTML + props).
     /// Populated at startup for production builds; empty in dev mode.
-    pub prerendered: HashMap<String, String>,
+    pub prerendered: HashMap<String, crate::prerender::PrerenderedPage>,
     /// Pre-rendered app routes (route pattern → HTML + flight data).
     /// Populated at startup for production builds; empty in dev mode.
     pub prerendered_app: HashMap<String, crate::prerender::PrerenderedAppRoute>,

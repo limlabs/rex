@@ -21,7 +21,7 @@
   @apply mb-4;
 }
 
-.prose a {
+.prose a:not(.no-underline) {
   @apply text-emerald-600 underline decoration-emerald-300 hover:text-emerald-700 hover:decoration-emerald-500 transition-colors;
 }
 

@@ -81,12 +81,6 @@ export default function Link(props: LinkProps): React.ReactElement {
 
     e.preventDefault();
 
-    // Static export: always do full-page navigation (no server for RSC/data)
-    if (window.__REX_STATIC_EXPORT) {
-      window.location.href = resolvedHref;
-      return;
-    }
-
     // RSC app router navigation (fetches flight data, re-renders in place)
     const rscNavigate = window.__REX_RSC_NAVIGATE;
     if (rscNavigate) {
@@ -95,7 +89,9 @@ export default function Link(props: LinkProps): React.ReactElement {
       } else {
         history.pushState(null, "", resolvedHref);
       }
-      rscNavigate(resolvedHref);
+      // Pass original href (not resolvedHref) so RSC gets the clean path
+      // without base_path prefix or .html extension
+      rscNavigate(href);
       return;
     }
 

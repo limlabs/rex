@@ -131,16 +131,29 @@ pub async fn export_site(
     )
     .await;
 
-    for (pattern, html) in &prerendered_pages {
+    // Create data directory for client-side navigation
+    let data_dir = output
+        .join("_rex")
+        .join("data")
+        .join(&ctx.manifest.build_id);
+    std::fs::create_dir_all(&data_dir)?;
+
+    for (pattern, page) in &prerendered_pages {
         let file_path = route_to_file_path(output, pattern);
         let html = if config.html_extensions {
-            rewrite_nav_links_to_html(html)
+            rewrite_nav_links_to_html(&page.html)
         } else {
-            html.to_string()
+            page.html.to_string()
         };
         let html = inject_static_export_flag(&html, config.html_extensions);
         let html = rewrite_asset_paths(&html, &config.base_path);
         write_html_file(&file_path, &html)?;
+
+        // Write static data JSON for client-side navigation
+        let data_json = format!(r#"{{"props":{}}}"#, page.props_json);
+        let data_path = route_to_data_path(&data_dir, pattern);
+        write_html_file(&data_path, &data_json)?;
+
         debug!(pattern, path = %file_path.display(), "Exported page");
         result.pages_exported += 1;
     }
@@ -164,6 +177,12 @@ pub async fn export_site(
     let prerendered_app =
         prerender::prerender_static_app_routes(ctx.pool, ctx.manifest, ctx.manifest_json).await;
 
+    // Create RSC flight data directory for client-side navigation
+    let rsc_dir = output.join("_rex").join("rsc").join(&ctx.manifest.build_id);
+    if !prerendered_app.is_empty() {
+        std::fs::create_dir_all(&rsc_dir)?;
+    }
+
     for (pattern, rendered) in &prerendered_app {
         let file_path = route_to_file_path(output, pattern);
         let html = if config.html_extensions {
@@ -174,6 +193,16 @@ pub async fn export_site(
         let html = inject_static_export_flag(&html, config.html_extensions);
         let html = rewrite_asset_paths(&html, &config.base_path);
         write_html_file(&file_path, &html)?;
+
+        // Write RSC flight data for client-side navigation
+        let flight_data = if config.html_extensions {
+            rewrite_nav_links_to_html(&rendered.flight)
+        } else {
+            rendered.flight.clone()
+        };
+        let rsc_path = route_to_rsc_path(&rsc_dir, pattern);
+        write_html_file(&rsc_path, &flight_data)?;
+
         debug!(pattern, path = %file_path.display(), "Exported app route");
         result.pages_exported += 1;
     }
@@ -311,6 +340,38 @@ fn route_to_file_path(output: &Path, pattern: &str) -> PathBuf {
         // "/about" -> "about.html", "/docs/intro" -> "docs/intro.html"
         let stripped = pattern.trim_start_matches('/');
         output.join(format!("{stripped}.html"))
+    }
+}
+
+/// Convert a route pattern to a data JSON file path for client-side navigation.
+///
+/// Maps the same URL structure the client router uses to fetch page data:
+///   `/` → `data_dir/.json`
+///   `/about` → `data_dir/about.json`
+///   `/docs/intro` → `data_dir/docs/intro.json`
+fn route_to_data_path(data_dir: &Path, pattern: &str) -> PathBuf {
+    // Client fetches: /_rex/data/{buildId}{pathname}.json
+    // For root (/), pathname is "/" so file is ".json" (hidden file)
+    if pattern == "/" {
+        data_dir.join(".json")
+    } else {
+        let stripped = pattern.trim_start_matches('/');
+        data_dir.join(format!("{stripped}.json"))
+    }
+}
+
+/// Convert a route pattern to an RSC flight data file path.
+///
+/// Uses `.rsc` extension so root doesn't conflict with subdirectories:
+///   `/` → `rsc_dir/.rsc`
+///   `/about` → `rsc_dir/about.rsc`
+///   `/docs/intro` → `rsc_dir/docs/intro.rsc`
+fn route_to_rsc_path(rsc_dir: &Path, pattern: &str) -> PathBuf {
+    if pattern == "/" {
+        rsc_dir.join(".rsc")
+    } else {
+        let stripped = pattern.trim_start_matches('/');
+        rsc_dir.join(format!("{stripped}.rsc"))
     }
 }
 
