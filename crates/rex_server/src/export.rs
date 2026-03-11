@@ -351,9 +351,9 @@ fn route_to_file_path(output: &Path, pattern: &str) -> PathBuf {
 ///   `/docs/intro` → `data_dir/docs/intro.json`
 fn route_to_data_path(data_dir: &Path, pattern: &str) -> PathBuf {
     // Client fetches: /_rex/data/{buildId}{pathname}.json
-    // For root (/), pathname is "/" so file is ".json" (hidden file)
+    // Root uses index.json to avoid dotfile (.json) which static servers skip
     if pattern == "/" {
-        data_dir.join(".json")
+        data_dir.join("index.json")
     } else {
         let stripped = pattern.trim_start_matches('/');
         data_dir.join(format!("{stripped}.json"))
@@ -367,8 +367,9 @@ fn route_to_data_path(data_dir: &Path, pattern: &str) -> PathBuf {
 ///   `/about` → `rsc_dir/about.rsc`
 ///   `/docs/intro` → `rsc_dir/docs/intro.rsc`
 fn route_to_rsc_path(rsc_dir: &Path, pattern: &str) -> PathBuf {
+    // Root uses index.rsc to avoid dotfile (.rsc) which static servers skip
     if pattern == "/" {
-        rsc_dir.join(".rsc")
+        rsc_dir.join("index.rsc")
     } else {
         let stripped = pattern.trim_start_matches('/');
         rsc_dir.join(format!("{stripped}.rsc"))

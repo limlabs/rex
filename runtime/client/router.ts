@@ -140,7 +140,10 @@
   // --- Data fetching ---
 
   function fetchPageData(pathname: string): Promise<GsspData> {
-    const dataUrl = "/_rex/data/" + buildId + pathname + ".json";
+    // Static export uses index.json for root to avoid dotfile that static servers skip
+    const file = window.__REX_STATIC_EXPORT && pathname === "/" ? "/index.json" : pathname + ".json";
+    const basePath = ((window.__REX_BASE_PATH || "") as string).replace(/\/+$/, "");
+    const dataUrl = basePath + "/_rex/data/" + buildId + file;
     return fetch(dataUrl).then(function (res) {
       if (!res.ok) throw new Error("Data fetch failed: " + res.status);
       return res.json() as Promise<GsspData>;

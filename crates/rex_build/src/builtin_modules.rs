@@ -25,8 +25,8 @@ pub fn ensure_builtin_modules(project_root: &Path) -> Result<PathBuf> {
     let node_modules_dir = project_root.join("node_modules");
     let version_file = node_modules_dir.join(".rex-builtin-version");
 
-    // Skip extraction if version matches
-    if version_file.exists() {
+    // Skip extraction if version matches and react packages actually exist
+    if version_file.exists() && node_modules_dir.join("react").exists() {
         if let Ok(existing) = fs::read_to_string(&version_file) {
             if existing.trim() == EMBEDDED_REACT_VERSION {
                 return Ok(node_modules_dir);

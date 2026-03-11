@@ -265,7 +265,7 @@ fn route_to_data_path_root() {
     let data_dir = Path::new("/out/_rex/data/abc123");
     assert_eq!(
         route_to_data_path(data_dir, "/"),
-        PathBuf::from("/out/_rex/data/abc123/.json")
+        PathBuf::from("/out/_rex/data/abc123/index.json")
     );
 }
 
@@ -292,7 +292,7 @@ fn route_to_rsc_path_root() {
     let rsc_dir = Path::new("/out/_rex/rsc/abc123");
     assert_eq!(
         route_to_rsc_path(rsc_dir, "/"),
-        PathBuf::from("/out/_rex/rsc/abc123/.rsc")
+        PathBuf::from("/out/_rex/rsc/abc123/index.rsc")
     );
 }
 
