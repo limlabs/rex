@@ -30,3 +30,9 @@ notify-debouncer-mini = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+axum = { workspace = true }
+rex_core = { path = "../rex_core" }
+rex_router = { path = "../rex_router" }

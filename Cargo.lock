@@ -4685,6 +4685,7 @@ dependencies = [
  "axum",
  "dashmap 6.1.0",
  "hex",
+ "http-body-util",
  "notify",
  "notify-debouncer-mini",
  "rex_build",
@@ -4697,6 +4698,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
+ "tower",
  "tower-http",
  "tracing",
 ]

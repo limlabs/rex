@@ -280,49 +280,42 @@ async fn live_handler_impl(server: Arc<LiveServer>, request: axum::extract::Requ
         .expect("response build")
 }
 
-/// Handle requests for client-side static assets (JS/CSS chunks).
-pub async fn static_handler(
-    State(server): State<Arc<LiveServer>>,
-    uri: axum::http::Uri,
-) -> Response {
-    let path = uri.path();
-
-    // Extract project prefix and file path from /_rex/static/{prefix}/{file}
-    // For now, route all /_rex/static/ requests to the matched project's static dir
-    let (project, _remaining) = match server.match_project(path) {
-        Some(result) => result,
-        None => {
-            return StatusCode::NOT_FOUND.into_response();
-        }
-    };
-
-    // Serve from the project's .rex/build/client/ directory
-    let static_dir = project.static_dir();
-    let file_path = static_dir.join(_remaining.trim_start_matches('/'));
-
-    match tokio::fs::read(&file_path).await {
-        Ok(contents) => {
-            let content_type = if file_path.extension().and_then(|e| e.to_str()) == Some("js") {
-                "application/javascript"
-            } else if file_path.extension().and_then(|e| e.to_str()) == Some("css") {
-                "text/css"
-            } else {
-                "application/octet-stream"
-            };
-
-            Response::builder()
-                .header("content-type", content_type)
-                .header("cache-control", "public, max-age=31536000, immutable")
-                .body(Body::from(contents))
-                .expect("response build")
-        }
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
-    }
-}
-
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn html_escape_ampersand() {
+        assert_eq!(html_escape("a & b"), "a &amp; b");
+    }
+
+    #[test]
+    fn html_escape_tags() {
+        assert_eq!(html_escape("<script>"), "&lt;script&gt;");
+    }
+
+    #[test]
+    fn html_escape_quotes() {
+        assert_eq!(html_escape(r#"he said "hi""#), "he said &quot;hi&quot;");
+    }
+
+    #[test]
+    fn html_escape_combined() {
+        assert_eq!(
+            html_escape(r#"<a href="x&y">"#),
+            "&lt;a href=&quot;x&amp;y&quot;&gt;"
+        );
+    }
+
+    #[test]
+    fn html_escape_passthrough() {
+        assert_eq!(html_escape("plain text"), "plain text");
+    }
 }
