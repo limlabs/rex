@@ -20,10 +20,6 @@ target "app-build" {
   cache-from = ["type=gha,scope=docker"]
   cache-to   = ["type=gha,scope=docker,mode=max"]
   output     = ["type=docker"]
-  secret     = [
-    "id=ACTIONS_CACHE_URL,env=ACTIONS_CACHE_URL",
-    "id=ACTIONS_RUNTIME_TOKEN,env=ACTIONS_RUNTIME_TOKEN"
-  ]
 }
 
 target "runtime" {
@@ -31,8 +27,4 @@ target "runtime" {
   tags       = ["${TAG_PREFIX}:${TAG_SUFFIX}"]
   cache-from = ["type=gha,scope=docker"]
   output     = ["type=docker"]
-  secret     = [
-    "id=ACTIONS_CACHE_URL,env=ACTIONS_CACHE_URL",
-    "id=ACTIONS_RUNTIME_TOKEN,env=ACTIONS_RUNTIME_TOKEN"
-  ]
 }
