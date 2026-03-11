@@ -105,9 +105,6 @@ jobs:
         uses: docker/bake-action@v6
         with:
           load: true
-          set: |
-            *.cache-from=type=gha,scope=docker
-            *.cache-to=type=gha,scope=docker,mode=max
 
       - name: Build railway fixture
         run: docker build --build-arg REX_VERSION=ci -t rex-railway-fixture fixtures/railway
