@@ -7,7 +7,8 @@ A next-generation React framework built on the Next.js API. Write standard React
 - **Fast** — Axum HTTP server, pooled V8 isolates for SSR, Rolldown bundler. No cold starts, no single-threaded bottlenecks.
 - **Both routers** — Pages Router (`pages/` with `getServerSideProps`) and App Router (`app/` with RSC, layouts, streaming) in one framework.
 - **Batteries included** — CSS Modules, Tailwind (auto-detected), MDX, image optimization, Google Fonts, middleware, server actions — no plugins to install.
-- **One CLI** — `rex dev`, `rex build`, `rex start`, plus built-in `lint` (oxlint), `fmt` (oxfmt), and `typecheck` (tsc).
+- **Live mode** — point `rex live` at source directories and serve instantly with on-demand compilation, no build step. Mount multiple projects under different URL prefixes.
+- **One CLI** — `rex dev`, `rex build`, `rex start`, `rex live`, plus built-in `lint` (oxlint), `fmt` (oxfmt), and `typecheck` (tsc).
 - **Single binary** — ships as one native executable per platform via npm. No Node.js required at runtime.
 - **Zero-config** — works without a `package.json`. Add one when you need a lockfile or extra dependencies.
 - **Agent-friendly** — fewer files and dependencies means less baseline context for AI coding agents, leaving more of the context window for your actual application logic.
@@ -96,6 +97,10 @@ rex lint  [--root .] [--fix]       Lint with oxlint
           [--deny-warnings]
 rex typecheck [--root .]           Type-check with tsc
 rex fmt [--root .] [--check]       Format with oxfmt
+rex live -m /=./app                Live mode — serve from source
+         [-m /admin=./admin-app]   Mount multiple projects
+         [--port 4000] [-H host]
+         [--workers 4]
 ```
 
 All port/host flags also read `$PORT` and `$HOST` environment variables.
@@ -133,6 +138,23 @@ Create `rex.config.json` (or `rex.config.toml`) in your project root:
 5. **Client hydration** — React hydrates the server-rendered HTML; the client-side router handles subsequent navigations
 6. **HMR** — file watcher triggers incremental rebuilds, V8 isolates reload, WebSocket pushes updates to the browser
 
+## Live Mode
+
+Live mode serves React projects directly from source with zero build step. Rex compiles on the first request, caches the result, and automatically recompiles when source files change.
+
+```sh
+# Serve a single project
+rex live -m /=./my-app
+
+# Mount multiple projects under different prefixes
+rex live -m /=./marketing -m /dashboard=./admin-app -m /docs=./docs-site
+
+# Custom port and worker count
+rex live -m /=./my-app --port 8080 --workers 8
+```
+
+Each mounted project is fully isolated with its own build cache, V8 isolate pool, and file watcher. Cache invalidation is automatic — Rex checks source file timestamps on every request and the file watcher proactively invalidates the cache when files change.
+
 ## Architecture
 
 ```
@@ -145,6 +167,7 @@ rex/
 │   ├── rex_v8/       V8 isolate pool + SSR engine
 │   ├── rex_server/   Axum HTTP server + document assembly
 │   ├── rex_dev/      File watcher + HMR WebSocket
+│   ├── rex_live/     Live mode server (on-demand compilation)
 │   ├── rex_image/    Image optimization + blur placeholders
 │   ├── rex_mdx/      MDX compiler
 │   ├── rex_napi/     Node.js N-API bindings

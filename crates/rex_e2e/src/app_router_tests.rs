@@ -1,3 +1,4 @@
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -21,13 +22,14 @@ fn rex_binary() -> PathBuf {
         .parent()
         .unwrap()
         .to_path_buf();
-    let release = workspace_root.join("target/release/rex");
-    if release.exists() {
-        return release;
-    }
+    // Prefer debug (matches `cargo build` default and pre-push hook)
     let debug = workspace_root.join("target/debug/rex");
     if debug.exists() {
         return debug;
+    }
+    let release = workspace_root.join("target/release/rex");
+    if release.exists() {
+        return release;
     }
     panic!("Rex binary not found. Run `cargo build` first.");
 }
@@ -66,18 +68,31 @@ fn ensure_server() -> &'static TestServer {
             .spawn()
             .unwrap_or_else(|e| panic!("Failed to start rex: {e}"));
 
+        // Poll with HTTP GET until the server returns a valid response (not
+        // just TCP connect, since rex dev binds the port before the build).
         let deadline = Instant::now() + Duration::from_secs(30);
         let addr = format!("127.0.0.1:{port}");
         loop {
             if Instant::now() > deadline {
                 panic!("[e2e-app] Server failed to start within 30s on port {port}");
             }
-            if TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(100))
-                .is_ok()
+            if let Ok(mut stream) =
+                TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(500))
             {
-                break;
+                stream
+                    .set_read_timeout(Some(Duration::from_millis(500)))
+                    .ok();
+                let req = format!("GET / HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+                if stream.write_all(req.as_bytes()).is_ok() {
+                    let mut buf = [0u8; 32];
+                    if let Ok(n) = stream.read(&mut buf) {
+                        if n > 0 && String::from_utf8_lossy(&buf[..n]).contains("HTTP/") {
+                            break;
+                        }
+                    }
+                }
             }
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(200));
         }
 
         eprintln!("[e2e-app] Server ready on port {port}");

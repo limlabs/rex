@@ -31,7 +31,7 @@ pub use crate::tailwind::{
 /// If the project has no `package.json`, extract the embedded React packages
 /// into the project's `node_modules/` first (zero-config mode). Either way
 /// rolldown resolves from the standard `node_modules/` path.
-pub(crate) fn resolve_modules_dirs(config: &RexConfig) -> Result<Vec<String>> {
+pub fn resolve_modules_dirs(config: &RexConfig) -> Result<Vec<String>> {
     if !crate::builtin_modules::has_package_json(&config.project_root) {
         crate::builtin_modules::ensure_builtin_modules(&config.project_root)?;
         info!(

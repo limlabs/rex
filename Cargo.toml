@@ -13,6 +13,7 @@ members = [
     "crates/rex_mdx",
     "crates/rex_napi",
     "crates/rex_python",
+    "crates/rex_live",
 ]
 # rex_python is a PyO3 cdylib — built via `maturin develop`, not `cargo build`.
 # Exclude from default builds so `cargo build`/`cargo run` don't try to link
@@ -29,6 +30,7 @@ default-members = [
     "crates/rex_image",
     "crates/rex_e2e",
     "crates/rex_napi",
+    "crates/rex_live",
 ]
 
 [workspace.dependencies]

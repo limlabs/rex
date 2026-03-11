@@ -9,14 +9,14 @@ pub mod rsc_graph;
 pub mod server_action_manifest;
 
 // Internal modules extracted from bundler.rs
-pub(crate) mod build_utils;
+pub mod build_utils;
 pub(crate) mod client_bundle;
 pub(crate) mod css_collect;
 pub(crate) mod css_modules;
 pub(crate) mod font;
 pub(crate) mod font_google;
 pub(crate) mod mdx;
-pub(crate) mod server_bundle;
+pub mod server_bundle;
 pub mod tailwind;
 pub mod tailwind_optimize;
 pub(crate) mod tailwind_scan;
@@ -30,7 +30,7 @@ pub(crate) mod rsc_server_bundle;
 pub(crate) mod rsc_ssr_bundle;
 pub(crate) mod rsc_stubs;
 
-pub use bundler::{build_bundles, V8_POLYFILLS};
+pub use bundler::{build_bundles, resolve_modules_dirs, V8_POLYFILLS};
 pub use manifest::AssetManifest;
 pub use tailwind::{
     collect_all_css_import_paths, find_tailwind_bin, needs_tailwind, process_tailwind_css,

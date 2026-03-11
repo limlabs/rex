@@ -1,0 +1,38 @@
+[package]
+name = "rex_live"
+version = "0.15.1" # x-release-please-version
+edition = "2021"
+publish = false
+description = "Live mode: serve React apps from source with on-demand compilation"
+
+[lints]
+workspace = true
+
+[dependencies]
+rex_core = { path = "../rex_core" }
+rex_router = { path = "../rex_router" }
+rex_build = { path = "../rex_build" }
+rex_v8 = { path = "../rex_v8" }
+rex_server = { path = "../rex_server" }
+
+axum = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+dashmap = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+notify = { workspace = true }
+notify-debouncer-mini = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+axum = { workspace = true }
+rex_core = { path = "../rex_core" }
+rex_router = { path = "../rex_router" }
