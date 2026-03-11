@@ -34,8 +34,7 @@ Reproduce: `cd benchmarks && uv run python bench.py --suite dx,server --framewor
 ```sh
 npx @limlabs/rex init my-app
 cd my-app
-npm install
-npx rex dev
+rex dev
 ```
 
 Open http://localhost:3000.
