@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.16.0](https://github.com/limlabs/rex/compare/v0.15.2...v0.16.0) (2026-03-11)
+
+
+### Features
+
+* **export:** enable client-side navigation in static exports ([#170](https://github.com/limlabs/rex/issues/170)) ([d86a23a](https://github.com/limlabs/rex/commit/d86a23a0f51ced216132c0742dd3863eaf81298f))
+* **install:** curl-pipe install script for npm-free setup ([#174](https://github.com/limlabs/rex/issues/174)) ([e7aa9f8](https://github.com/limlabs/rex/commit/e7aa9f89018c8f4b5b09e392266a41b2352527e7))
+* **live:** add live mode MVP with on-demand compilation ([#161](https://github.com/limlabs/rex/issues/161)) ([4e5d6a6](https://github.com/limlabs/rex/commit/4e5d6a6de469471e51eaafe07c609c00e5bbb1c7))
+
+
+### Bug Fixes
+
+* **init:** true zero-config init — no package.json or npm required ([#172](https://github.com/limlabs/rex/issues/172)) ([3cf7738](https://github.com/limlabs/rex/commit/3cf7738e87e1a901bf4097ceb776216e56ed7895))
+
 ## [0.15.2](https://github.com/limlabs/rex/compare/v0.15.1...v0.15.2) (2026-03-10)
 
 
