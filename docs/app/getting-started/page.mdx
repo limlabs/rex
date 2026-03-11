@@ -2,15 +2,23 @@
 
 Get a Rex app running in under a minute. No `package.json` or `npm install` required — Rex embeds React and extracts it automatically.
 
+## Install Rex
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/limlabs/rex/main/install.sh | sh
+```
+
+Or via npm: `npx @limlabs/rex init my-app` (one-shot, no global install needed).
+
 ## Create a new project
 
 ```bash
-npx @limlabs/rex init my-app
+rex init my-app
 cd my-app
 rex dev
 ```
 
-That's it. Rex scaffolds a starter page, installs itself globally, and the dev server handles the rest.
+That's it. Rex scaffolds a starter page and the dev server handles the rest.
 
 ## Start from scratch
 
