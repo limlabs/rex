@@ -1,18 +1,22 @@
 name: Setup
-description: Shared CI setup — Rust cache, Node, and fixture deps.
-
-inputs:
-  save-cache:
-    description: Whether to save the Rust cache (only on main)
-    default: "false"
+description: Shared CI setup — sccache, Rust registry cache, Node, and fixture deps.
 
 runs:
   using: composite
   steps:
+    - name: Configure sccache
+      uses: mozilla-actions/sccache-action@v0.0.9
+
+    - name: Enable sccache for Rust builds
+      shell: bash
+      run: |
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+        echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
     - uses: Swatinem/rust-cache@v2
       with:
         shared-key: ci
-        save-if: ${{ inputs.save-cache }}
+        cache-targets: "false"
 
     - uses: actions/setup-node@v4
       with:
