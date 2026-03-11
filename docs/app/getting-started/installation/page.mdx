@@ -1,14 +1,18 @@
 # Installation
 
-## npm
-
-The recommended way to install Rex:
+## Shell (recommended)
 
 ```bash
-npm install @limlabs/rex
+curl -fsSL https://raw.githubusercontent.com/limlabs/rex/main/install.sh | sh
 ```
 
-This installs the Rex CLI and runtime. The CLI binary is platform-specific and downloaded automatically for your OS and architecture.
+Downloads the latest binary for your platform to `~/.rex/bin` and adds it to your PATH. No Node.js required.
+
+To install a specific version:
+
+```bash
+REX_VERSION=0.15.2 curl -fsSL https://raw.githubusercontent.com/limlabs/rex/main/install.sh | sh
+```
 
 ### Supported platforms
 
@@ -21,9 +25,21 @@ This installs the Rex CLI and runtime. The CLI binary is platform-specific and d
 
 ### Prerequisites
 
-- **Node.js 18+** — required only for the initial `npx @limlabs/rex init` (or `npm install -g @limlabs/rex`). Not needed at runtime.
+None. Rex is a single binary with React embedded. No Node.js, no `npm install`, no `package.json` needed for zero-config projects. Add a `package.json` when you need a lockfile or extra dependencies.
 
-Rex embeds React 19 and extracts it automatically — no `npm install` or `package.json` required for zero-config projects. Add a `package.json` when you need a lockfile or extra dependencies.
+## npm
+
+If you prefer npm:
+
+```bash
+npm install -g @limlabs/rex
+```
+
+Or use `npx` for one-shot commands without a global install:
+
+```bash
+npx @limlabs/rex init my-app
+```
 
 ## Docker
 
@@ -38,8 +54,6 @@ Or use the Dockerfile included in your project:
 ```dockerfile
 FROM ghcr.io/limlabs/rex:latest
 WORKDIR /app
-COPY package*.json ./
-RUN npm install
 COPY . .
 RUN rex build
 CMD ["rex", "start"]
@@ -62,5 +76,5 @@ The binary is built to `target/release/rex`. You'll need Rust 1.75+ and a C++ co
 ## Verify installation
 
 ```bash
-npx rex --version
+rex --version
 ```

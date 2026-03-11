@@ -32,7 +32,8 @@ Reproduce: `cd benchmarks && uv run python bench.py --suite dx,server --framewor
 ## Quick Start
 
 ```sh
-npx @limlabs/rex init my-app
+curl -fsSL https://raw.githubusercontent.com/limlabs/rex/main/install.sh | sh
+rex init my-app
 cd my-app
 rex dev
 ```
@@ -41,13 +42,21 @@ Open http://localhost:3000.
 
 ## Install
 
-### npm (recommended)
+### Shell (recommended)
 
 ```sh
-npm install -D @limlabs/rex
+curl -fsSL https://raw.githubusercontent.com/limlabs/rex/main/install.sh | sh
 ```
 
-Installs the `rex` binary for your platform (macOS arm64/x64, Linux x64/arm64).
+Downloads the latest binary for your platform (macOS arm64/x64, Linux x64/arm64) to `~/.rex/bin`.
+
+### npm
+
+```sh
+npx @limlabs/rex init my-app    # one-shot, no global install
+# or
+npm install -g @limlabs/rex      # global install
+```
 
 ### From source
 
