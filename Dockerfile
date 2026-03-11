@@ -1,6 +1,9 @@
 # ── Chef base ────────────────────────────────────────────────────────
 FROM rust:1.93-bookworm AS chef
-RUN cargo install cargo-chef --locked
+RUN cargo install cargo-chef --locked && \
+    curl -fsSL https://github.com/mozilla/sccache/releases/download/v0.14.0/sccache-v0.14.0-x86_64-unknown-linux-musl.tar.gz \
+    | tar xz -C /usr/local/bin --strip-components=1 --wildcards '*/sccache'
+ENV RUSTC_WRAPPER=/usr/local/bin/sccache
 WORKDIR /usr/src/rex
 
 # ── Planner ──────────────────────────────────────────────────────────
@@ -11,9 +14,17 @@ RUN cargo chef prepare --recipe-path recipe.json
 # ── Builder ──────────────────────────────────────────────────────────
 FROM chef AS builder
 
-# Build dependencies (cached until Cargo.lock or manifests change)
+# Build dependencies (cargo-chef layer cache when Cargo.lock unchanged;
+# sccache provides compilation-unit caching as fallback when layer misses)
 COPY --from=planner /usr/src/rex/recipe.json recipe.json
-RUN cargo chef cook --release -p rex_cli --features build --recipe-path recipe.json
+RUN --mount=type=secret,id=ACTIONS_CACHE_URL \
+    --mount=type=secret,id=ACTIONS_RUNTIME_TOKEN \
+    if [ -f /run/secrets/ACTIONS_CACHE_URL ]; then \
+      export SCCACHE_GHA_ENABLED=true \
+             ACTIONS_CACHE_URL=$(cat /run/secrets/ACTIONS_CACHE_URL) \
+             ACTIONS_RUNTIME_TOKEN=$(cat /run/secrets/ACTIONS_RUNTIME_TOKEN); \
+    fi && \
+    cargo chef cook --release -p rex_cli --features build --recipe-path recipe.json
 
 # Copy runtime/ (needed by include_str! in rex_server)
 COPY runtime/ runtime/
@@ -23,7 +34,14 @@ COPY runtime/ runtime/
 #   2. rex:         runtime-only, no bundler/linter/dev (ships in final image)
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates/ crates/
-RUN cargo build --release --bin rex -p rex_cli --features build && \
+RUN --mount=type=secret,id=ACTIONS_CACHE_URL \
+    --mount=type=secret,id=ACTIONS_RUNTIME_TOKEN \
+    if [ -f /run/secrets/ACTIONS_CACHE_URL ]; then \
+      export SCCACHE_GHA_ENABLED=true \
+             ACTIONS_CACHE_URL=$(cat /run/secrets/ACTIONS_CACHE_URL) \
+             ACTIONS_RUNTIME_TOKEN=$(cat /run/secrets/ACTIONS_RUNTIME_TOKEN); \
+    fi && \
+    cargo build --release --bin rex -p rex_cli --features build && \
     cp target/release/rex /usr/local/bin/rex-builder && \
     cargo build --release --bin rex -p rex_cli --no-default-features
 
