@@ -300,7 +300,11 @@ fn try_resolve_path(candidate: &Path) -> Option<PathBuf> {
     }
     let extensions = ["tsx", "ts", "jsx", "js", "mdx"];
     for ext in &extensions {
-        let with_ext = candidate.with_extension(ext);
+        // Use with_file_name to append the extension rather than replace it.
+        // `with_extension` replaces the last extension, so `Component.client`
+        // would become `Component.tsx` instead of `Component.client.tsx`.
+        let file_name = candidate.file_name()?.to_str()?;
+        let with_ext = candidate.with_file_name(format!("{file_name}.{ext}"));
         if with_ext.exists() && with_ext.is_file() {
             return with_ext.canonicalize().ok();
         }
@@ -338,7 +342,12 @@ fn resolve_import(from: &Path, specifier: &str, root: &Path) -> Option<PathBuf> 
     }
 
     // Try tsconfig path aliases (e.g. @/ → src/)
-    let aliases = crate::build_utils::tsconfig_path_aliases(root);
+    // Sort by prefix length descending so longer (more specific) prefixes match
+    // first — e.g. "@payload-config" matches before "@".
+    let mut aliases: Vec<_> = crate::build_utils::tsconfig_path_aliases(root)
+        .into_iter()
+        .collect();
+    aliases.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
     for (prefix, targets) in &aliases {
         if specifier.starts_with(prefix) {
             if let Some(Some(target)) = targets.first() {

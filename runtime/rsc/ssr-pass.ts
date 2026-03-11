@@ -56,8 +56,10 @@ function _drainHtmlStream(
                     const parts: string[] = [];
                     for (let i = 0; i < chunks.length; i++) {
                         const c = chunks[i];
-                        parts.push(typeof c === 'string' ? c : decoder.decode(c));
+                        parts.push(typeof c === 'string' ? c : decoder.decode(c, { stream: true }));
                     }
+                    // Flush any remaining bytes from the decoder
+                    parts.push(decoder.decode());
                     _ssrResult = JSON.stringify({
                         body: parts.join(''),
                         head: '',

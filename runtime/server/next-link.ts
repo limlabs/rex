@@ -5,7 +5,12 @@
 
 function Link(props: any) {
     const { href, children, ...rest } = props;
-    // Server-side: plain anchor tag
+    // Server-side: use React.createElement to produce a valid React element
+    const createElement = globalThis.React?.createElement;
+    if (createElement) {
+        return createElement('a', { href, ...rest }, ...(Array.isArray(children) ? children : [children]));
+    }
+    // Fallback: plain object (matches React element shape)
     return { type: 'a', props: { href, ...rest }, children };
 }
 

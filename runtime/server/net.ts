@@ -89,6 +89,7 @@ export class Socket extends EventEmitter {
             // any data is pushed. We use Promise.resolve().then() to defer to
             // the next microtask, which runs during perform_microtask_checkpoint().
             Promise.resolve().then(() => {
+                if (this.destroyed || !this._connId) return;
                 this._connecting = false;
                 if (_g.__rex_tcp_debug) {
                     _g.__rex_tcp_debug('socket EMIT connect connId=' + this._connId);
@@ -139,6 +140,8 @@ export class Socket extends EventEmitter {
     }
 
     end(data?: any, encoding?: any, callback?: any): this {
+        if (this.destroyed || !this._connId) return this;
+
         const cb = typeof data === 'function' ? data :
                    (typeof encoding === 'function' ? encoding : callback);
 
@@ -223,6 +226,7 @@ export class Socket extends EventEmitter {
             _g.__rex_tcp_debug('socket._onError connId=' + this._connId + ' error=' + error.message);
         }
         this.emit('error', error);
+        this.destroy();
     }
 
     // Expose connId for tls.connect() to use
