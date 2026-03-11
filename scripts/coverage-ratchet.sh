@@ -39,7 +39,7 @@ fi
 echo "Running tests with coverage..."
 cargo llvm-cov --workspace --exclude rex_python --ignore-filename-regex 'tests/' --json --output-path "$REPO_ROOT/coverage.json"
 
-COVERAGE=$(jq '.data[0].totals.lines.percent' "$REPO_ROOT/coverage.json" | xargs printf '%.0f')
+COVERAGE=$(jq '.data[0].totals.lines.percent | floor' "$REPO_ROOT/coverage.json")
 rm -f "$REPO_ROOT/coverage.json"
 
 echo "Line coverage: ${COVERAGE}% (threshold: ${THRESHOLD}%)"
