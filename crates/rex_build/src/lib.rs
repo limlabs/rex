@@ -30,6 +30,7 @@ pub(crate) mod rsc_entries;
 pub(crate) mod rsc_server_bundle;
 pub(crate) mod rsc_ssr_bundle;
 pub(crate) mod rsc_stubs;
+pub(crate) mod use_client_detect;
 
 pub use bundler::{build_bundles, resolve_modules_dirs, V8_POLYFILLS};
 pub use manifest::AssetManifest;

@@ -218,7 +218,7 @@ pub(crate) fn parse_css_classes(css: &str) -> Vec<String> {
 }
 
 /// Generate a short hash for CSS module scoping based on the file path.
-fn css_module_hash(file_path: &Path) -> String {
+pub(crate) fn css_module_hash(file_path: &Path) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(file_path.to_string_lossy().as_bytes());
@@ -226,7 +226,7 @@ fn css_module_hash(file_path: &Path) -> String {
 }
 
 /// Extract the stem from a CSS module filename (e.g., `Button.module.css` → `Button`).
-fn css_module_stem(file_path: &Path) -> String {
+pub(crate) fn css_module_stem(file_path: &Path) -> String {
     file_path
         .file_stem()
         .and_then(|s| s.to_str())

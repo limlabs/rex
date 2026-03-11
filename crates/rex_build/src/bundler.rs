@@ -492,11 +492,18 @@ globalThis.__rex_resolve_api = function() {
         .to_string();
     let empty_stub = runtime_dir.join("empty.ts").to_string_lossy().to_string();
     let polyfill_plugin: std::sync::Arc<dyn rolldown::plugin::Pluginable> =
-        std::sync::Arc::new(crate::server_bundle::NodePolyfillResolvePlugin::new(vec![
-            ("file-type".to_string(), stub),
-            ("@vercel/og".to_string(), empty_stub.clone()),
-            ("next/dist/compiled/@vercel/og".to_string(), empty_stub),
-        ]));
+        std::sync::Arc::new(crate::server_bundle::NodePolyfillResolvePlugin::new(
+            vec![
+                ("file-type".to_string(), stub),
+                ("@vercel/og".to_string(), empty_stub.clone()),
+                (
+                    "next/dist/compiled/@vercel/og".to_string(),
+                    empty_stub.clone(),
+                ),
+                ("next/og".to_string(), empty_stub.clone()),
+            ],
+            empty_stub,
+        ));
     let mut bundler = rolldown::Bundler::with_plugins(options, vec![polyfill_plugin])
         .map_err(|e| anyhow::anyhow!("Failed to create server bundler: {e}"))?;
 

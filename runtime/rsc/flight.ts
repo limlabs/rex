@@ -28,6 +28,30 @@ let _htmlResult: string | null = null;
 let _metadataHeadHtml = '';
 let _metadataDone = true;
 
+// --- Sentinel detection for notFound() and redirect() ---
+// Next.js throws errors with a `digest` property for flow control.
+// Rex's own stubs (next-navigation.ts) and the real next/navigation both use this pattern.
+function _isNotFound(e: unknown): boolean {
+    if (e && typeof e === 'object') {
+        const obj = e as Record<string, unknown>;
+        return obj.digest === 'NEXT_NOT_FOUND' || obj.__rex_type === '__rex_notFound__';
+    }
+    return false;
+}
+
+function _isRedirect(e: unknown): { url: string; status: number } | null {
+    if (e && typeof e === 'object') {
+        const obj = e as Record<string, unknown>;
+        if (obj.digest === 'NEXT_REDIRECT' || obj.__rex_type === '__rex_redirect__') {
+            return {
+                url: String(obj.url || '/'),
+                status: Number(obj.status || 307),
+            };
+        }
+    }
+    return null;
+}
+
 // --- Metadata Resolution ---
 
 // Resolve metadata from the layout chain + page for a route.
@@ -41,7 +65,13 @@ function _resolveMetadata(routeKey: string, propsJson: string): void {
         return;
     }
 
-    const props = JSON.parse(propsJson);
+    const raw = JSON.parse(propsJson);
+    // Next.js 15 passes params/searchParams as Promises to generateMetadata too
+    const props = {
+        ...raw,
+        params: Promise.resolve(raw.params || {}),
+        searchParams: Promise.resolve(raw.searchParams || {}),
+    };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any[] = [];
     let hasAsync = false;
@@ -102,12 +132,24 @@ function _buildElement(routeKey: string, propsJson: string): React.ReactElement 
     const Page = globalThis.__rex_app_pages[routeKey];
     if (!Page) return null;
 
+    // Next.js 15 passes params and searchParams as Promises.
+    // Wrap them so page components can `await params` / `await searchParams`.
+    const pageProps = {
+        ...props,
+        params: Promise.resolve(props.params || {}),
+        searchParams: Promise.resolve(props.searchParams || {}),
+    };
+
     const layouts = globalThis.__rex_app_layout_chains[routeKey] || [];
 
     // Build nested layout tree: Layout1(Layout2(Page))
-    let element = __rex_createElement(Page, props);
+    let element = __rex_createElement(Page, pageProps);
     for (let i = layouts.length - 1; i >= 0; i--) {
-        element = __rex_createElement(layouts[i], { children: element } as React.Attributes & { children: React.ReactElement });
+        const layoutProps = {
+            params: pageProps.params,
+            children: element,
+        };
+        element = __rex_createElement(layouts[i], layoutProps as React.Attributes & { children: React.ReactElement });
     }
     return element;
 }
@@ -155,6 +197,25 @@ function _startReading(reader: ReadableStreamDefaultReader<Uint8Array>): void {
                 }
             }, function(err: unknown) {
                 _streamDone = true;
+                // Check for notFound/redirect sentinels from async components
+                if (_isNotFound(err)) {
+                    _flightString = '';
+                    if (_wantHtml && !_htmlDone) {
+                        _htmlResult = '__REX_NOT_FOUND__';
+                        _htmlDone = true;
+                    }
+                    return;
+                }
+                const redir = _isRedirect(err);
+                if (redir) {
+                    _flightString = '';
+                    if (_wantHtml && !_htmlDone) {
+                        _htmlResult = '__REX_REDIRECT__:' + redir.status + ':' + redir.url;
+                        _htmlDone = true;
+                    }
+                    return;
+                }
+                // Encode error as flight data
                 _flightString = '0:{"error":' + JSON.stringify(_safeErrorString(err)) + '}\n';
                 if (_wantHtml && !_htmlDone) {
                     const errMsg = _safeErrorString(err);
@@ -217,7 +278,16 @@ globalThis.__rex_render_flight = function(routeKey: string, propsJson: string): 
         _startReading(stream.getReader());
     } catch (e) {
         _streamDone = true;
-        _flightString = '0:{"error":' + JSON.stringify(_safeErrorString(e)) + '}\n';
+        if (_isNotFound(e)) {
+            _flightString = '__REX_NOT_FOUND__';
+        } else {
+            const redir = _isRedirect(e);
+            if (redir) {
+                _flightString = '__REX_REDIRECT__:' + redir.status + ':' + redir.url;
+            } else {
+                _flightString = '0:{"error":' + JSON.stringify(_safeErrorString(e)) + '}\n';
+            }
+        }
     }
 
     if (_streamDone) {
@@ -261,15 +331,30 @@ globalThis.__rex_render_rsc_to_html = function(routeKey: string, propsJson: stri
         const stream = __rex_renderToReadableStream(element, bundlerConfig, renderOptions);
         _startReading(stream.getReader());
     } catch (e) {
-        const errMsg = _safeErrorString(e);
-        _streamDone = true;
-        _flightString = '0:{"error":' + JSON.stringify(errMsg) + '}\n';
-        _htmlResult = JSON.stringify({
-            body: '<div style="color:red">RSC Error: ' + errMsg.replace(/</g, '&lt;') + '</div>',
-            head: '',
-            flight: _flightString
-        });
-        _htmlDone = true;
+        if (_isNotFound(e)) {
+            _streamDone = true;
+            _flightString = '';
+            _htmlResult = '__REX_NOT_FOUND__';
+            _htmlDone = true;
+        } else {
+            const redir = _isRedirect(e);
+            if (redir) {
+                _streamDone = true;
+                _flightString = '';
+                _htmlResult = '__REX_REDIRECT__:' + redir.status + ':' + redir.url;
+                _htmlDone = true;
+            } else {
+                const errMsg = _safeErrorString(e);
+                _streamDone = true;
+                _flightString = '0:{"error":' + JSON.stringify(errMsg) + '}\n';
+                _htmlResult = JSON.stringify({
+                    body: '<div style="color:red">RSC Error: ' + errMsg.replace(/</g, '&lt;') + '</div>',
+                    head: '',
+                    flight: _flightString
+                });
+                _htmlDone = true;
+            }
+        }
     }
 
     if (_htmlDone && _metadataDone) {

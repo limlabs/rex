@@ -14,11 +14,16 @@ use tracing::debug;
 pub(crate) struct NodePolyfillResolvePlugin {
     /// Maps bare specifier prefixes → absolute path of stub file.
     redirects: Vec<(String, String)>,
+    /// Fallback stub for unloadable file types (e.g. `.wasm?module`).
+    empty_stub: String,
 }
 
 impl NodePolyfillResolvePlugin {
-    pub fn new(redirects: Vec<(String, String)>) -> Self {
-        Self { redirects }
+    pub fn new(redirects: Vec<(String, String)>, empty_stub: String) -> Self {
+        Self {
+            redirects,
+            empty_stub,
+        }
     }
 }
 
@@ -37,7 +42,7 @@ impl rolldown::plugin::Plugin for NodePolyfillResolvePlugin {
             if specifier == prefix
                 || (specifier.len() > prefix.len()
                     && specifier.starts_with(prefix)
-                    && specifier.as_bytes()[prefix.len()] == b'/')
+                    && matches!(specifier.as_bytes()[prefix.len()], b'/' | b'.'))
             {
                 Some(rolldown::plugin::HookResolveIdOutput::from_id(
                     target.clone(),
@@ -46,6 +51,293 @@ impl rolldown::plugin::Plugin for NodePolyfillResolvePlugin {
                 None
             }
         });
+        // Catch .wasm imports with query strings (e.g. "./resvg.wasm?module")
+        // that rolldown can't load as regular files.
+        let result = result.or_else(|| {
+            if specifier.contains(".wasm?") || specifier.contains(".wasm!") {
+                Some(rolldown::plugin::HookResolveIdOutput::from_id(
+                    self.empty_stub.clone(),
+                ))
+            } else {
+                None
+            }
+        });
+        async move { Ok(result) }
+    }
+
+    fn load(
+        &self,
+        _ctx: rolldown::plugin::SharedLoadPluginContext,
+        args: &rolldown::plugin::HookLoadArgs<'_>,
+    ) -> impl std::future::Future<Output = rolldown::plugin::HookLoadReturn> + Send {
+        // Intercept .wasm imports with query strings (e.g. "...resvg.wasm?module")
+        // that rolldown resolved but can't load from disk.
+        let result = if args.id.contains(".wasm?") {
+            Some(rolldown::plugin::HookLoadOutput {
+                code: "export default {};".into(),
+                ..Default::default()
+            })
+        } else {
+            None
+        };
+        async move { Ok(result) }
+    }
+
+    fn register_hook_usage(&self) -> rolldown::plugin::HookUsage {
+        rolldown::plugin::HookUsage::ResolveId | rolldown::plugin::HookUsage::Load
+    }
+}
+
+/// Rolldown plugin that stubs out heavy server-only packages (database drivers,
+/// AWS SDK, etc.) that leak into the RSC server bundle via PayloadCMS or other
+/// frameworks. These packages can't run in V8 and their class hierarchies crash
+/// with "Class extends value is not a constructor" when their parent classes
+/// resolve to empty stubs.
+///
+/// Unlike `NodePolyfillResolvePlugin` which redirects imports to an empty file,
+/// this plugin reads the original file's exports and generates a stub that
+/// provides constructable classes for each export, preventing class extension
+/// crashes at evaluation time.
+#[derive(Debug)]
+pub(crate) struct HeavyPackageStubPlugin {
+    /// Package path prefixes to stub (matched against resolved file paths).
+    /// e.g., `["node_modules/@aws-sdk/", "node_modules/drizzle-orm/"]`
+    package_prefixes: Vec<String>,
+}
+
+impl HeavyPackageStubPlugin {
+    pub fn new(package_prefixes: Vec<String>) -> Self {
+        Self { package_prefixes }
+    }
+
+    fn should_stub(&self, resolved_id: &str) -> bool {
+        self.package_prefixes
+            .iter()
+            .any(|prefix| resolved_id.contains(prefix.as_str()))
+    }
+
+    /// Extract export names from a JS/TS source file using basic pattern matching.
+    /// Public for reuse by `UseClientDetectPlugin`.
+    /// Handles: `export function X`, `export class X`, `export const/let/var X`,
+    /// `export { X, Y }`, `export default`, `exports.X = `, `module.exports`.
+    pub fn extract_exports(source: &str) -> Vec<String> {
+        let mut exports = Vec::new();
+        let mut has_default = false;
+
+        for line in source.lines() {
+            let trimmed = line.trim();
+
+            // ESM: export default
+            if trimmed.starts_with("export default") {
+                has_default = true;
+                continue;
+            }
+
+            // ESM: export function/class/const/let/var NAME
+            if let Some(rest) = trimmed.strip_prefix("export ") {
+                let rest = rest.trim_start();
+                // Skip "export {" and "export *"
+                if rest.starts_with('{') || rest.starts_with('*') {
+                    // Handle "export { X, Y, Z }"
+                    if rest.starts_with('{') {
+                        let block = rest.trim_start_matches('{');
+                        for part in block.split(',') {
+                            let name = part
+                                .split_whitespace()
+                                .next()
+                                .unwrap_or("")
+                                .trim_end_matches('}');
+                            if !name.is_empty()
+                                && name != "}"
+                                && name.chars().next().is_some_and(|c| c.is_alphabetic())
+                            {
+                                exports.push(name.to_string());
+                            }
+                        }
+                    }
+                    continue;
+                }
+                // Skip keywords to get to the name
+                let rest = rest
+                    .strip_prefix("async ")
+                    .unwrap_or(rest)
+                    .strip_prefix("function ")
+                    .or_else(|| rest.strip_prefix("function* "))
+                    .or_else(|| rest.strip_prefix("class "))
+                    .or_else(|| rest.strip_prefix("const "))
+                    .or_else(|| rest.strip_prefix("let "))
+                    .or_else(|| rest.strip_prefix("var "))
+                    .unwrap_or("");
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '$')
+                    .collect();
+                if !name.is_empty() {
+                    exports.push(name);
+                }
+                continue;
+            }
+
+            // CJS: exports.X = or module.exports.X = or module.exports =
+            if let Some(rest) = trimmed.strip_prefix("exports.") {
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '$')
+                    .collect();
+                if !name.is_empty() && name != "default" {
+                    exports.push(name);
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("module.exports.") {
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '$')
+                    .collect();
+                if !name.is_empty() && name != "default" {
+                    exports.push(name);
+                }
+            } else if trimmed.starts_with("module.exports") {
+                has_default = true;
+            }
+        }
+
+        if has_default && !exports.contains(&"default".to_string()) {
+            exports.push("default".to_string());
+        }
+        exports.sort();
+        exports.dedup();
+        exports
+    }
+
+    fn generate_stub_code(exports: &[String]) -> String {
+        // Deep proxy stub: every property access, function call, and constructor
+        // invocation returns another proxy. Handles all chaining patterns like
+        // `db.init().connect()`. Special cases prevent infinite loops and handle
+        // primitive coercion for string/number contexts.
+        let mut code = String::from(
+            r#"var __$P=new Proxy(function(){},{get(t,k){if(k==="then")return function(r){if(r)r(null)};if(k===Symbol.toPrimitive)return()=>"";if(k===Symbol.iterator)return function*(){};if(k==="toString"||k==="toJSON")return()=>"";if(k==="valueOf")return()=>0;if(k==="length"||k==="size")return 0;if(k==="prototype")return{};if(k==="docs"||k==="data")return[];if(k==="totalDocs"||k==="totalPages")return 0;return __$P},apply(){return __$P},construct(){return __$P},set(){return true},has(){return true}});
+"#,
+        );
+        for name in exports {
+            if name == "default" {
+                code.push_str("export default __$P;\n");
+            } else {
+                code.push_str(&format!("export var {name} = __$P;\n"));
+            }
+        }
+        if !exports.contains(&"default".to_string()) {
+            code.push_str("export default __$P;\n");
+        }
+        code
+    }
+}
+
+impl rolldown::plugin::Plugin for HeavyPackageStubPlugin {
+    fn name(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("rex:heavy-package-stub")
+    }
+
+    fn load(
+        &self,
+        _ctx: rolldown::plugin::SharedLoadPluginContext,
+        args: &rolldown::plugin::HookLoadArgs<'_>,
+    ) -> impl std::future::Future<Output = rolldown::plugin::HookLoadReturn> + Send {
+        let result = if self.should_stub(args.id) {
+            let source = fs::read_to_string(args.id).unwrap_or_default();
+            let exports = Self::extract_exports(&source);
+            let code = Self::generate_stub_code(&exports);
+            Some(rolldown::plugin::HookLoadOutput {
+                code: code.into(),
+                ..Default::default()
+            })
+        } else {
+            None
+        };
+        async move { Ok(result) }
+    }
+
+    fn register_hook_usage(&self) -> rolldown::plugin::HookUsage {
+        rolldown::plugin::HookUsage::Load
+    }
+}
+
+/// Rolldown plugin that intercepts `.module.css` imports and returns a JS proxy
+/// with scoped class name mappings. This allows server components in RSC/SSR
+/// bundles to import CSS modules and get the correct class name strings.
+///
+/// Without this plugin, `.module.css` files match the `.css → Empty` module type
+/// rule and resolve to `undefined`, crashing components that access class names.
+#[derive(Debug)]
+pub(crate) struct CssModulePlugin {
+    /// Directory where proxy JS files are written.
+    temp_dir: PathBuf,
+}
+
+impl CssModulePlugin {
+    pub fn new(temp_dir: PathBuf) -> Self {
+        let _ = fs::create_dir_all(&temp_dir);
+        Self { temp_dir }
+    }
+
+    fn generate_proxy(&self, css_path: &Path) -> Result<PathBuf> {
+        let css_content = fs::read_to_string(css_path)?;
+        let classes = crate::css_modules::parse_css_classes(&css_content);
+        let file_hash = crate::css_modules::css_module_hash(css_path);
+        let stem = crate::css_modules::css_module_stem(css_path);
+
+        let mut class_map = HashMap::new();
+        for class in &classes {
+            class_map.insert(class.clone(), format!("{stem}_{class}_{file_hash}"));
+        }
+
+        let proxy_code = crate::css_modules::generate_css_module_proxy(&class_map);
+
+        let proxy_name = format!("{stem}_{file_hash}.css-module.js");
+        let proxy_path = self.temp_dir.join(&proxy_name);
+        fs::write(&proxy_path, &proxy_code)?;
+
+        Ok(proxy_path)
+    }
+}
+
+impl rolldown::plugin::Plugin for CssModulePlugin {
+    fn name(&self) -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("rex:css-module")
+    }
+
+    fn resolve_id(
+        &self,
+        _ctx: &rolldown::plugin::PluginContext,
+        args: &rolldown::plugin::HookResolveIdArgs<'_>,
+    ) -> impl std::future::Future<Output = rolldown::plugin::HookResolveIdReturn> + Send {
+        let specifier = args.specifier;
+        let importer = args.importer.map(|s| s.to_string());
+
+        let result = if specifier.ends_with(".module.css") {
+            let css_path = if specifier.starts_with('.') {
+                importer
+                    .as_deref()
+                    .and_then(|imp| Path::new(imp).parent().map(|dir| dir.join(specifier)))
+            } else {
+                // Absolute path or bare specifier — try as-is
+                Some(PathBuf::from(specifier))
+            };
+
+            css_path.and_then(|p| {
+                if p.exists() {
+                    self.generate_proxy(&p).ok().map(|proxy| {
+                        rolldown::plugin::HookResolveIdOutput::from_id(
+                            proxy.to_string_lossy().to_string(),
+                        )
+                    })
+                } else {
+                    None
+                }
+            })
+        } else {
+            None
+        };
+
         async move { Ok(result) }
     }
 
@@ -328,13 +620,18 @@ pub(crate) async fn build_server_bundle(
         .to_string_lossy()
         .to_string();
     let empty_stub = runtime_dir.join("empty.ts").to_string_lossy().to_string();
-    let polyfill_plugin = Arc::new(NodePolyfillResolvePlugin {
-        redirects: vec![
+    let polyfill_plugin = Arc::new(NodePolyfillResolvePlugin::new(
+        vec![
             ("file-type".to_string(), stub),
             ("@vercel/og".to_string(), empty_stub.clone()),
-            ("next/dist/compiled/@vercel/og".to_string(), empty_stub),
+            (
+                "next/dist/compiled/@vercel/og".to_string(),
+                empty_stub.clone(),
+            ),
+            ("next/og".to_string(), empty_stub.clone()),
         ],
-    });
+        empty_stub,
+    ));
 
     let mut bundler = rolldown::Bundler::with_plugins(
         options,

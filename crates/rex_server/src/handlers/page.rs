@@ -262,7 +262,7 @@ pub(super) async fn page_handler_inner(
                     .body(Body::from(cached.html.clone()))
                     .expect("response build");
             }
-            return render_app_route(state, hot, &app_match, path, uri).await;
+            return render_app_route(state, hot, &app_match, path, uri, Some(headers)).await;
         }
     }
 

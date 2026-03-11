@@ -46,6 +46,10 @@ pub struct AppRoute {
     pub dynamic_segments: Vec<DynamicSegment>,
     /// Specificity score for route matching priority
     pub specificity: u32,
+    /// Route group name (e.g. "app", "payload"), or `None` if not in a group.
+    /// Used for per-group RSC bundle splitting so each group's heavy imports
+    /// don't pollute other groups.
+    pub route_group: Option<String>,
 }
 
 /// A flattened API route handler derived from the app directory tree.
@@ -123,6 +127,22 @@ impl AppScanResult {
     /// Convert all app API routes to `Route` objects for building a `RouteTrie`.
     pub fn to_api_routes(&self) -> Vec<crate::Route> {
         self.api_routes.iter().map(|r| r.to_route()).collect()
+    }
+
+    /// Group routes by their route group name.
+    ///
+    /// Returns `(group_name, routes)` pairs sorted by group name.
+    /// Routes not in any group are keyed by `None`.
+    pub fn routes_by_group(&self) -> Vec<(Option<String>, Vec<&AppRoute>)> {
+        use std::collections::BTreeMap;
+        let mut groups: BTreeMap<Option<String>, Vec<&AppRoute>> = BTreeMap::new();
+        for route in &self.routes {
+            groups
+                .entry(route.route_group.clone())
+                .or_default()
+                .push(route);
+        }
+        groups.into_iter().collect()
     }
 }
 

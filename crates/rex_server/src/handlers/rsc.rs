@@ -2,7 +2,6 @@ use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use futures::stream::{self, StreamExt};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::error;
@@ -116,6 +115,7 @@ pub(super) async fn render_app_route(
     route_match: &rex_core::RouteMatch,
     _path: &str,
     uri: &Uri,
+    req_headers: Option<&axum::http::HeaderMap>,
 ) -> Response {
     let route_key = route_match.route.pattern.clone();
     let params = route_match.params.clone();
@@ -149,7 +149,102 @@ pub(super) async fn render_app_route(
     let css_files = hot.manifest.global_css.clone();
     let css_contents = hot.manifest.css_contents.clone();
 
-    // Flush head shell immediately so browser starts fetching resources
+    // Serialize request headers/cookies for V8 context (enables next/headers)
+    let headers_json = req_headers
+        .map(|hm| {
+            let map: HashMap<String, String> = hm
+                .iter()
+                .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+                .collect();
+            serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
+        })
+        .unwrap_or_else(|| "{}".to_string());
+    let cookies_json = req_headers
+        .and_then(|hm| hm.get("cookie"))
+        .and_then(|v| v.to_str().ok())
+        .map(|cookie_str| {
+            let map: HashMap<String, String> = cookie_str
+                .split(';')
+                .filter_map(|pair| {
+                    let mut parts = pair.splitn(2, '=');
+                    let k = parts.next()?.trim().to_string();
+                    let v = parts.next().unwrap_or("").trim().to_string();
+                    Some((k, v))
+                })
+                .collect();
+            serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
+        })
+        .unwrap_or_else(|| "{}".to_string());
+
+    // Render RSC first to detect notFound/redirect before streaming headers
+    let route_key_clone = route_key.clone();
+    let props_clone = props_json.clone();
+    let rsc_result = state
+        .isolate_pool
+        .execute(move |iso| {
+            let _ = iso.set_request_context(&headers_json, &cookies_json);
+            let result = iso.render_rsc_to_html(&route_key_clone, &props_clone);
+            let _ = iso.clear_request_context();
+            result
+        })
+        .await;
+
+    // Handle notFound() → 404 response
+    // Handle redirect() → 30x response
+    if let Ok(Err(e)) = &rsc_result {
+        let msg = e.to_string();
+        if msg.contains("__REX_NOT_FOUND__") {
+            return Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .header("content-type", "text/html; charset=utf-8")
+                .body(Body::from(
+                    "<html><body><h1>404 - Not Found</h1></body></html>",
+                ))
+                .expect("response build");
+        }
+        if let Some(rest) = msg.strip_prefix("__REX_REDIRECT__:") {
+            // Format: "status:url"
+            if let Some((status_str, url)) = rest.split_once(':') {
+                let status = status_str.parse::<u16>().unwrap_or(307);
+                return Response::builder()
+                    .status(status)
+                    .header("location", url)
+                    .body(Body::empty())
+                    .expect("response build");
+            }
+        }
+    }
+
+    let (body_html, head_html, flight_data) = match rsc_result {
+        Ok(Ok(r)) => (r.body, r.head, r.flight),
+        Ok(Err(e)) => {
+            error!("RSC render error: {e}");
+            let msg = e.to_string().replace('<', "&lt;").replace('>', "&gt;");
+            if is_dev {
+                (
+                    format!("<pre style=\"padding:20px;color:#e63946;font-family:monospace\">RSC Error: {msg}</pre>"),
+                    String::new(),
+                    String::new(),
+                )
+            } else {
+                (
+                    "<h1>Internal Server Error</h1>".to_string(),
+                    String::new(),
+                    String::new(),
+                )
+            }
+        }
+        Err(e) => {
+            error!("RSC pool error: {e}");
+            (
+                "<h1>Internal Server Error</h1>".to_string(),
+                String::new(),
+                String::new(),
+            )
+        }
+    };
+
+    // Build head shell + body tail
     let shell = assemble_rsc_head_shell(
         &client_chunks,
         &client_manifest_json,
@@ -157,67 +252,19 @@ pub(super) async fn render_app_route(
         &css_contents,
     );
 
-    let shell_chunk = stream::once(async { Ok::<_, std::convert::Infallible>(shell) });
-
-    let state_clone = state.clone();
-    let route_key_clone = route_key.clone();
-    let props_clone = props_json.clone();
-    let client_chunks_clone = client_chunks.clone();
-    let client_manifest_json_clone = client_manifest_json.clone();
-
-    let tail_chunk = stream::once(async move {
-        let rsc_result = state_clone
-            .isolate_pool
-            .execute(move |iso| iso.render_rsc_to_html(&route_key_clone, &props_clone))
-            .await;
-
-        let (body_html, head_html, flight_data) = match rsc_result {
-            Ok(Ok(r)) => (r.body, r.head, r.flight),
-            Ok(Err(e)) => {
-                error!("RSC render error: {e}");
-                let msg = e.to_string().replace('<', "&lt;").replace('>', "&gt;");
-                if is_dev {
-                    (
-                        format!("<pre style=\"padding:20px;color:#e63946;font-family:monospace\">RSC Error: {msg}</pre>"),
-                        String::new(),
-                        String::new(),
-                    )
-                } else {
-                    (
-                        "<h1>Internal Server Error</h1>".to_string(),
-                        String::new(),
-                        String::new(),
-                    )
-                }
-            }
-            Err(e) => {
-                error!("RSC pool error: {e}");
-                (
-                    "<h1>Internal Server Error</h1>".to_string(),
-                    String::new(),
-                    String::new(),
-                )
-            }
-        };
-
-        let tail = assemble_rsc_body_tail(
-            &body_html,
-            &head_html,
-            &flight_data,
-            &client_chunks_clone,
-            &client_manifest_json_clone,
-            is_dev,
-            Some(&manifest_json),
-        );
-
-        Ok::<_, std::convert::Infallible>(tail)
-    });
-
-    let body = Body::from_stream(shell_chunk.chain(tail_chunk));
+    let tail = assemble_rsc_body_tail(
+        &body_html,
+        &head_html,
+        &flight_data,
+        &client_chunks,
+        &client_manifest_json,
+        is_dev,
+        Some(&manifest_json),
+    );
 
     Response::builder()
         .header("content-type", "text/html; charset=utf-8")
-        .body(body)
+        .body(Body::from(format!("{shell}{tail}")))
         .expect("response build")
 }
 

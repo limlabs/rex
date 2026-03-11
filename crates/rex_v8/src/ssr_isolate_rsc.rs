@@ -119,6 +119,14 @@ impl SsrIsolate {
         // Run fetch loop in case server components used fetch()
         crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
 
+        // Check for sentinel values before JSON parsing
+        if result_str == "__REX_NOT_FOUND__" {
+            return Err(anyhow::anyhow!("__REX_NOT_FOUND__"));
+        }
+        if let Some(rest) = result_str.strip_prefix("__REX_REDIRECT__:") {
+            return Err(anyhow::anyhow!("__REX_REDIRECT__:{rest}"));
+        }
+
         if result_str == "__REX_RSC_HTML_ASYNC__" {
             self.resolve_rsc_async()?;
 
@@ -132,6 +140,14 @@ impl SsrIsolate {
                 .map_err(|e| anyhow::anyhow!("RSC finalize error: {e}"))?;
                 result.to_rust_string_lossy(scope)
             };
+
+            // Check for sentinel values in async result
+            if finalized == "__REX_NOT_FOUND__" {
+                return Err(anyhow::anyhow!("__REX_NOT_FOUND__"));
+            }
+            if let Some(rest) = finalized.strip_prefix("__REX_REDIRECT__:") {
+                return Err(anyhow::anyhow!("__REX_REDIRECT__:{rest}"));
+            }
 
             // React's flight protocol can produce lone surrogates as JSON hex
             // escapes (\uD800-\uDFFF) which serde_json rejects. Replace them

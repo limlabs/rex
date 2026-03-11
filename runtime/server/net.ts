@@ -81,7 +81,7 @@ export class Socket extends EventEmitter {
             this._connId = _g.__rex_tcp_connect(host, port);
             this.writable = true;
             this.readable = true;
-            _socketRegistry.set(this._connId, this);
+            _socketRegistry.set(this._connId!, this);
 
             // Defer 'connect' event so pg can attach listeners first.
             // pg calls socket.connect() then socket.once('connect', handler).

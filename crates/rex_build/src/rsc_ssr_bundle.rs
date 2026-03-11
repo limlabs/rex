@@ -90,12 +90,41 @@ pub(crate) async fn build_rsc_ssr_bundle(
     let runtime_dir = crate::build_utils::runtime_server_dir()?;
     let empty_stub = runtime_dir.join("empty.ts").to_string_lossy().to_string();
     let polyfill_plugin: std::sync::Arc<dyn rolldown::plugin::Pluginable> =
-        std::sync::Arc::new(crate::server_bundle::NodePolyfillResolvePlugin::new(vec![
-            ("@vercel/og".to_string(), empty_stub.clone()),
-            ("next/dist/compiled/@vercel/og".to_string(), empty_stub),
+        std::sync::Arc::new(crate::server_bundle::NodePolyfillResolvePlugin::new(
+            vec![
+                ("@vercel/og".to_string(), empty_stub.clone()),
+                (
+                    "next/dist/compiled/@vercel/og".to_string(),
+                    empty_stub.clone(),
+                ),
+                ("next/og".to_string(), empty_stub.clone()),
+            ],
+            empty_stub,
+        ));
+
+    // CSS module plugin for client components that import .module.css
+    let css_module_plugin: std::sync::Arc<dyn rolldown::plugin::Pluginable> = std::sync::Arc::new(
+        crate::server_bundle::CssModulePlugin::new(output_dir.join("_css_module_proxies")),
+    );
+
+    // Stub packages that use Node.js native modules and can never run in V8.
+    let heavy_stub_plugin: std::sync::Arc<dyn rolldown::plugin::Pluginable> =
+        std::sync::Arc::new(crate::server_bundle::HeavyPackageStubPlugin::new(vec![
+            "node_modules/@aws-sdk/".to_string(),
+            "node_modules/@smithy/".to_string(),
+            "node_modules/pg/".to_string(),
+            "node_modules/pg-native/".to_string(),
+            "node_modules/pg-pool/".to_string(),
+            "node_modules/pg-protocol/".to_string(),
+            "node_modules/@node-rs/".to_string(),
+            "node_modules/undici/".to_string(),
         ]));
-    let mut bundler = rolldown::Bundler::with_plugins(options, vec![polyfill_plugin])
-        .map_err(|e| anyhow::anyhow!("Failed to create RSC SSR bundler: {e}"))?;
+
+    let mut bundler = rolldown::Bundler::with_plugins(
+        options,
+        vec![polyfill_plugin, css_module_plugin, heavy_stub_plugin],
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to create RSC SSR bundler: {e}"))?;
 
     bundler
         .write()
