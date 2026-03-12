@@ -1,6 +1,8 @@
 pub mod log_layer;
+mod mascot;
 
 use crate::tui::log_layer::{LogBuffer, LogEntry};
+use crate::tui::mascot::{render_mascot, MascotState};
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 use futures::StreamExt;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -61,6 +63,11 @@ pub struct StartupInfo {
     pub has_typescript: bool,
 }
 
+/// An unresolved error with its full message (may contain a stack trace).
+struct UnresolvedError {
+    message: String,
+}
+
 struct TuiApp {
     screen: Screen,
     log_buffer: LogBuffer,
@@ -74,6 +81,8 @@ struct TuiApp {
     tail_flick_ticks: u8,
     /// Last log message we saw, used to detect new rebuild events.
     last_seen_msg: String,
+    /// Currently unresolved error. Set on ERROR log, cleared on successful rebuild.
+    unresolved_error: Option<UnresolvedError>,
 }
 
 impl TuiApp {
@@ -90,6 +99,7 @@ impl TuiApp {
             auto_scroll: true,
             tail_flick_ticks: 0,
             last_seen_msg,
+            unresolved_error: None,
         }
     }
 
@@ -98,12 +108,27 @@ impl TuiApp {
         if let Some(entry) = self.log_buffer.last() {
             if entry.message != self.last_seen_msg {
                 if entry.message.starts_with("Rebuild complete") {
-                    self.tail_flick_ticks = 4; // shows flick for ~300ms (3 render frames)
+                    self.tail_flick_ticks = 4;
+                    self.unresolved_error = None;
+                } else if entry.level == Level::ERROR {
+                    self.unresolved_error = Some(UnresolvedError {
+                        message: entry.message.clone(),
+                    });
                 }
                 self.last_seen_msg = entry.message;
             }
         }
         self.tail_flick_ticks = self.tail_flick_ticks.saturating_sub(1);
+    }
+
+    fn mascot_state(&self) -> MascotState {
+        if self.unresolved_error.is_some() {
+            MascotState::Error
+        } else if self.tail_flick_ticks > 0 {
+            MascotState::TailFlick
+        } else {
+            MascotState::Idle
+        }
     }
 
     fn render(&self, f: &mut Frame<'_>) {
@@ -116,55 +141,64 @@ impl TuiApp {
     fn render_home(&self, f: &mut Frame<'_>) {
         let area = f.area();
 
-        // Vertical layout: padding, mascot+info+last log, spacer, footer
+        let error_lines = self
+            .unresolved_error
+            .as_ref()
+            .map(|e| e.message.lines().count().min(12) as u16 + 2) // +2 for header + gap
+            .unwrap_or(0);
+
         let chunks = Layout::vertical([
-            Constraint::Length(2), // top padding
-            Constraint::Length(7), // mascot + info + last log
-            Constraint::Min(0),    // spacer
-            Constraint::Length(1), // footer
+            Constraint::Length(2),           // top padding
+            Constraint::Length(7),           // mascot + info + last log
+            Constraint::Length(error_lines), // error stack trace (0 when no error)
+            Constraint::Min(0),              // spacer
+            Constraint::Length(1),           // footer
         ])
         .split(area);
 
         self.render_mascot_and_info(f, chunks[1]);
-        self.render_home_footer(f, chunks[3]);
+        if let Some(ref err) = self.unresolved_error {
+            Self::render_error_section(f, chunks[2], err, area.width);
+        }
+        self.render_home_footer(f, chunks[4]);
     }
 
     fn render_mascot_and_info(&self, f: &mut Frame<'_>, area: Rect) {
-        // Two-column layout: mascot (fixed) | info (left-aligned)
-        let cols = Layout::horizontal([
-            Constraint::Length(25), // "  " + mascot (21 chars) + "  "
-            Constraint::Min(0),
-        ])
-        .split(area);
+        let cols = Layout::horizontal([Constraint::Length(25), Constraint::Min(0)]).split(area);
 
-        self.render_mascot(f, cols[0]);
+        render_mascot(f, cols[0], self.mascot_state());
         self.render_info(f, cols[1]);
     }
 
-    fn render_mascot(&self, f: &mut Frame<'_>, area: Rect) {
-        let mascot_lines: [&str; 5] = if self.tail_flick_ticks > 0 {
-            [
-                "        ▄████▄       ",
-                "  ▄     █ ◦ █▀█▄    ",
-                "   ▀▄▄▄▄█████▀▀     ",
-                "    ▀▀▀▀██████       ",
-                "        █▀ █▀        ",
-            ]
-        } else {
-            [
-                "        ▄████▄       ",
-                "        █ ◦ █▀█▄    ",
-                "  ▄▄▄▄▄▄█████▀▀     ",
-                "    ▀▀▀▀██████       ",
-                "        █▀ █▀        ",
-            ]
-        };
+    fn render_error_section(f: &mut Frame<'_>, area: Rect, err: &UnresolvedError, _w: u16) {
+        let mut lines: Vec<Line<'_>> = Vec::new();
 
-        let mut lines = Vec::new();
-        for ml in &mascot_lines {
+        // Header
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                "✕ Error",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+
+        // Stack trace lines
+        let max_lines = 12;
+        let all_lines: Vec<&str> = err.message.lines().collect();
+        let show = all_lines.len().min(max_lines);
+        for line in &all_lines[..show] {
             lines.push(Line::from(vec![
                 Span::raw("  "),
-                Span::styled(*ml, Style::default().fg(EMERALD)),
+                Span::styled(*line, Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+        if all_lines.len() > max_lines {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(
+                    "  ... press l for full logs",
+                    Style::default().fg(Color::DarkGray),
+                ),
             ]));
         }
 
@@ -175,7 +209,6 @@ impl TuiApp {
     fn render_info(&self, f: &mut Frame<'_>, area: Rect) {
         let info = &self.startup_info;
 
-        // Route summary
         let mut route_parts = Vec::new();
         if info.page_count > 0 {
             route_parts.push(format!(
@@ -201,7 +234,6 @@ impl TuiApp {
         }
         let route_summary = route_parts.join(" · ");
 
-        // Feature flags
         let mut features = Vec::new();
         if info.has_tailwind {
             features.push("Tailwind CSS");
@@ -211,9 +243,11 @@ impl TuiApp {
         }
         let feature_line = features
             .iter()
-            .map(|f| format!("◇ {f}"))
+            .map(|feat| format!("◇ {feat}"))
             .collect::<Vec<_>>()
             .join(" · ");
+
+        let has_error = self.unresolved_error.is_some();
 
         let mut lines = vec![
             Line::from(vec![
@@ -223,19 +257,25 @@ impl TuiApp {
                 ),
                 Span::styled(&info.version, Style::default().fg(Color::DarkGray)),
             ]),
-            Line::from(vec![Span::styled(
-                format!("✓ Ready in {}ms", info.ready_ms),
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            )]),
+            if has_error {
+                Line::from(vec![Span::styled(
+                    "✕ Error",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                )])
+            } else {
+                Line::from(vec![Span::styled(
+                    format!("✓ Ready in {}ms", info.ready_ms),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                )])
+            },
             Line::from(vec![
                 Span::styled("➜ Local: ", Style::default().fg(Color::DarkGray)),
                 Span::styled(&info.url, Style::default().add_modifier(Modifier::BOLD)),
             ]),
         ];
 
-        // Route + feature line
         let mut route_spans = vec![Span::styled(
             &route_summary,
             Style::default().fg(Color::DarkGray),
@@ -287,9 +327,9 @@ impl TuiApp {
         let area = f.area();
 
         let chunks = Layout::vertical([
-            Constraint::Length(1), // filter bar
-            Constraint::Min(1),    // log list
-            Constraint::Length(1), // search bar / footer
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
         ])
         .split(area);
 
@@ -345,7 +385,6 @@ impl TuiApp {
         let entries = self.filtered_entries();
         let visible_height = area.height as usize;
 
-        // Calculate scroll position
         let scroll = if self.auto_scroll {
             entries.len().saturating_sub(visible_height)
         } else {
@@ -364,7 +403,6 @@ impl TuiApp {
                     Style::default().fg(color),
                 )];
 
-                // Highlight search matches
                 if !self.search_query.is_empty() {
                     let msg = &entry.message;
                     let query_lower = self.search_query.to_lowercase();
@@ -454,7 +492,6 @@ impl TuiApp {
             .collect()
     }
 
-    /// Handle a keyboard/terminal event. Returns `true` if the app should quit.
     fn handle_event(&mut self, event: Event) -> bool {
         match event {
             Event::Key(key) => self.handle_key(key),
@@ -463,12 +500,10 @@ impl TuiApp {
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> bool {
-        // Ctrl+C always quits
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             return true;
         }
 
-        // Search mode input
         if self.searching {
             return self.handle_search_key(key);
         }
@@ -523,7 +558,6 @@ impl TuiApp {
                 false
             }
             KeyCode::Char('n') => {
-                // Jump to next search match (scroll down)
                 if !self.search_query.is_empty() {
                     self.auto_scroll = false;
                     self.log_scroll = self.log_scroll.saturating_add(1);
@@ -531,14 +565,12 @@ impl TuiApp {
                 false
             }
             KeyCode::Char('N') => {
-                // Jump to previous search match (scroll up)
                 if !self.search_query.is_empty() {
                     self.auto_scroll = false;
                     self.log_scroll = self.log_scroll.saturating_sub(1);
                 }
                 false
             }
-            // Filter shortcuts
             KeyCode::Char('e') => {
                 self.log_filter = LogFilter::Error;
                 false
@@ -610,7 +642,6 @@ fn level_symbol(level: &Level) -> &'static str {
 pub async fn run_tui(log_buffer: LogBuffer, startup_info: StartupInfo) -> anyhow::Result<()> {
     let mut terminal = ratatui::init();
 
-    // Install panic hook that restores terminal
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         ratatui::restore();

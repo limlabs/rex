@@ -21,6 +21,9 @@ pub enum HmrMessage {
     Error {
         message: String,
         file: Option<String>,
+        /// Error origin: "build", "server", or "typescript".
+        #[serde(skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
     },
     #[serde(rename = "tsc-error")]
     TscError { errors: Vec<TscDiagnostic> },
@@ -76,6 +79,15 @@ impl HmrBroadcast {
         let _ = self.tx.send(HmrMessage::Error {
             message: message.to_string(),
             file: file.map(|s| s.to_string()),
+            kind: Some("build".to_string()),
+        });
+    }
+
+    pub fn send_server_error(&self, message: &str, file: Option<&str>) {
+        let _ = self.tx.send(HmrMessage::Error {
+            message: message.to_string(),
+            file: file.map(|s| s.to_string()),
+            kind: Some("server".to_string()),
         });
     }
 

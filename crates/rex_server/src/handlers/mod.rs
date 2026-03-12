@@ -45,6 +45,13 @@ pub(crate) fn dev_error_overlay(title: &str, message: &str, file: Option<&str>) 
         })
         .unwrap_or_default();
 
+    // Determine badge color based on title
+    let badge_bg = if title.contains("Runtime") || title.contains("Server") {
+        "#7c3aed"
+    } else {
+        "#e63946"
+    };
+
     format!(
         r#"<!DOCTYPE html>
 <html>
@@ -64,63 +71,31 @@ body {{
   justify-content: center;
   padding: 60px 20px;
 }}
-.container {{
-  max-width: 860px;
-  width: 100%;
+.container {{ max-width: 860px; width: 100%; }}
+.header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }}
+.origin {{
+  font-size: 11px; font-weight: 600; letter-spacing: .5px;
+  padding: 3px 8px; border-radius: 4px; text-transform: uppercase;
+  background: rgba(99,102,241,0.15); color: #818cf8;
 }}
 .badge {{
-  display: inline-block;
-  background: #e63946;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 4px 10px;
-  border-radius: 4px;
-  margin-bottom: 16px;
-}}
-h1 {{
-  font-size: 22px;
-  font-weight: 600;
-  color: #fff;
-  margin-bottom: 20px;
-  line-height: 1.4;
+  display: inline-block; background: {badge_bg}; color: #fff;
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.5px; padding: 4px 10px; border-radius: 4px;
 }}
 .file {{
-  color: #8892b0;
-  font-size: 13px;
-  margin-bottom: 16px;
-  padding: 8px 12px;
-  background: rgba(255,255,255,0.04);
-  border-radius: 6px;
-  border-left: 3px solid #e63946;
+  color: #8892b0; font-size: 13px; margin-bottom: 16px; padding: 8px 12px;
+  background: rgba(255,255,255,0.04); border-radius: 6px; border-left: 3px solid {badge_bg};
 }}
 .stack {{
-  background: #0d1117;
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 8px;
-  padding: 20px;
-  overflow-x: auto;
-  font-size: 13px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  color: #f0c674;
+  background: #0d1117; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;
+  padding: 20px; overflow-x: auto; font-size: 13px; line-height: 1.7;
+  white-space: pre-wrap; word-wrap: break-word; color: #f0c674;
 }}
-.hint {{
-  margin-top: 24px;
-  font-size: 12px;
-  color: #555;
-}}
+.hint {{ margin-top: 24px; font-size: 12px; color: #555; display: flex; align-items: center; }}
 .dot {{
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-right: 8px;
-  background: #e63946;
-  animation: pulse 2s infinite;
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 8px; background: #e63946; animation: pulse 2s infinite;
 }}
 .dot.connected {{ background: #2ecc71; animation: none; }}
 @keyframes pulse {{ 0%,100% {{ opacity: 1; }} 50% {{ opacity: 0.3; }} }}
@@ -128,7 +103,10 @@ h1 {{
 </head>
 <body>
 <div class="container">
-  <div class="badge">{title}</div>
+  <div class="header">
+    <span class="origin">Server</span>
+    <span class="badge">{title}</span>
+  </div>
   {file_section}
   <div class="stack">{escaped_message}</div>
   <div class="hint"><span class="dot" id="dot"></span><span id="status">Waiting for changes...</span></div>
