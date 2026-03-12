@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.0](https://github.com/limlabs/rex/compare/v0.16.0...v0.17.0) (2026-03-12)
+
+
+### Features
+
+* **v8:** Node.js builtin polyfills and TCP sockets for PayloadCMS ([#136](https://github.com/limlabs/rex/issues/136)) ([c5ab099](https://github.com/limlabs/rex/commit/c5ab099b1d91693671ab3bbbca2ea7d1d687d796))
+
+
+### Bug Fixes
+
+* **ci:** remove stale lockfile and avoid npx in smoke tests ([#175](https://github.com/limlabs/rex/issues/175)) ([4f908ac](https://github.com/limlabs/rex/commit/4f908acbf82b126cf2948c8fea35c8b55c5f0d9b))
+
 ## [0.16.0](https://github.com/limlabs/rex/compare/v0.15.2...v0.16.0) (2026-03-11)
 
 
