@@ -238,7 +238,7 @@ impl Rex {
         config: RexConfig,
         scan: ScanResult,
         pool: IsolatePool,
-        manifest: AssetManifest,
+        mut manifest: AssetManifest,
         build_id: String,
         static_dir: PathBuf,
         project_config: ProjectConfig,
@@ -277,7 +277,7 @@ impl Rex {
         // Automatic static optimization: pre-render eligible pages at startup.
         // In dev mode, skip pre-rendering so pages always reflect the latest code.
         let (prerendered, prerendered_app) = if !config.dev {
-            let pages = crate::prerender::prerender_static_pages(
+            let mut pages = crate::prerender::prerender_static_pages(
                 &pool,
                 &manifest,
                 &scan.routes,
@@ -285,6 +285,16 @@ impl Rex {
                 document_descriptor.as_ref(),
             )
             .await;
+            // Pre-render pages that export getStaticPaths
+            let static_path_pages = crate::prerender::prerender_static_path_pages(
+                &pool,
+                &mut manifest,
+                &scan.routes,
+                &manifest_json,
+                document_descriptor.as_ref(),
+            )
+            .await;
+            pages.extend(static_path_pages);
             let app =
                 crate::prerender::prerender_static_app_routes(&pool, &manifest, &manifest_json)
                     .await;

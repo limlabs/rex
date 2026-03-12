@@ -1,5 +1,5 @@
 use crate::client_manifest::ClientReferenceManifest;
-use crate::{DataStrategy, RenderMode};
+use crate::{DataStrategy, Fallback, RenderMode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -61,6 +61,12 @@ pub struct PageAssets {
     /// Whether this page is statically pre-rendered or server-rendered per request
     #[serde(default)]
     pub render_mode: RenderMode,
+    /// Whether this page exports `getStaticPaths` (dynamic routes only)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_static_paths: bool,
+    /// Fallback behaviour resolved from `getStaticPaths`
+    #[serde(default, skip_serializing_if = "Fallback::is_false")]
+    pub fallback: Fallback,
 }
 
 /// Assets for an app/ route (RSC).
@@ -110,6 +116,8 @@ impl AssetManifest {
                 css: Vec::new(),
                 data_strategy,
                 render_mode,
+                has_static_paths: false,
+                fallback: Fallback::default(),
             },
         );
     }
@@ -130,6 +138,8 @@ impl AssetManifest {
                 css: css_filenames.to_vec(),
                 data_strategy,
                 render_mode,
+                has_static_paths: false,
+                fallback: Fallback::default(),
             },
         );
     }

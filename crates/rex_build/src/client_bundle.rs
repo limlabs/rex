@@ -1,9 +1,8 @@
-use crate::build_utils::{
-    detect_data_strategy, find_route_for_chunk, route_to_chunk_name, runtime_client_dir,
-};
+use crate::build_utils::{find_route_for_chunk, route_to_chunk_name, runtime_client_dir};
 use crate::css_collect::collect_css_files;
 use crate::css_modules::CssModuleProcessing;
 use crate::manifest::AssetManifest;
+use crate::page_exports::{detect_data_strategy, detect_has_static_paths};
 use anyhow::Result;
 use rex_core::{ProjectConfig, RexConfig};
 use rex_router::ScanResult;
@@ -293,6 +292,14 @@ if (!window.__REX_NAVIGATING__) {{
                     );
                 } else {
                     manifest.add_page(&route.pattern, &filename, strategy, has_dynamic);
+                }
+                // Detect getStaticPaths on dynamic routes
+                let has_static_paths =
+                    has_dynamic && detect_has_static_paths(&route.abs_path).unwrap_or(false);
+                if has_static_paths {
+                    if let Some(page) = manifest.pages.get_mut(&route.pattern) {
+                        page.has_static_paths = true;
+                    }
                 }
             }
         }

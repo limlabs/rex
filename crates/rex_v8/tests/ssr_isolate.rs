@@ -267,6 +267,7 @@ fn test_gsp_sync() {
             "function Page(props) { return React.createElement('span', null, props.title); }",
         gssp: None,
         gsp: Some("function(ctx) { return { props: { title: 'from gsp' } }; }"),
+        gsp_paths: None,
     }]);
     let json = iso.get_static_props("page", r#"{"params":{}}"#).unwrap();
     let val: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -280,6 +281,7 @@ fn test_gsp_async() {
         component: "function Page() { return React.createElement('div'); }",
         gssp: None,
         gsp: Some("function(ctx) { return Promise.resolve({ props: { async: true } }); }"),
+        gsp_paths: None,
     }]);
     let json = iso.get_static_props("page", r#"{"params":{}}"#).unwrap();
     let val: serde_json::Value = serde_json::from_str(&json).unwrap();

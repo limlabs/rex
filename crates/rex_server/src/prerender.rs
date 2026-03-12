@@ -2,7 +2,7 @@ use crate::document::{
     assemble_body_tail, assemble_head_shell, assemble_rsc_document, extract_body_tag_attrs,
     extract_html_tag_attrs, DocumentDescriptor, RscDocumentParams,
 };
-use rex_core::{AppRouteAssets, AssetManifest, PageAssets, RenderMode, Route};
+use rex_core::{AppRouteAssets, AssetManifest, Fallback, PageAssets, RenderMode, Route};
 use rex_v8::IsolatePool;
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
@@ -325,235 +325,193 @@ fn assemble_static_html(
     format!("{shell}{tail}")
 }
 
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-    use rex_core::{AppRouteAssets, DataStrategy};
+/// Pre-render pages that export `getStaticPaths` — call getStaticPaths to discover
+/// concrete URL paths, then call getStaticProps + render for each one.
+///
+/// Returns a map of concrete URL path -> PrerenderedPage.
+/// Also mutates the manifest to store the resolved fallback for each page.
+pub async fn prerender_static_path_pages(
+    pool: &IsolatePool,
+    manifest: &mut AssetManifest,
+    routes: &[Route],
+    manifest_json: &str,
+    doc_descriptor: Option<&DocumentDescriptor>,
+) -> HashMap<String, PrerenderedPage> {
+    let mut prerendered = HashMap::new();
 
-    #[test]
-    fn parse_gsp_result_with_props() {
-        let json = r#"{"props":{"title":"Hello","count":42}}"#;
-        match parse_gsp_result(json) {
-            GspOutcome::Props(props) => {
-                let val: serde_json::Value = serde_json::from_str(&props).unwrap();
-                assert_eq!(val["title"], "Hello");
-                assert_eq!(val["count"], 42);
+    let route_by_pattern: HashMap<&str, &Route> =
+        routes.iter().map(|r| (r.pattern.as_str(), r)).collect();
+
+    // Collect pages that have getStaticPaths
+    let static_path_pages: Vec<(String, PageAssets)> = manifest
+        .pages
+        .iter()
+        .filter(|(_, assets)| assets.has_static_paths)
+        .map(|(pattern, assets)| (pattern.clone(), assets.clone()))
+        .collect();
+
+    for (pattern, assets) in &static_path_pages {
+        let route = match route_by_pattern.get(pattern.as_str()) {
+            Some(r) => *r,
+            None => {
+                warn!(pattern, "No route found for static-path page, skipping");
+                continue;
             }
-            other => panic!("Expected Props, got {other:?}"),
+        };
+        let route_key = route.module_name();
+
+        // Call getStaticPaths to get the list of paths + fallback
+        let key = route_key.clone();
+        let paths_json = match pool.execute(move |iso| iso.get_static_paths(&key)).await {
+            Ok(Ok(json)) => json,
+            Ok(Err(e)) => {
+                warn!(pattern, error = %e, "getStaticPaths failed, skipping");
+                continue;
+            }
+            Err(e) => {
+                warn!(pattern, error = %e, "Pool error during getStaticPaths");
+                continue;
+            }
+        };
+
+        let (param_sets, fallback) = match parse_static_paths_result(&paths_json) {
+            Some(r) => r,
+            None => {
+                warn!(pattern, "Failed to parse getStaticPaths result, skipping");
+                continue;
+            }
+        };
+
+        // Store fallback in manifest
+        if let Some(page) = manifest.pages.get_mut(pattern) {
+            page.fallback = fallback;
+        }
+
+        debug!(
+            pattern,
+            paths = param_sets.len(),
+            ?fallback,
+            "getStaticPaths resolved"
+        );
+
+        // For each set of params, build the concrete URL path, call GSP, and render
+        for params in &param_sets {
+            let concrete_path = params_to_path(pattern, params);
+
+            // Call getStaticProps with these params
+            let key = route_key.clone();
+            let ctx = serde_json::json!({ "params": params }).to_string();
+            let props_json = match pool
+                .execute(move |iso| iso.get_static_props(&key, &ctx))
+                .await
+            {
+                Ok(Ok(json)) => match parse_gsp_result(&json) {
+                    GspOutcome::Props(props) => props,
+                    GspOutcome::Redirect { destination } => {
+                        debug!(
+                            concrete_path,
+                            destination, "getStaticProps returned redirect, skipping"
+                        );
+                        continue;
+                    }
+                    GspOutcome::NotFound => {
+                        debug!(concrete_path, "getStaticProps returned notFound, skipping");
+                        continue;
+                    }
+                },
+                Ok(Err(e)) => {
+                    warn!(concrete_path, error = %e, "getStaticProps failed, skipping");
+                    continue;
+                }
+                Err(e) => {
+                    warn!(concrete_path, error = %e, "Pool error during getStaticProps");
+                    continue;
+                }
+            };
+
+            // Render the page via V8
+            let key = route_key.clone();
+            let props = props_json.clone();
+            let render_result = match pool.execute(move |iso| iso.render_page(&key, &props)).await {
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => {
+                    warn!(concrete_path, error = %e, "SSR render failed, skipping");
+                    continue;
+                }
+                Err(e) => {
+                    warn!(concrete_path, error = %e, "Pool error during render");
+                    continue;
+                }
+            };
+
+            let html = assemble_static_html(
+                &render_result,
+                assets,
+                manifest,
+                &props_json,
+                manifest_json,
+                doc_descriptor,
+            );
+            debug!(
+                concrete_path,
+                bytes = html.len(),
+                "Pre-rendered static path page"
+            );
+            prerendered.insert(concrete_path, PrerenderedPage { html, props_json });
         }
     }
 
-    #[test]
-    fn parse_gsp_result_missing_props_key() {
-        assert_eq!(
-            parse_gsp_result(r#"{"data":"something"}"#),
-            GspOutcome::Props("{}".to_string())
+    if !prerendered.is_empty() {
+        info!(
+            count = prerendered.len(),
+            "Static path pages pre-rendered (getStaticPaths)"
         );
     }
 
-    #[test]
-    fn parse_gsp_result_invalid_json() {
-        assert_eq!(
-            parse_gsp_result("not json"),
-            GspOutcome::Props("{}".to_string())
-        );
-    }
-
-    #[test]
-    fn parse_gsp_result_empty_props() {
-        assert_eq!(
-            parse_gsp_result(r#"{"props":{}}"#),
-            GspOutcome::Props("{}".to_string())
-        );
-    }
-
-    #[test]
-    fn parse_gsp_result_redirect() {
-        let json = r#"{"redirect":{"destination":"/login","permanent":false}}"#;
-        assert_eq!(
-            parse_gsp_result(json),
-            GspOutcome::Redirect {
-                destination: "/login".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn parse_gsp_result_redirect_default_destination() {
-        let json = r#"{"redirect":{}}"#;
-        assert_eq!(
-            parse_gsp_result(json),
-            GspOutcome::Redirect {
-                destination: "/".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn parse_gsp_result_not_found() {
-        let json = r#"{"notFound":true}"#;
-        assert_eq!(parse_gsp_result(json), GspOutcome::NotFound);
-    }
-
-    #[test]
-    fn parse_gsp_result_not_found_false_returns_empty_props() {
-        let json = r#"{"notFound":false}"#;
-        assert_eq!(parse_gsp_result(json), GspOutcome::Props("{}".to_string()));
-    }
-
-    #[test]
-    fn collect_static_pages_filters_correctly() {
-        let mut manifest = AssetManifest::new("test".into());
-        manifest.add_page("/", "index.js", DataStrategy::None, false);
-        manifest.add_page("/about", "about.js", DataStrategy::None, false);
-        manifest.add_page("/dash", "dash.js", DataStrategy::GetServerSideProps, false);
-        manifest.add_page("/blog/:slug", "slug.js", DataStrategy::None, true);
-
-        let static_pages = collect_static_pages(&manifest);
-        let patterns: Vec<&str> = static_pages
-            .iter()
-            .map(|(p, _): &(String, PageAssets)| p.as_str())
-            .collect();
-
-        assert_eq!(static_pages.len(), 2);
-        assert!(patterns.contains(&"/"));
-        assert!(patterns.contains(&"/about"));
-    }
-
-    #[test]
-    fn collect_static_pages_empty_manifest() {
-        let manifest = AssetManifest::new("test".into());
-        assert!(collect_static_pages(&manifest).is_empty());
-    }
-
-    #[test]
-    fn collect_static_pages_all_server_rendered() {
-        let mut manifest = AssetManifest::new("test".into());
-        manifest.add_page("/", "index.js", DataStrategy::GetServerSideProps, false);
-        manifest.add_page("/blog/:slug", "slug.js", DataStrategy::None, true);
-        assert!(collect_static_pages(&manifest).is_empty());
-    }
-
-    #[test]
-    fn assemble_static_html_produces_valid_document() {
-        let render_result = rex_v8::RenderResult {
-            body: "<div>Hello</div>".to_string(),
-            head: "<title>Test</title>".to_string(),
-        };
-        let mut manifest = AssetManifest::new("build123".into());
-        manifest.add_page("/", "index.js", DataStrategy::None, false);
-        let assets = manifest.pages.get("/").unwrap();
-        let manifest_json = serde_json::to_string(&manifest).unwrap();
-
-        let html = assemble_static_html(
-            &render_result,
-            assets,
-            &manifest,
-            "{}",
-            &manifest_json,
-            None,
-        );
-
-        assert!(html.contains("<!DOCTYPE html>"));
-        assert!(html.contains("<div>Hello</div>"));
-        assert!(html.contains("<title>Test</title>"));
-        assert!(html.contains("index.js"));
-    }
-
-    #[test]
-    fn assemble_static_html_includes_css() {
-        let render_result = rex_v8::RenderResult {
-            body: "<p>Styled</p>".to_string(),
-            head: String::new(),
-        };
-        let mut manifest = AssetManifest::new("test".into());
-        manifest.add_page_with_css(
-            "/styled",
-            "styled.js",
-            &["page.css".into()],
-            DataStrategy::None,
-            false,
-        );
-        manifest.global_css = vec!["global.css".into()];
-        let assets = manifest.pages.get("/styled").unwrap();
-        let manifest_json = serde_json::to_string(&manifest).unwrap();
-
-        let html = assemble_static_html(
-            &render_result,
-            assets,
-            &manifest,
-            "{}",
-            &manifest_json,
-            None,
-        );
-
-        assert!(html.contains("global.css"));
-        assert!(html.contains("page.css"));
-        assert!(html.contains("<p>Styled</p>"));
-    }
-
-    #[test]
-    fn collect_static_app_routes_filters_correctly() {
-        let mut manifest = AssetManifest::new("test".into());
-        manifest.app_routes.insert(
-            "/".to_string(),
-            AppRouteAssets {
-                client_chunks: vec!["chunk.js".into()],
-                layout_chain: vec![],
-                render_mode: RenderMode::Static,
-            },
-        );
-        manifest.app_routes.insert(
-            "/about".to_string(),
-            AppRouteAssets {
-                client_chunks: vec!["chunk.js".into()],
-                layout_chain: vec![],
-                render_mode: RenderMode::Static,
-            },
-        );
-        manifest.app_routes.insert(
-            "/blog/:slug".to_string(),
-            AppRouteAssets {
-                client_chunks: vec!["chunk.js".into()],
-                layout_chain: vec![],
-                render_mode: RenderMode::ServerRendered,
-            },
-        );
-        manifest.app_routes.insert(
-            "/dashboard".to_string(),
-            AppRouteAssets {
-                client_chunks: vec!["chunk.js".into()],
-                layout_chain: vec![],
-                render_mode: RenderMode::ServerRendered,
-            },
-        );
-
-        let static_routes = collect_static_app_routes(&manifest);
-        let patterns: Vec<&str> = static_routes.iter().map(|(p, _)| p.as_str()).collect();
-
-        assert_eq!(static_routes.len(), 2);
-        assert!(patterns.contains(&"/"));
-        assert!(patterns.contains(&"/about"));
-    }
-
-    #[test]
-    fn collect_static_app_routes_empty_manifest() {
-        let manifest = AssetManifest::new("test".into());
-        assert!(collect_static_app_routes(&manifest).is_empty());
-    }
-
-    #[test]
-    fn collect_static_app_routes_all_server_rendered() {
-        let mut manifest = AssetManifest::new("test".into());
-        manifest.app_routes.insert(
-            "/".to_string(),
-            AppRouteAssets {
-                client_chunks: vec![],
-                layout_chain: vec![],
-                render_mode: RenderMode::ServerRendered,
-            },
-        );
-        assert!(collect_static_app_routes(&manifest).is_empty());
-    }
+    prerendered
 }
+
+/// Parse the JSON result from getStaticPaths.
+///
+/// Expected shape: `{ paths: [{ params: { id: "1" } }, ...], fallback: false | "blocking" }`
+pub(crate) fn parse_static_paths_result(
+    json: &str,
+) -> Option<(Vec<HashMap<String, serde_json::Value>>, Fallback)> {
+    let val: serde_json::Value = serde_json::from_str(json).ok()?;
+
+    let paths = val.get("paths")?.as_array()?;
+    let mut param_sets = Vec::new();
+    for path_entry in paths {
+        let params_val = path_entry.get("params")?;
+        let params: HashMap<String, serde_json::Value> =
+            serde_json::from_value(params_val.clone()).ok()?;
+        param_sets.push(params);
+    }
+
+    let fallback = match val.get("fallback") {
+        Some(serde_json::Value::Bool(false)) | None => Fallback::False,
+        Some(serde_json::Value::String(s)) if s == "blocking" => Fallback::Blocking,
+        _ => Fallback::False,
+    };
+
+    Some((param_sets, fallback))
+}
+
+/// Convert a route pattern + params to a concrete URL path.
+///
+/// Example: pattern = "/posts/:id", params = {"id": "first"} -> "/posts/first"
+pub(crate) fn params_to_path(pattern: &str, params: &HashMap<String, serde_json::Value>) -> String {
+    let mut path = pattern.to_string();
+    for (key, value) in params {
+        let value_str = match value {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string().trim_matches('"').to_string(),
+        };
+        path = path.replace(&format!(":{key}"), &value_str);
+    }
+    path
+}
+
+#[cfg(test)]
+#[path = "prerender_tests.rs"]
+mod tests;

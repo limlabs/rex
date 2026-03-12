@@ -2,7 +2,7 @@ use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use rex_core::{DataStrategy, ServerSidePropsContext};
+use rex_core::{DataStrategy, Fallback, ServerSidePropsContext};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::error;
@@ -30,6 +30,26 @@ pub async fn data_handler(
         Some(m) => m,
         None => return StatusCode::NOT_FOUND.into_response(),
     };
+
+    // Serve pre-rendered data for static path pages
+    if let Some(page) = hot
+        .prerendered
+        .get(&path)
+        .or_else(|| hot.prerendered.get(&route_match.route.pattern))
+    {
+        return Response::builder()
+            .header("Content-Type", "application/json")
+            .body(Body::from(format!(r#"{{"props":{}}}"#, page.props_json)))
+            .expect("response build");
+    }
+
+    // If this is a getStaticPaths page with fallback: false, return 404
+    if let Some(page_assets) = hot.manifest.pages.get(&route_match.route.pattern) {
+        if page_assets.has_static_paths && page_assets.fallback == Fallback::False {
+            return StatusCode::NOT_FOUND.into_response();
+        }
+        // fallback: "blocking" — continue to SSR below
+    }
 
     let route_key = route_match.route.module_name();
     let params = route_match.params.clone();

@@ -16,6 +16,7 @@ pub(crate) mod css_modules;
 pub(crate) mod font;
 pub(crate) mod font_google;
 pub(crate) mod mdx;
+pub(crate) mod page_exports;
 pub mod server_bundle;
 pub mod tailwind;
 pub mod tailwind_optimize;

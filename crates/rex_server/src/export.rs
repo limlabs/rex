@@ -53,7 +53,7 @@ pub fn validate_exportability(
                 }
             }
             _ => {
-                if assets.render_mode == RenderMode::ServerRendered {
+                if assets.render_mode == RenderMode::ServerRendered && !assets.has_static_paths {
                     let msg = format!("Route {pattern} has dynamic segments (cannot pre-render)");
                     if force {
                         warnings.push(msg);

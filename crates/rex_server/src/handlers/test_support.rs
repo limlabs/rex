@@ -149,6 +149,31 @@ globalThis.__rex_resolve_gsp = function() {
     if (globalThis.__rex_gsp_resolved !== null) return JSON.stringify(globalThis.__rex_gsp_resolved);
     throw new Error('GSP promise did not resolve');
 };
+
+globalThis.__rex_gsp_paths_resolved = null;
+globalThis.__rex_gsp_paths_rejected = null;
+
+globalThis.__rex_get_static_paths = function(routeKey) {
+    var page = globalThis.__rex_pages[routeKey];
+    if (!page || !page.getStaticPaths) return JSON.stringify({ paths: [], fallback: false });
+    var result = page.getStaticPaths();
+    if (result && typeof result.then === 'function') {
+        globalThis.__rex_gsp_paths_resolved = null;
+        globalThis.__rex_gsp_paths_rejected = null;
+        result.then(
+            function(v) { globalThis.__rex_gsp_paths_resolved = v; },
+            function(e) { globalThis.__rex_gsp_paths_rejected = e; }
+        );
+        return '__REX_GSP_PATHS_ASYNC__';
+    }
+    return JSON.stringify(result);
+};
+
+globalThis.__rex_resolve_static_paths = function() {
+    if (globalThis.__rex_gsp_paths_rejected) throw globalThis.__rex_gsp_paths_rejected;
+    if (globalThis.__rex_gsp_paths_resolved !== null) return JSON.stringify(globalThis.__rex_gsp_paths_resolved);
+    throw new Error('getStaticPaths promise did not resolve');
+};
 "#,
     );
     bundle
