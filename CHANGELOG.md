@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/limlabs/rex/compare/v0.16.0...v0.16.1) (2026-03-12)
+
+
+### Bug Fixes
+
+* **ci:** remove stale lockfile and avoid npx in smoke tests ([#175](https://github.com/limlabs/rex/issues/175)) ([4f908ac](https://github.com/limlabs/rex/commit/4f908acbf82b126cf2948c8fea35c8b55c5f0d9b))
+
 ## [0.16.0](https://github.com/limlabs/rex/compare/v0.15.2...v0.16.0) (2026-03-11)
 
 
