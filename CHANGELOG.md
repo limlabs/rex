@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.1](https://github.com/limlabs/rex/compare/v0.17.0...v0.17.1) (2026-03-12)
+
+
+### Bug Fixes
+
+* **dev:** trigger hot reload for imported files outside pages/app ([#180](https://github.com/limlabs/rex/issues/180)) ([5e192bf](https://github.com/limlabs/rex/commit/5e192bf12c845e4c0969f4c66b7be75242bcbbb1))
+* embed @types/react for zero-config TypeScript support ([#181](https://github.com/limlabs/rex/issues/181)) ([f41d788](https://github.com/limlabs/rex/commit/f41d7884d06bced9143def82ecff85bf76e58453))
+
 ## [0.17.0](https://github.com/limlabs/rex/compare/v0.16.0...v0.17.0) (2026-03-12)
 
 
