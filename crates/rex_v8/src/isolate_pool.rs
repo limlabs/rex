@@ -1,10 +1,18 @@
 use anyhow::Result;
 use crossbeam_channel::{bounded, Sender};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
 use tracing::{debug, error, warn};
 
 type WorkItem = Box<dyn FnOnce(&mut crate::SsrIsolate) + Send + 'static>;
+
+/// Shared state for lazy V8 reload: a new bundle is staged here and each
+/// isolate thread picks it up before its next work item.
+struct PendingReload {
+    generation: AtomicU64,
+    bundle: RwLock<Arc<String>>,
+}
 
 /// A pool of V8 isolates, each pinned to its own OS thread.
 /// Work is dispatched via channels and results returned via oneshot.
@@ -14,8 +22,9 @@ type WorkItem = Box<dyn FnOnce(&mut crate::SsrIsolate) + Send + 'static>;
 pub struct IsolatePool {
     senders: Vec<Option<Sender<WorkItem>>>,
     threads: Vec<Option<JoinHandle<()>>>,
-    next: std::sync::atomic::AtomicUsize,
+    next: AtomicUsize,
     size: usize,
+    pending: Arc<PendingReload>,
 }
 
 impl IsolatePool {
@@ -30,10 +39,16 @@ impl IsolatePool {
         let mut senders = Vec::with_capacity(size);
         let mut threads = Vec::with_capacity(size);
 
+        let pending = Arc::new(PendingReload {
+            generation: AtomicU64::new(0),
+            bundle: RwLock::new(server_bundle_js.clone()),
+        });
+
         for i in 0..size {
             let (tx, rx) = bounded::<WorkItem>(64);
             let bundle_js = server_bundle_js.clone();
             let root = project_root.clone();
+            let pending = Arc::clone(&pending);
 
             let handle = thread::Builder::new()
                 .name(format!("rex-v8-isolate-{i}"))
@@ -55,7 +70,24 @@ impl IsolatePool {
 
                     debug!("V8 isolate {i} ready");
 
+                    let mut local_generation = 0u64;
+
                     while let Ok(work) = rx.recv() {
+                        // Lazy reload: pick up pending bundle before processing work
+                        let current_gen = pending.generation.load(Ordering::Acquire);
+                        if current_gen > local_generation {
+                            let new_bundle = pending
+                                .bundle
+                                .read()
+                                .expect("PendingReload lock poisoned")
+                                .clone();
+                            if let Err(e) = isolate.reload(&new_bundle) {
+                                error!("V8 isolate {i} lazy reload failed: {e:#}");
+                                // Bump generation to avoid retry loop — isolate auto-restores last_bundle
+                            }
+                            local_generation = current_gen;
+                        }
+
                         work(&mut isolate);
                     }
 
@@ -71,8 +103,9 @@ impl IsolatePool {
         Ok(Self {
             senders,
             threads,
-            next: std::sync::atomic::AtomicUsize::new(0),
+            next: AtomicUsize::new(0),
             size,
+            pending,
         })
     }
 
@@ -90,7 +123,7 @@ impl IsolatePool {
         });
 
         // Round-robin dispatch
-        let idx = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % self.size;
+        let idx = self.next.fetch_add(1, Ordering::Relaxed) % self.size;
 
         self.senders[idx]
             .as_ref()
@@ -100,6 +133,18 @@ impl IsolatePool {
 
         rx.await
             .map_err(|_| anyhow::anyhow!("V8 isolate dropped the response"))
+    }
+
+    /// Stage a new bundle for lazy reload. Each isolate thread will pick it up
+    /// before processing its next work item — no synchronous reload wait.
+    pub fn mark_stale(&self, new_bundle: Arc<String>) {
+        *self
+            .pending
+            .bundle
+            .write()
+            .expect("PendingReload lock poisoned") = new_bundle;
+        self.pending.generation.fetch_add(1, Ordering::Release);
+        debug!("V8 isolates marked stale (lazy reload pending)");
     }
 
     /// Reload all isolates with a new server bundle
