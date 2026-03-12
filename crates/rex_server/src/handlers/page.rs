@@ -655,5 +655,9 @@ pub(super) async fn handle_app_route_handler(
 mod tests;
 
 #[cfg(test)]
+#[path = "page_gsp_tests.rs"]
+mod gsp_tests;
+
+#[cfg(test)]
 #[path = "app_route_tests.rs"]
 mod app_route_tests;

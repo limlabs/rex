@@ -114,7 +114,7 @@ mod tests {
     use crate::handlers::test_support::*;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use rex_core::DynamicSegment;
+    use rex_core::{DataStrategy, DynamicSegment, Fallback};
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -257,5 +257,136 @@ mod tests {
         let json = body_string(resp.into_body()).await;
         let val: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(val["props"]["id"], "42");
+    }
+
+    #[tokio::test]
+    async fn test_data_handler_prerendered_static_path() {
+        let app = TestAppBuilder::new()
+            .routes(
+                vec![make_route(
+                    "/posts/:id",
+                    "posts/[id].tsx",
+                    vec![DynamicSegment::Single("id".into())],
+                )],
+                vec![(
+                    "posts/[id]",
+                    "function Post(props) { return React.createElement('p', null, props.id); }",
+                    None,
+                )],
+            )
+            .static_paths_page("/posts/:id", Fallback::False)
+            .prerendered(
+                "/posts/first",
+                "<html><body>first</body></html>",
+                r#"{"id":"first"}"#,
+            )
+            .build();
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/data/test-build-id/posts/first.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_string(resp.into_body()).await;
+        let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(val["props"]["id"], "first");
+    }
+
+    #[tokio::test]
+    async fn test_data_handler_static_paths_fallback_false_404() {
+        let app = TestAppBuilder::new()
+            .routes(
+                vec![make_route(
+                    "/posts/:id",
+                    "posts/[id].tsx",
+                    vec![DynamicSegment::Single("id".into())],
+                )],
+                vec![(
+                    "posts/[id]",
+                    "function Post(props) { return React.createElement('p', null, props.id); }",
+                    None,
+                )],
+            )
+            .static_paths_page("/posts/:id", Fallback::False)
+            .build();
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/data/test-build-id/posts/unknown.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_data_handler_static_paths_fallback_blocking_ssrs() {
+        let app = TestAppBuilder::new()
+            .routes(
+                vec![make_route(
+                    "/posts/:id",
+                    "posts/[id].tsx",
+                    vec![DynamicSegment::Single("id".into())],
+                )],
+                vec![(
+                    "posts/[id]",
+                    "function Post(props) { return React.createElement('p', null, props.id); }",
+                    Some("function(ctx) { return { props: { id: ctx.params.id } }; }"),
+                )],
+            )
+            .static_paths_page("/posts/:id", Fallback::Blocking)
+            .build();
+
+        // Not pre-rendered but fallback: blocking — should SSR via GSSP
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/data/test-build-id/posts/new-post.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_string(resp.into_body()).await;
+        let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(val["props"]["id"], "new-post");
+    }
+
+    #[tokio::test]
+    async fn test_data_handler_get_static_props() {
+        let app = TestAppBuilder::new()
+            .routes(
+                vec![make_route("/info", "info.tsx", vec![])],
+                vec![(
+                    "info",
+                    "function Info() { return React.createElement('div'); }",
+                    Some("GSP:function(ctx) { return { props: { source: 'gsp' } }; }"),
+                )],
+            )
+            .page_strategy("/info", DataStrategy::GetStaticProps)
+            .build();
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/data/test-build-id/info.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_string(resp.into_body()).await;
+        let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(val["props"]["source"], "gsp");
     }
 }

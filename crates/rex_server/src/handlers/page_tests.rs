@@ -598,3 +598,5 @@ async fn test_dev_mode_gssp_error_shows_overlay() {
         "dev overlay should show error message: {html}"
     );
 }
+
+// getStaticPaths and getStaticProps tests are in page_gsp_tests.rs
