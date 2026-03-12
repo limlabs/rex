@@ -32,6 +32,9 @@ RUN cargo fetch
 # Copy runtime/ (needed by include_str! in rex_server)
 COPY runtime/ runtime/
 
+# Copy Rex package source (type stubs embedded by rex_build's build.rs)
+COPY packages/rex/src/ packages/rex/src/
+
 # Copy full source and build two binaries:
 #   1. rex-builder: includes `build` feature for `rex build` (used in app-build stage)
 #   2. rex:         runtime-only, no bundler/linter/dev (ships in final image)

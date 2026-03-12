@@ -561,6 +561,30 @@ fn cmd_init(name: String) -> Result<()> {
         "node_modules\n.rex\n.DS_Store\n",
     )?;
 
+    // tsconfig.json — enables TypeScript and IDE support.
+    // Rex extracts @types/react and @limlabs/rex into node_modules on first run.
+    std::fs::write(
+        project_dir.join("tsconfig.json"),
+        r#"{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "paths": {
+      "rex/*": ["./node_modules/@limlabs/rex/src/*"]
+    }
+  },
+  "include": ["pages/**/*"]
+}
+"#,
+    )?;
+
     // pages/index.tsx
     std::fs::write(
         project_dir.join("pages/index.tsx"),
