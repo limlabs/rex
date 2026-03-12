@@ -247,7 +247,7 @@ impl Rex {
     ) -> Result<Self> {
         let trie = RouteTrie::from_routes(&scan.routes);
         let api_trie = RouteTrie::from_routes(&scan.api_routes);
-        let manifest_json = HotState::compute_manifest_json(&build_id, &manifest);
+        let mut manifest_json = HotState::compute_manifest_json(&build_id, &manifest);
 
         // Build app route trie from app scan if present
         let app_route_trie = scan.app_scan.as_ref().map(|app| {
@@ -285,7 +285,7 @@ impl Rex {
                 document_descriptor.as_ref(),
             )
             .await;
-            // Pre-render pages that export getStaticPaths
+            // Pre-render pages that export getStaticPaths (mutates manifest with fallback values)
             let static_path_pages = crate::prerender::prerender_static_path_pages(
                 &pool,
                 &mut manifest,
@@ -295,6 +295,8 @@ impl Rex {
             )
             .await;
             pages.extend(static_path_pages);
+            // Recompute manifest_json after getStaticPaths may have updated fallback values
+            manifest_json = HotState::compute_manifest_json(&build_id, &manifest);
             let app =
                 crate::prerender::prerender_static_app_routes(&pool, &manifest, &manifest_json)
                     .await;

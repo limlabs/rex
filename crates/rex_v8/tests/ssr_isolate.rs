@@ -447,6 +447,74 @@ fn test_process_env_is_writable() {
 }
 
 #[test]
+fn test_get_static_paths_sync() {
+    let mut iso = make_isolate_ext(&[TestPage {
+        key: "posts/[id]",
+        component: "function Page(props) { return React.createElement('p', null, props.id); }",
+        gssp: None,
+        gsp: None,
+        gsp_paths: Some(
+            r#"function() { return { paths: [{ params: { id: "first" } }, { params: { id: "second" } }], fallback: false }; }"#,
+        ),
+    }]);
+    let json = iso.get_static_paths("posts/[id]").unwrap();
+    let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(val["paths"].as_array().unwrap().len(), 2);
+    assert_eq!(val["paths"][0]["params"]["id"], "first");
+    assert_eq!(val["paths"][1]["params"]["id"], "second");
+    assert_eq!(val["fallback"], false);
+}
+
+#[test]
+fn test_get_static_paths_async() {
+    let mut iso = make_isolate_ext(&[TestPage {
+        key: "posts/[id]",
+        component: "function Page() { return React.createElement('div'); }",
+        gssp: None,
+        gsp: None,
+        gsp_paths: Some(
+            r#"function() { return Promise.resolve({ paths: [{ params: { id: "async-post" } }], fallback: "blocking" }); }"#,
+        ),
+    }]);
+    let json = iso.get_static_paths("posts/[id]").unwrap();
+    let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(val["paths"].as_array().unwrap().len(), 1);
+    assert_eq!(val["paths"][0]["params"]["id"], "async-post");
+    assert_eq!(val["fallback"], "blocking");
+}
+
+#[test]
+fn test_get_static_paths_no_export() {
+    let mut iso = make_isolate_ext(&[TestPage {
+        key: "page",
+        component: "function Page() { return React.createElement('div'); }",
+        gssp: None,
+        gsp: None,
+        gsp_paths: None,
+    }]);
+    let json = iso.get_static_paths("page").unwrap();
+    let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert!(val["paths"].as_array().unwrap().is_empty());
+    assert_eq!(val["fallback"], false);
+}
+
+#[test]
+fn test_get_static_paths_throws() {
+    let mut iso = make_isolate_ext(&[TestPage {
+        key: "bad",
+        component: "function Page() { return React.createElement('div'); }",
+        gssp: None,
+        gsp: None,
+        gsp_paths: Some("function() { throw new Error('paths failed'); }"),
+    }]);
+    let err = iso.get_static_paths("bad").unwrap_err();
+    assert!(
+        err.to_string().contains("paths failed"),
+        "expected 'paths failed', got: {err}"
+    );
+}
+
+#[test]
 fn test_console_log_emits_tracing_event() {
     use std::sync::{Arc, Mutex};
     use tracing_subscriber::layer::SubscriberExt;

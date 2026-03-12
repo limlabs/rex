@@ -290,3 +290,49 @@ fn parse_gsp_result_not_found_false_returns_empty_props() {
     let json = r#"{"notFound":false}"#;
     assert_eq!(parse_gsp_result(json), GspOutcome::Props("{}".to_string()));
 }
+
+#[test]
+fn params_to_path_catch_all_array() {
+    let mut params = HashMap::new();
+    params.insert("slug".to_string(), serde_json::json!(["2020", "01", "01"]));
+    assert_eq!(
+        params_to_path("/archive/:slug*", &params),
+        "/archive/2020/01/01"
+    );
+}
+
+#[test]
+fn params_to_path_numeric() {
+    let mut params = HashMap::new();
+    params.insert("id".to_string(), serde_json::json!(42));
+    assert_eq!(params_to_path("/items/:id", &params), "/items/42");
+}
+
+#[test]
+fn parse_static_paths_fallback_true_treated_as_blocking() {
+    let json = r#"{"paths":[{"params":{"id":"1"}}],"fallback":true}"#;
+    let (params, fallback) = parse_static_paths_result(json).unwrap();
+    assert_eq!(params.len(), 1);
+    assert_eq!(fallback, Fallback::Blocking);
+}
+
+#[test]
+fn parse_static_paths_unknown_fallback_defaults_to_false() {
+    let json = r#"{"paths":[],"fallback":"unknown"}"#;
+    let (_, fallback) = parse_static_paths_result(json).unwrap();
+    assert_eq!(fallback, Fallback::False);
+}
+
+#[test]
+fn params_to_path_catch_all_empty_array() {
+    let mut params = HashMap::new();
+    params.insert("slug".to_string(), serde_json::json!([]));
+    assert_eq!(params_to_path("/docs/:slug*", &params), "/docs/");
+}
+
+#[test]
+fn parse_static_paths_string_paths() {
+    // Some users pass string paths instead of { params } objects — should fail gracefully
+    let json = r#"{"paths":["/blog/a"],"fallback":false}"#;
+    assert!(parse_static_paths_result(json).is_none());
+}

@@ -491,6 +491,10 @@ pub(crate) fn parse_static_paths_result(
     let fallback = match val.get("fallback") {
         Some(serde_json::Value::Bool(false)) | None => Fallback::False,
         Some(serde_json::Value::String(s)) if s == "blocking" => Fallback::Blocking,
+        Some(serde_json::Value::Bool(true)) => {
+            warn!("fallback: true is not yet supported; treating as blocking");
+            Fallback::Blocking
+        }
         _ => Fallback::False,
     };
 
@@ -505,9 +509,19 @@ pub(crate) fn params_to_path(pattern: &str, params: &HashMap<String, serde_json:
     for (key, value) in params {
         let value_str = match value {
             serde_json::Value::String(s) => s.clone(),
-            other => other.to_string().trim_matches('"').to_string(),
+            // Array params for catch-all routes: ["2020", "01", "01"] -> "2020/01/01"
+            serde_json::Value::Array(arr) => arr
+                .iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join("/"),
+            serde_json::Value::Number(n) => n.to_string(),
+            _ => value.to_string(),
         };
-        path = path.replace(&format!(":{key}"), &value_str);
+        // Handle both :param and :param* (catch-all) patterns
+        path = path
+            .replace(&format!(":{key}*"), &value_str)
+            .replace(&format!(":{key}"), &value_str);
     }
     path
 }
