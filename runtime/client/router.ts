@@ -51,6 +51,26 @@
     popstate?: boolean;
   }
 
+  // --- Base path ---
+
+  const basePath = ((window.__REX_BASE_PATH || "") as string).replace(/\/+$/, "");
+
+  // Strip the base path prefix and any trailing slash from a browser pathname
+  // so it can be matched against manifest route patterns (which never include
+  // the base path).  e.g. "/rex/features/routing/" → "/features/routing"
+  function stripBasePath(pathname: string): string {
+    let p = pathname;
+    if (basePath && p.startsWith(basePath)) {
+      p = p.slice(basePath.length) || "/";
+    }
+    // Normalise trailing slash (GitHub Pages redirects to trailing slash for
+    // directory/index.html files)
+    if (p.length > 1 && p.endsWith("/")) {
+      p = p.slice(0, -1);
+    }
+    return p;
+  }
+
   // --- Query string parsing ---
 
   function parseQuery(search: string): Record<string, string> {
@@ -109,19 +129,20 @@
 
   // --- Router state ---
 
+  const initialPathname = stripBasePath(window.location.pathname);
   const initialMatch =
-    matchRoute(window.location.pathname) ||
-    matchAppRoute(window.location.pathname);
+    matchRoute(initialPathname) ||
+    matchAppRoute(initialPathname);
   const initialQuery = parseQuery(window.location.search);
   if (initialMatch) {
     for (const k in initialMatch.params) initialQuery[k] = initialMatch.params[k];
   }
 
   const state: RexRouterState = {
-    pathname: initialMatch ? initialMatch.pattern : window.location.pathname,
+    pathname: initialMatch ? initialMatch.pattern : initialPathname,
     asPath: window.location.pathname + window.location.search,
     query: initialQuery,
-    route: initialMatch ? initialMatch.pattern : window.location.pathname,
+    route: initialMatch ? initialMatch.pattern : initialPathname,
   };
 
   function updateState(match: RouteMatch | null, url: string): void {
@@ -228,8 +249,9 @@
 
     const a = document.createElement("a");
     a.href = url;
-    const pathname = a.pathname;
-    const fullUrl = a.pathname + a.search;
+    const rawPathname = a.pathname;
+    const pathname = stripBasePath(rawPathname);
+    const fullUrl = rawPathname + a.search;
 
     const match = matchRoute(pathname);
     if (!match) {
@@ -342,7 +364,7 @@
     prefetch: function (url: string) {
       const a = document.createElement("a");
       a.href = url;
-      const pathname = a.pathname;
+      const pathname = stripBasePath(a.pathname);
       if (matchRoute(pathname)) {
         if (!prefetchCache[pathname]) {
           prefetchCache[pathname] = fetchPageData(pathname);

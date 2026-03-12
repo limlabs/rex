@@ -332,14 +332,19 @@ async fn export_404_page(
     }
 }
 
-/// Convert a route pattern like "/about" to a file path like "output/about.html".
+/// Convert a route pattern like "/about" to a file path like "output/about/index.html".
+///
+/// Uses the `directory/index.html` convention for all non-root routes.  This is
+/// critical for static hosts (GitHub Pages, S3, Cloudflare Pages) which redirect
+/// `/path` to `/path/` when a same-named directory exists — causing a 404 if
+/// the file was stored as `path.html` instead of `path/index.html`.
 fn route_to_file_path(output: &Path, pattern: &str) -> PathBuf {
     if pattern == "/" {
         output.join("index.html")
     } else {
-        // "/about" -> "about.html", "/docs/intro" -> "docs/intro.html"
+        // "/about" -> "about/index.html", "/docs/intro" -> "docs/intro/index.html"
         let stripped = pattern.trim_start_matches('/');
-        output.join(format!("{stripped}.html"))
+        output.join(stripped).join("index.html")
     }
 }
 
