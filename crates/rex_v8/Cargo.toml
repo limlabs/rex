@@ -1,6 +1,6 @@
 [package]
 name = "rex_v8"
-version = "0.16.0" # x-release-please-version
+version = "0.17.0" # x-release-please-version
 edition = "2021"
 description = "V8 isolate pool and SSR engine for the Rex framework"
 license = "MIT"
@@ -10,7 +10,7 @@ repository = "https://github.com/limlabs/rex"
 workspace = true
 
 [dependencies]
-rex_core = { path = "../rex_core", version = "0.16.0" } # x-release-please-version
+rex_core = { path = "../rex_core", version = "0.17.0" } # x-release-please-version
 v8 = { workspace = true }
 crossbeam-channel = { workspace = true }
 tokio = { workspace = true }
@@ -26,7 +26,7 @@ webpki-roots = "0.26"
 rustls-pki-types = "1"
 
 [dev-dependencies]
-rex_build = { path = "../rex_build", version = "0.16.0" } # x-release-please-version
+rex_build = { path = "../rex_build", version = "0.17.0" } # x-release-please-version
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt"] }
 tracing-subscriber = { workspace = true }
