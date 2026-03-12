@@ -72,10 +72,7 @@ mod init {
             .status()
             .unwrap();
 
-        assert!(
-            init_status.success(),
-            "rex init should exit successfully"
-        );
+        assert!(init_status.success(), "rex init should exit successfully");
         assert!(
             project_dir.join("pages/index.tsx").exists(),
             "rex init should create pages/index.tsx"
