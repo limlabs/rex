@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.2](https://github.com/limlabs/rex/compare/v0.17.1...v0.17.2) (2026-03-12)
+
+
+### Bug Fixes
+
+* **v8:** remove crates.io version req for unpublishable rex_build dev-dep ([#186](https://github.com/limlabs/rex/issues/186)) ([4d95305](https://github.com/limlabs/rex/commit/4d953051c2a043b1ad26225ef61b2c1a54089f38))
+
 ## [0.17.1](https://github.com/limlabs/rex/compare/v0.17.0...v0.17.1) (2026-03-12)
 
 
