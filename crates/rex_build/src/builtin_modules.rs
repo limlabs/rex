@@ -135,6 +135,11 @@ mod tests {
         assert!(nm.join("@types/react/package.json").exists());
         assert!(nm.join("@types/react-dom/package.json").exists());
 
+        // Should contain @limlabs/rex source for rex/* path alias
+        assert!(nm.join("@limlabs/rex/package.json").exists());
+        assert!(nm.join("@limlabs/rex/src/link.tsx").exists());
+        assert!(nm.join("@limlabs/rex/src/head.tsx").exists());
+
         // Should have version marker
         let version_file = tmp.path().join("node_modules/.rex-builtin-version");
         assert_eq!(

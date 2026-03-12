@@ -104,7 +104,7 @@ fn main() {
     let stamp = out_dir.join(".vendor-stamp");
 
     let expected = format!(
-        "react@{REACT_VERSION} rsdw@{REACT_VERSION} scheduler@{SCHEDULER_VERSION} tailwind@{TAILWIND_VERSION} types-react@{TYPES_REACT_VERSION} types-react-dom@{TYPES_REACT_DOM_VERSION}"
+        "react@{REACT_VERSION} rsdw@{REACT_VERSION} scheduler@{SCHEDULER_VERSION} tailwind@{TAILWIND_VERSION} types-react@{TYPES_REACT_VERSION} types-react-dom@{TYPES_REACT_DOM_VERSION} rex-types@1"
     );
 
     // Skip download on incremental rebuilds when stamp matches
@@ -130,6 +130,10 @@ fn main() {
     // Download Tailwind CSS and bundle compiler for V8
     download_npm_package(&node_modules, "tailwindcss", TAILWIND_VERSION);
     bundle_tailwind_compiler(out_dir);
+
+    // Embed @limlabs/rex source files so `rex/*` path aliases resolve in
+    // zero-config projects (IDE / TypeScript).
+    embed_rex_types(Path::new(&manifest_dir), &node_modules);
 
     fs::write(&stamp, &expected).expect("failed to write stamp");
 }
@@ -304,4 +308,41 @@ fn remove_cjs_matching(dir: &Path, patterns: &[&str]) {
             let _ = fs::remove_file(entry.path());
         }
     }
+}
+
+/// Rex source files to embed for `rex/*` type resolution in zero-config projects.
+const REX_SRC_FILES: &[&str] = &[
+    "actions.d.ts",
+    "document.tsx",
+    "head.tsx",
+    "image.tsx",
+    "index.ts",
+    "link.tsx",
+    "middleware.d.ts",
+    "router.ts",
+    "server.ts",
+];
+
+/// Copy `packages/rex/src/` into the embedded node_modules so zero-config
+/// projects can resolve `rex/*` via the standard path alias
+/// (`"rex/*": ["./node_modules/@limlabs/rex/src/*"]`).
+fn embed_rex_types(manifest_dir: &Path, node_modules: &Path) {
+    let rex_src = manifest_dir.join("../../packages/rex/src");
+    let dest = node_modules.join("@limlabs/rex/src");
+    fs::create_dir_all(&dest).expect("failed to create @limlabs/rex/src dir");
+
+    for &file in REX_SRC_FILES {
+        let src_path = rex_src.join(file);
+        let dest_path = dest.join(file);
+        fs::copy(&src_path, &dest_path)
+            .unwrap_or_else(|e| panic!("failed to copy {}: {e}", src_path.display()));
+        println!("cargo:rerun-if-changed=../../packages/rex/src/{file}");
+    }
+
+    // Minimal package.json so npm/TypeScript recognises the package
+    fs::write(
+        node_modules.join("@limlabs/rex/package.json"),
+        r#"{"name":"@limlabs/rex","version":"0.0.0","private":true}"#,
+    )
+    .expect("failed to write @limlabs/rex/package.json");
 }
