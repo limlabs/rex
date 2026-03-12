@@ -31,6 +31,11 @@ pub(crate) use crate::core::{
 /// Generate a full-page error overlay for dev mode.
 /// Includes HMR WebSocket connection for auto-reload on fix.
 pub(crate) fn dev_error_overlay(title: &str, message: &str, file: Option<&str>) -> String {
+    let escaped_title = title
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;");
     let escaped_message = message
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -58,7 +63,7 @@ pub(crate) fn dev_error_overlay(title: &str, message: &str, file: Option<&str>) 
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>{title}</title>
+<title>{escaped_title}</title>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{
@@ -105,7 +110,7 @@ body {{
 <div class="container">
   <div class="header">
     <span class="origin">Server</span>
-    <span class="badge">{title}</span>
+    <span class="badge">{escaped_title}</span>
   </div>
   {file_section}
   <div class="stack">{escaped_message}</div>
@@ -241,6 +246,13 @@ mod tests {
             overlay.contains("WebSocket"),
             "should include WebSocket reconnect"
         );
+    }
+
+    #[test]
+    fn test_dev_error_overlay_escapes_title() {
+        let overlay = dev_error_overlay("</title><script>xss</script>", "some error", None);
+        assert!(overlay.contains("&lt;/title&gt;&lt;script&gt;xss&lt;/script&gt;"));
+        assert!(!overlay.contains("</title><script>xss</script>"));
     }
 
     #[test]

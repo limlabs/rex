@@ -61,7 +61,9 @@
         case "tsc-error":
           console.error("[Rex HMR] TypeScript errors:", msg.errors?.length);
           tscErrors = msg.errors || [];
-          if (!currentError) {
+          if (currentError?.kind === "typescript") {
+            currentError.message = formatTscErrors(tscErrors);
+          } else if (!currentError) {
             currentError = {
               message: formatTscErrors(tscErrors),
               kind: "typescript",
@@ -228,7 +230,9 @@
     removeBadge();
 
     const err = currentError;
-    const kind = err.kind || "build";
+    // Sanitize kind to prevent XSS — only allow known values
+    const validKinds = ["build", "server", "client", "typescript"];
+    const kind = validKinds.includes(err.kind || "") ? err.kind! : "build";
     const origin = originLabel(kind);
     const formattedStack = formatStack(err.message, kind);
 
@@ -287,13 +291,15 @@
       showOverlay();
     };
 
-    // ESC to minimize
-    overlay.addEventListener("keydown", function (e: KeyboardEvent) {
+    // ESC to minimize — listen on document since div elements can't receive focus
+    function onEsc(e: KeyboardEvent): void {
       if (e.key === "Escape") {
+        document.removeEventListener("keydown", onEsc);
         minimized = true;
         showOverlay();
       }
-    });
+    }
+    document.addEventListener("keydown", onEsc);
   }
 
   function showBadge(): void {
