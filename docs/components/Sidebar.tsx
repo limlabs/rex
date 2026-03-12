@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import Link from "rex/link";
 
 interface NavItem {
@@ -55,6 +55,25 @@ const navigation: NavSection[] = [
 
 export default function Sidebar() {
   const [open, setOpen] = useState(false);
+  const [pathname, setPathname] = useState("");
+
+  useEffect(() => {
+    setPathname(window.location.pathname);
+
+    function onPopState() {
+      setPathname(window.location.pathname);
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const handleNavClick = useCallback(() => {
+    setOpen(false);
+    // Defer pathname update to after navigateTo pushes the new URL
+    requestAnimationFrame(() => {
+      setPathname(window.location.pathname);
+    });
+  }, []);
 
   return (
     <>
@@ -98,16 +117,23 @@ export default function Sidebar() {
                 {section.title}
               </h3>
               <ul className="space-y-0.5">
-                {section.items.map((item) => (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      className="block px-2 py-1.5 rounded text-sm text-slate-400 hover:text-white hover:bg-slate-800 transition-colors no-underline"
-                    >
-                      {item.title}
-                    </Link>
-                  </li>
-                ))}
+                {section.items.map((item) => {
+                  const active = pathname === item.href;
+                  return (
+                    <li key={item.href} onClick={handleNavClick}>
+                      <Link
+                        href={item.href}
+                        className={`block px-2 py-1.5 rounded text-sm transition-colors no-underline ${
+                          active
+                            ? "text-white bg-slate-800"
+                            : "text-slate-400 hover:text-white hover:bg-slate-800"
+                        }`}
+                      >
+                        {item.title}
+                      </Link>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           ))}
