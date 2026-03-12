@@ -23,7 +23,8 @@ pub async fn handle_file_event(
         FileEventKind::PageModified
         | FileEventKind::CssModified
         | FileEventKind::MiddlewareModified
-        | FileEventKind::McpModified => {
+        | FileEventKind::McpModified
+        | FileEventKind::SourceModified => {
             let t0 = Instant::now();
 
             // Rescan, rebuild, reload isolates, update hot state
