@@ -2,24 +2,30 @@ pre-commit:
   parallel: false
   commands:
     fmt:
+      glob: "**/*.rs"
       run: cargo fmt --check
       fail_text: "Run `cargo fmt` to fix formatting"
     check:
+      glob: "**/*.rs"
       run: RUSTFLAGS="-D warnings" cargo check --all-targets
       fail_text: "Fix build warnings before committing"
     clippy:
+      glob: "**/*.rs"
       run: cargo clippy --all-targets -- -D warnings
       fail_text: "Fix clippy warnings before committing"
     no-js:
       run: "! git diff --cached --name-only --diff-filter=ACR | grep '\\.js$' | grep -v '^packages/rex/bin/' | grep -q ."
       fail_text: "Do not commit .js files — use TypeScript (.ts/.tsx) instead"
     oxlint:
-      run: npx oxlint --deny-warnings runtime/ packages/rex/src/ benchmarks/
+      glob: "**/*.{ts,tsx,js,jsx}"
+      run: oxlint --deny-warnings runtime/ packages/rex/src/ benchmarks/
       fail_text: "Fix oxlint warnings before committing"
     typecheck:
+      glob: "runtime/**/*.{ts,tsx}"
       run: cd runtime && { [ -d node_modules ] || npm install --no-package-lock --ignore-scripts --no-audit --no-fund; } && npm run typecheck
       fail_text: "Fix TypeScript errors in runtime/"
     typecheck-fixtures:
+      glob: "**/*.{ts,tsx}"
       run: scripts/typecheck-fixtures.sh
       fail_text: "Fix TypeScript errors in fixtures/benchmarks before committing"
     file-length:
