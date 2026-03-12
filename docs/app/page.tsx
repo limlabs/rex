@@ -10,20 +10,20 @@ export default function Home() {
   return (
     <div>
       <div className="mb-10">
-        <div className="flex items-stretch gap-8 mb-20">
+        <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-6 sm:gap-8 mb-20">
           <Mascot />
-          <div>
-            <h1 className="!text-8xl font-bold text-slate-900 border-0 pb-0 !mb-2">
+          <div className="text-center sm:text-left">
+            <h1 className="!text-5xl sm:!text-8xl font-bold text-slate-900 border-0 pb-0 !mb-2">
               Rex
             </h1>
-            <p className="!text-xl text-slate-600">
+            <p className="!text-lg sm:!text-xl text-slate-600">
               A next-generation React framework with Next.js compatibility.
               <br />
               <br />
               Superior performance, minimal dependencies, and a delightful
               development experience for human developers and agents alike!
             </p>
-            <div className="flex gap-3">
+            <div className="flex justify-center sm:justify-start gap-3">
               <Link
                 href="/getting-started"
                 className="inline-flex items-center px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition-colors no-underline"
