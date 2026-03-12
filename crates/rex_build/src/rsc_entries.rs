@@ -96,8 +96,8 @@ pub(crate) fn generate_server_entry(
         entry.push_str("globalThis.__rex_decodeAction = decodeAction;\n");
 
         // Group actions by module_path to deduplicate imports
-        let mut modules_by_path: std::collections::HashMap<&str, Vec<(&str, &str)>> =
-            std::collections::HashMap::new();
+        let mut modules_by_path: std::collections::BTreeMap<&str, Vec<(&str, &str)>> =
+            std::collections::BTreeMap::new();
         for (action_id, action_entry) in &server_action_manifest.actions {
             modules_by_path
                 .entry(&action_entry.module_path)
@@ -214,8 +214,8 @@ pub fn generate_core_entry(
         entry.push_str("globalThis.__rex_decodeReply = decodeReply;\n");
         entry.push_str("globalThis.__rex_decodeAction = decodeAction;\n");
 
-        let mut modules_by_path: std::collections::HashMap<&str, Vec<(&str, &str)>> =
-            std::collections::HashMap::new();
+        let mut modules_by_path: std::collections::BTreeMap<&str, Vec<(&str, &str)>> =
+            std::collections::BTreeMap::new();
         for (action_id, action_entry) in &server_action_manifest.actions {
             modules_by_path
                 .entry(&action_entry.module_path)

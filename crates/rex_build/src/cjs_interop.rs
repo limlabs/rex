@@ -22,7 +22,7 @@ const NEW_PATTERN: &str = "var __toCommonJS = (mod) => __hasOwnProp.call(mod, \"
 pub(crate) fn patch_to_common_js(bundle_path: &Path) -> Result<()> {
     let content = std::fs::read_to_string(bundle_path)?;
     if content.contains(OLD_PATTERN) {
-        let patched = content.replacen(OLD_PATTERN, NEW_PATTERN, 1);
+        let patched = content.replace(OLD_PATTERN, NEW_PATTERN);
         std::fs::write(bundle_path, patched)?;
     }
     Ok(())

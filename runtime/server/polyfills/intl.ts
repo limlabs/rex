@@ -86,7 +86,10 @@ if (typeof Intl !== 'undefined' && typeof Intl.DateTimeFormat === 'function') {
             // Fallback: return a formatter that uses Date.toISOString()
             return {
                 format(date: Date) {
-                    return date instanceof Date ? date.toISOString() : String(date);
+                    if (date instanceof Date && !isNaN(date.getTime())) {
+                        return date.toISOString();
+                    }
+                    return String(date);
                 },
                 resolvedOptions() {
                     return {

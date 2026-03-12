@@ -427,6 +427,9 @@ fn split_bare_specifier(specifier: &str) -> (&str, &str) {
         // Scoped package: @scope/name/subpath
         if let Some(pos) = after_at.find('/') {
             let after_scope = pos + 1; // position in after_at
+            if after_scope + 1 > after_at.len() {
+                return (specifier, "");
+            }
             if let Some(pos2) = after_at[after_scope + 1..].find('/') {
                 // +1 for '@' prefix
                 let split = 1 + after_scope + 1 + pos2;
