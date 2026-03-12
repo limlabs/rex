@@ -322,6 +322,9 @@ fn load_dotenv(project_root: &std::path::Path) {
             continue;
         };
         let key = key.trim();
+        if key.is_empty() {
+            continue;
+        }
         let value = value.trim();
         // Strip surrounding quotes (must be at least 2 chars to have open+close)
         let value = if value.len() >= 2
@@ -406,5 +409,17 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         // Should not panic or error when .env doesn't exist
         load_dotenv(tmp.path());
+    }
+
+    #[test]
+    fn load_dotenv_empty_key_skipped() {
+        let tmp = tempfile::tempdir().unwrap();
+        // "=value" produces an empty key — must not panic
+        std::fs::write(tmp.path().join(".env"), "=bad_value\nREX_TEST_EKEY=good\n").unwrap();
+
+        std::env::remove_var("REX_TEST_EKEY");
+        load_dotenv(tmp.path());
+        assert_eq!(std::env::var("REX_TEST_EKEY").unwrap(), "good");
+        std::env::remove_var("REX_TEST_EKEY");
     }
 }

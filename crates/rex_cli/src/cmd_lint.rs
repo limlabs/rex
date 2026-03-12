@@ -207,7 +207,7 @@ fn load_gitignore_patterns(root: &std::path::Path) -> Vec<String> {
     content
         .lines()
         .map(|l| l.trim())
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with('!'))
         // Strip leading "/" — .gitignore uses it for root-relative, our is_ignored already does prefix matching
         .map(|l| l.strip_prefix('/').unwrap_or(l).to_string())
         .collect()
@@ -219,10 +219,10 @@ pub(crate) fn is_ignored(
     patterns: &[String],
 ) -> bool {
     let rel = match path.strip_prefix(root) {
-        Ok(r) => r.to_string_lossy(),
+        Ok(r) => r.to_string_lossy().replace('\\', "/"),
         Err(_) => return false,
     };
-    let rel_str = rel.as_ref();
+    let rel_str = rel.as_str();
 
     for pattern in patterns {
         // Directory pattern (e.g., "dist/", "pages/api/")
@@ -426,5 +426,19 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let patterns = load_gitignore_patterns(tmp.path());
         assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn load_gitignore_patterns_skips_negated() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(".gitignore"),
+            "dist\n!dist/important.js\nnode_modules\n",
+        )
+        .unwrap();
+
+        let patterns = load_gitignore_patterns(tmp.path());
+        // Negated pattern should be filtered out (unsupported)
+        assert_eq!(patterns, vec!["dist", "node_modules"]);
     }
 }
