@@ -281,7 +281,7 @@
 
         // Handle notFound — fall back to server
         if (data.notFound) {
-          window.location.href = pathname;
+          window.location.href = fullUrl;
           return;
         }
 
