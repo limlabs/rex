@@ -26,7 +26,7 @@ pub(crate) mod tailwind_v8;
 pub(crate) mod cjs_interop;
 pub(crate) mod rsc_build_config;
 pub(crate) mod rsc_client_bundle;
-pub(crate) mod rsc_entries;
+pub mod rsc_entries;
 pub(crate) mod rsc_server_bundle;
 pub(crate) mod rsc_ssr_bundle;
 pub(crate) mod rsc_stubs;

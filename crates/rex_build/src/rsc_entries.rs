@@ -171,7 +171,7 @@ pub(crate) fn generate_server_entry(
 /// Contains: React imports (exported to globalThis), webpack config, server
 /// actions, API route handlers, metadata runtime, flight runtime.
 /// Does NOT include layout/page imports — those go in per-group entries.
-pub(crate) fn generate_core_entry(
+pub fn generate_core_entry(
     app_scan: &AppScanResult,
     client_manifest: &ClientReferenceManifest,
     server_action_manifest: &ServerActionManifest,
@@ -286,7 +286,7 @@ pub(crate) fn generate_core_entry(
 /// React is NOT imported — group bundles use rolldown aliases to resolve
 /// `react` to a shim that reads from `globalThis.__rex_react_ns` (set by
 /// the core bundle).
-pub(crate) fn generate_group_entry(routes: &[&AppRoute]) -> String {
+pub fn generate_group_entry(routes: &[&AppRoute]) -> String {
     let mut entry = String::new();
 
     // Import layouts
