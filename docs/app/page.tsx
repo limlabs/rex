@@ -1,5 +1,6 @@
 import React from "react";
 import Link from "rex/link";
+import Mascot from "../components/Mascot";
 
 export const metadata = {
   title: "Rex — Rust-Native React Framework",
@@ -9,26 +10,34 @@ export default function Home() {
   return (
     <div>
       <div className="mb-10">
-        <h1 className="text-4xl font-bold text-slate-900 mb-4 border-0 pb-0">
-          Rex
-        </h1>
-        <p className="text-xl text-slate-600 mb-6">
-          A Rust-native React framework with Next.js compatibility. Fast builds,
-          lightweight runtime, familiar conventions.
-        </p>
-        <div className="flex gap-3">
-          <Link
-            href="/getting-started"
-            className="inline-flex items-center px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition-colors no-underline"
-          >
-            Get Started
-          </Link>
-          <a
-            href="https://github.com/limlabs/rex"
-            className="inline-flex items-center px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors no-underline"
-          >
-            GitHub
-          </a>
+        <div className="flex items-stretch gap-8 mb-20">
+          <Mascot />
+          <div>
+            <h1 className="!text-8xl font-bold text-slate-900 border-0 pb-0 !mb-2">
+              Rex
+            </h1>
+            <p className="!text-xl text-slate-600">
+              A next-generation React framework with Next.js compatibility.
+              <br />
+              <br />
+              Superior performance, minimal dependencies, and a delightful
+              development experience for human developers and agents alike!
+            </p>
+            <div className="flex gap-3">
+              <Link
+                href="/getting-started"
+                className="inline-flex items-center px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 transition-colors no-underline"
+              >
+                Get Started
+              </Link>
+              <a
+                href="https://github.com/limlabs/rex"
+                className="inline-flex items-center px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors no-underline"
+              >
+                GitHub
+              </a>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -62,13 +71,7 @@ export default function Home() {
   );
 }
 
-function Card({
-  title,
-  description,
-}: {
-  title: string;
-  description: string;
-}) {
+function Card({ title, description }: { title: string; description: string }) {
   return (
     <div className="rounded-lg border border-slate-200 p-5 hover:border-emerald-300 transition-colors">
       <h3 className="font-semibold text-slate-900 mb-1">{title}</h3>
