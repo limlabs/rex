@@ -74,3 +74,51 @@ pub(crate) fn print_route_summary(routes: &[rex_core::Route], api_routes: &[rex_
         eprintln!("  {}", dim(&parts.join(" · ")));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bold_wraps_text() {
+        assert_eq!(bold("hi"), "\x1b[1mhi\x1b[0m");
+    }
+
+    #[test]
+    fn dim_wraps_text() {
+        assert_eq!(dim("hi"), "\x1b[2mhi\x1b[0m");
+    }
+
+    #[test]
+    fn magenta_bold_wraps_text() {
+        assert_eq!(magenta_bold("hi"), "\x1b[1;35mhi\x1b[0m");
+    }
+
+    #[test]
+    fn green_bold_wraps_text() {
+        assert_eq!(green_bold("hi"), "\x1b[1;32mhi\x1b[0m");
+    }
+
+    #[test]
+    fn emerald_wraps_text() {
+        assert_eq!(emerald("hi"), "\x1b[38;2;46;204;113mhi\x1b[0m");
+    }
+
+    #[test]
+    fn format_duration_milliseconds() {
+        let d = std::time::Duration::from_millis(750);
+        assert_eq!(format_duration(d), "750ms");
+    }
+
+    #[test]
+    fn format_duration_seconds() {
+        let d = std::time::Duration::from_millis(1500);
+        assert_eq!(format_duration(d), "1.50s");
+    }
+
+    #[test]
+    fn format_duration_zero() {
+        let d = std::time::Duration::from_millis(0);
+        assert_eq!(format_duration(d), "0ms");
+    }
+}

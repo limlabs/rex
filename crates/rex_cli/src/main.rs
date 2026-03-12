@@ -323,9 +323,10 @@ fn load_dotenv(project_root: &std::path::Path) {
         };
         let key = key.trim();
         let value = value.trim();
-        // Strip surrounding quotes
-        let value = if (value.starts_with('"') && value.ends_with('"'))
-            || (value.starts_with('\'') && value.ends_with('\''))
+        // Strip surrounding quotes (must be at least 2 chars to have open+close)
+        let value = if value.len() >= 2
+            && ((value.starts_with('"') && value.ends_with('"'))
+                || (value.starts_with('\'') && value.ends_with('\'')))
         {
             &value[1..value.len() - 1]
         } else {
@@ -335,5 +336,75 @@ fn load_dotenv(project_root: &std::path::Path) {
         if std::env::var(key).is_err() {
             std::env::set_var(key, value);
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn load_dotenv_basic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut f = std::fs::File::create(tmp.path().join(".env")).unwrap();
+        writeln!(f, "REX_TEST_BASIC=hello").unwrap();
+        writeln!(f, "REX_TEST_QUOTED=\"world\"").unwrap();
+        writeln!(f, "REX_TEST_SINGLE='single'").unwrap();
+        writeln!(f, "# comment line").unwrap();
+        writeln!(f).unwrap();
+        writeln!(f, "REX_TEST_SPACES = spaced ").unwrap();
+        drop(f);
+
+        // Clear any pre-existing values
+        std::env::remove_var("REX_TEST_BASIC");
+        std::env::remove_var("REX_TEST_QUOTED");
+        std::env::remove_var("REX_TEST_SINGLE");
+        std::env::remove_var("REX_TEST_SPACES");
+
+        load_dotenv(tmp.path());
+
+        assert_eq!(std::env::var("REX_TEST_BASIC").unwrap(), "hello");
+        assert_eq!(std::env::var("REX_TEST_QUOTED").unwrap(), "world");
+        assert_eq!(std::env::var("REX_TEST_SINGLE").unwrap(), "single");
+        assert_eq!(std::env::var("REX_TEST_SPACES").unwrap(), "spaced");
+
+        // Cleanup
+        std::env::remove_var("REX_TEST_BASIC");
+        std::env::remove_var("REX_TEST_QUOTED");
+        std::env::remove_var("REX_TEST_SINGLE");
+        std::env::remove_var("REX_TEST_SPACES");
+    }
+
+    #[test]
+    fn load_dotenv_single_char_quote_no_panic() {
+        let tmp = tempfile::tempdir().unwrap();
+        // A value that is just a single quote character — previously caused a panic
+        std::fs::write(tmp.path().join(".env"), "REX_TEST_QUOTE=\"\n").unwrap();
+
+        std::env::remove_var("REX_TEST_QUOTE");
+        // Must not panic; single `"` is not a matching pair so it stays as-is
+        load_dotenv(tmp.path());
+        assert_eq!(std::env::var("REX_TEST_QUOTE").unwrap(), "\"");
+        std::env::remove_var("REX_TEST_QUOTE");
+    }
+
+    #[test]
+    fn load_dotenv_does_not_overwrite() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(".env"), "REX_TEST_NOOVER=file_value\n").unwrap();
+
+        std::env::set_var("REX_TEST_NOOVER", "env_value");
+        load_dotenv(tmp.path());
+        assert_eq!(std::env::var("REX_TEST_NOOVER").unwrap(), "env_value");
+        std::env::remove_var("REX_TEST_NOOVER");
+    }
+
+    #[test]
+    fn load_dotenv_missing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Should not panic or error when .env doesn't exist
+        load_dotenv(tmp.path());
     }
 }

@@ -181,11 +181,11 @@ fn walk_lint_dir(
             if let Some("js" | "jsx" | "ts" | "tsx" | "mjs" | "mts") =
                 path.extension().and_then(|e| e.to_str())
             {
-                // Skip .d.ts type definition files
-                if !path
-                    .file_name()
-                    .is_some_and(|n| n.to_string_lossy().ends_with(".d.ts"))
-                {
+                // Skip .d.ts / .d.mts / .d.cts type definition files
+                if !path.file_name().is_some_and(|n| {
+                    let n = n.to_string_lossy();
+                    n.ends_with(".d.ts") || n.ends_with(".d.mts") || n.ends_with(".d.cts")
+                }) {
                     if !gitignore.is_empty() && is_ignored(&path, root, gitignore) {
                         continue;
                     }
@@ -227,7 +227,7 @@ pub(crate) fn is_ignored(
     for pattern in patterns {
         // Directory pattern (e.g., "dist/", "pages/api/")
         if let Some(dir) = pattern.strip_suffix('/') {
-            if rel_str.starts_with(dir) || rel_str.starts_with(&format!("{dir}/")) {
+            if rel_str == dir || rel_str.starts_with(&format!("{dir}/")) {
                 return true;
             }
         }
@@ -265,4 +265,166 @@ fn default_oxlintrc() -> &'static str {
   "ignorePatterns": [".rex/", "node_modules/"]
 }
 "#
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn is_ignored_dir_pattern_no_false_prefix_match() {
+        let root = Path::new("/project");
+        let patterns = vec!["pages/api/".to_string()];
+
+        // Should match: file inside pages/api/
+        assert!(is_ignored(
+            Path::new("/project/pages/api/hello.ts"),
+            root,
+            &patterns,
+        ));
+
+        // Should NOT match: pages/api-docs/ is a different directory
+        assert!(!is_ignored(
+            Path::new("/project/pages/api-docs/readme.ts"),
+            root,
+            &patterns,
+        ));
+
+        // Should match: exact directory name
+        assert!(is_ignored(
+            Path::new("/project/pages/api/nested/route.ts"),
+            root,
+            &patterns,
+        ));
+    }
+
+    #[test]
+    fn is_ignored_bare_dir_name() {
+        let root = Path::new("/project");
+        let patterns = vec!["dist".to_string()];
+
+        assert!(is_ignored(
+            Path::new("/project/dist/foo.ts"),
+            root,
+            &patterns
+        ));
+        assert!(!is_ignored(
+            Path::new("/project/dist-old/foo.ts"),
+            root,
+            &patterns,
+        ));
+    }
+
+    #[test]
+    fn is_ignored_glob_extension() {
+        let root = Path::new("/project");
+        let patterns = vec!["*.min.js".to_string()];
+
+        assert!(is_ignored(
+            Path::new("/project/bundle.min.js"),
+            root,
+            &patterns,
+        ));
+        assert!(!is_ignored(
+            Path::new("/project/bundle.js"),
+            root,
+            &patterns
+        ));
+    }
+
+    #[test]
+    fn is_ignored_exact_match() {
+        let root = Path::new("/project");
+        let patterns = vec!["Makefile".to_string()];
+
+        assert!(is_ignored(Path::new("/project/Makefile"), root, &patterns));
+        assert!(!is_ignored(
+            Path::new("/project/Makefile.bak"),
+            root,
+            &patterns,
+        ));
+    }
+
+    #[test]
+    fn is_ignored_outside_root() {
+        let root = Path::new("/project");
+        let patterns = vec!["dist".to_string()];
+
+        // Path not under root → never ignored
+        assert!(!is_ignored(
+            Path::new("/other/dist/foo.ts"),
+            root,
+            &patterns,
+        ));
+    }
+
+    #[test]
+    fn walk_lint_dir_skips_dts_dmts_dcts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        std::fs::write(root.join("types.d.ts"), "").unwrap();
+        std::fs::write(root.join("types.d.mts"), "").unwrap();
+        std::fs::write(root.join("types.d.cts"), "").unwrap();
+        std::fs::write(root.join("app.tsx"), "const x = 1;").unwrap();
+        std::fs::write(root.join("utils.ts"), "const y = 2;").unwrap();
+
+        let mut out = Vec::new();
+        walk_lint_dir(root, root, &[], &mut out);
+
+        let names: Vec<String> = out
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+
+        assert!(!names.contains(&"types.d.ts".to_string()));
+        assert!(!names.contains(&"types.d.mts".to_string()));
+        assert!(!names.contains(&"types.d.cts".to_string()));
+        assert!(names.contains(&"app.tsx".to_string()));
+        assert!(names.contains(&"utils.ts".to_string()));
+    }
+
+    #[test]
+    fn walk_lint_dir_skips_hardcoded_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        let nm = root.join("node_modules");
+        std::fs::create_dir_all(&nm).unwrap();
+        std::fs::write(nm.join("dep.js"), "").unwrap();
+
+        let dot_rex = root.join(".rex");
+        std::fs::create_dir_all(&dot_rex).unwrap();
+        std::fs::write(dot_rex.join("cache.js"), "").unwrap();
+
+        std::fs::write(root.join("index.tsx"), "const x = 1;").unwrap();
+
+        let mut out = Vec::new();
+        walk_lint_dir(root, root, &[], &mut out);
+
+        assert_eq!(out.len(), 1);
+        assert!(out[0].ends_with("index.tsx"));
+    }
+
+    #[test]
+    fn load_gitignore_patterns_strips_slash_and_comments() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(".gitignore"),
+            "# build output\n/dist\nnode_modules\n\n*.log\n",
+        )
+        .unwrap();
+
+        let patterns = load_gitignore_patterns(tmp.path());
+        assert_eq!(patterns, vec!["dist", "node_modules", "*.log"]);
+    }
+
+    #[test]
+    fn load_gitignore_patterns_missing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let patterns = load_gitignore_patterns(tmp.path());
+        assert!(patterns.is_empty());
+    }
 }
