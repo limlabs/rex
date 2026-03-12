@@ -85,6 +85,7 @@ pub(crate) async fn cmd_dev(
         let rebuild_config = config.clone();
         let rebuild_hmr = hmr.clone();
         let rebuild_state = state.clone();
+        let mut last_scan = Some(scan.clone());
         tokio::spawn(async move {
             while let Some(event) = rebuild_rx.recv().await {
                 info!(path = %event.path.display(), "Rebuilding...");
@@ -93,6 +94,7 @@ pub(crate) async fn cmd_dev(
                     &rebuild_config,
                     &rebuild_state,
                     &rebuild_hmr,
+                    &mut last_scan,
                 )
                 .await
                 {
