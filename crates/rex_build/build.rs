@@ -5,12 +5,16 @@ use std::process::Command;
 const REACT_VERSION: &str = "19.2.4";
 const SCHEDULER_VERSION: &str = "0.27.0";
 const TAILWIND_VERSION: &str = "4.2.1";
+const TYPES_REACT_VERSION: &str = "19.2.14";
+const TYPES_REACT_DOM_VERSION: &str = "19.2.3";
 
 const PACKAGES: &[(&str, &str)] = &[
     ("react", REACT_VERSION),
     ("react-dom", REACT_VERSION),
     ("react-server-dom-webpack", REACT_VERSION),
     ("scheduler", SCHEDULER_VERSION),
+    ("@types/react", TYPES_REACT_VERSION),
+    ("@types/react-dom", TYPES_REACT_DOM_VERSION),
 ];
 
 /// Server runtime TypeScript files to compile to JavaScript at build time.
@@ -100,7 +104,7 @@ fn main() {
     let stamp = out_dir.join(".vendor-stamp");
 
     let expected = format!(
-        "react@{REACT_VERSION} rsdw@{REACT_VERSION} scheduler@{SCHEDULER_VERSION} tailwind@{TAILWIND_VERSION}"
+        "react@{REACT_VERSION} rsdw@{REACT_VERSION} scheduler@{SCHEDULER_VERSION} tailwind@{TAILWIND_VERSION} types-react@{TYPES_REACT_VERSION} types-react-dom@{TYPES_REACT_DOM_VERSION}"
     );
 
     // Skip download on incremental rebuilds when stamp matches
@@ -135,7 +139,14 @@ fn download_npm_package(node_modules: &Path, name: &str, version: &str) {
     let pkg_dir = node_modules.join(name);
     fs::create_dir_all(&pkg_dir).expect("failed to create package dir");
 
-    let url = format!("https://registry.npmjs.org/{name}/-/{name}-{version}.tgz");
+    // Scoped packages (e.g. @types/react) use only the unscoped name in the
+    // tarball filename: @types/react/-/react-19.2.14.tgz
+    let tarball_name = if let Some(pos) = name.rfind('/') {
+        &name[pos + 1..]
+    } else {
+        name
+    };
+    let url = format!("https://registry.npmjs.org/{name}/-/{tarball_name}-{version}.tgz");
 
     let status = Command::new("sh")
         .arg("-c")
@@ -279,7 +290,8 @@ fn trim_package(dir: &Path, name: &str) {
             // Remove ESM loader (Node-only)
             let _ = fs::remove_dir_all(dir.join("esm"));
         }
-        _ => {} // react is already lean
+        // @types packages are already lean — just strip docs
+        _ => {}
     }
 }
 

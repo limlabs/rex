@@ -131,6 +131,10 @@ mod tests {
         assert!(nm.join("react-server-dom-webpack/package.json").exists());
         assert!(nm.join("scheduler/package.json").exists());
 
+        // Should contain @types for IDE/TypeScript support
+        assert!(nm.join("@types/react/package.json").exists());
+        assert!(nm.join("@types/react-dom/package.json").exists());
+
         // Should have version marker
         let version_file = tmp.path().join("node_modules/.rex-builtin-version");
         assert_eq!(
