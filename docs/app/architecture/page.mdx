@@ -2,6 +2,39 @@
 
 Rex is a Rust-native React framework. The server, router, build pipeline, and SSR engine are all written in Rust, while your application code remains standard React (TSX/JSX).
 
+## Motivations
+
+The web is evolving. The hyper-growth of AI and its reshaping of human-computer interaction demand that interfaces become faster, more flexible, and can respond to the needs of both humans and their agentic counterparts.
+
+Today's web frameworks have the _ingredients_ needed to serve this dynamic, ever-changing ecosystem of web content. Indeed, a wide array of components are needed for the modern full stack app:
+
+- UI and data fetching libraries/frameworks
+- Platform integrations - OAuth, Docker/k8s, cloud services, internal/external APIs, CDNs
+- Tooling - bundling, minification, type checking, linting, testing
+- REST, gRPC, MCP, and other machine-readable interfaces
+- Observability - logging, metrics, performance monitoring
+
+The list goes on. Yet today's developers, from vibe coders, to principal full stack engineers, to autonomous agent swarms must frequently understand and decide how to put these ingredients together.
+
+Each micro-decision increases the cognitive load required when returning to a project, as well as increases the knowledge gap between code authors and wider community of users and maintainers.
+
+Paradoxically, adding too much documentation _also_ increases cognitive load, requiring engineers with questions to navigate a wider potential space of potentially relevant (or irrelevant) information.
+
+So how does one cope? Abstraction. To use an analogy familiar to many: If cars required us to understand how the engine, drivetrain, brakes, wheels, and electronic components worked in order to drive them, few people would be on the road. 
+
+However, by exposing a simplified, constrained interface -- pedals, gauges, buttons, and dials -- how a car operates becomes less relevant. People can just sort of get in and start driving with some basic instructions and training.
+
+For Rex, we aim to be the abstraction that lets developers "shut up and drive", eliminating micro-decisions in favor of sensible, familiar defaults when developing full stack applications. Success for Rex means helping developers of all experience levels build the modern Web faster and hassle-free, unlocking its boundless potential.
+
+## Guiding Principles
+
+- **Minimal boilerplate.** Boilerplate adds ambiguity and cognitive load: similar code _looks_ like the same behavior, but offers few guarantees. Rex avoids boilerplate in favor of clear, simple conventions where possible.
+- **Familiarity.** Rather than reinvent the wheel, Rex builds on existing conventions already widely used in full stack development, allowing developers to re-use their existing knowledge and assumptions right away.
+- **Predictability.** If most people agree a Rex feature should work a certain way, it probably should indeed work that way. 
+- **Open-Closed.** Inspired from the object-oriented concept of the same name, Rex aims to be open for extension, but closed for modification. In practice, this means limiting the ability to patch or use internal APIs in favor of well-defined extension points, such as plugin interfaces.
+- **Speed.** Faster tools unlock faster iteration for developers. Faster web pages and APIs offer smooth experiences to users. Rex aims to serve developers and users equally with high-speed, efficient implementations, beating the performance of current-gen competitors.
+- **Agent DX matters.** Developers are increasingly relying on coding agents to write their React and Typescript code. However, with today's limited context windows, recall relies on well-curated memories and files like AGENTS.md or CLAUDE.md. These artifacts quickly become a burden to synchronize with the rapid pace of agent-driven development. We believe that these now are framework-level concerns, which Rex tackles through extending its conventions, documentation, and features to accomodate the agentic audience as first-class citizens in the ecosystem.
+
 ## How a request flows
 
 1. **Axum** receives the HTTP request
