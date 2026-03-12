@@ -14,6 +14,7 @@
     kind?: string;
   } | null = null;
   let tscErrors: RexTscDiagnostic[] = [];
+  let activeEscListener: ((e: KeyboardEvent) => void) | null = null;
 
   function connect(): void {
     ws = new WebSocket(url);
@@ -230,9 +231,22 @@
     removeBadge();
 
     const err = currentError;
-    // Sanitize kind to prevent XSS — only allow known values
-    const validKinds = ["build", "server", "client", "typescript"];
-    const kind = validKinds.includes(err.kind || "") ? err.kind! : "build";
+    // Sanitize kind — switch assigns only literal strings (breaks taint chain for CodeQL)
+    let kind: string;
+    switch (err.kind) {
+      case "server":
+        kind = "server";
+        break;
+      case "client":
+        kind = "client";
+        break;
+      case "typescript":
+        kind = "typescript";
+        break;
+      default:
+        kind = "build";
+        break;
+    }
     const origin = originLabel(kind);
     const formattedStack = formatStack(err.message, kind);
 
@@ -280,26 +294,30 @@
     }
 
     document.getElementById("__rex_eo_dismiss")!.onclick = function () {
+      removeEscListener();
       clearAllErrors();
     };
     document.getElementById("__rex_eo_min")!.onclick = function () {
+      removeEscListener();
       minimized = true;
       showOverlay();
     };
     document.getElementById("__rex_eo_backdrop")!.onclick = function () {
+      removeEscListener();
       minimized = true;
       showOverlay();
     };
 
     // ESC to minimize — listen on document since div elements can't receive focus
-    function onEsc(e: KeyboardEvent): void {
+    removeEscListener();
+    activeEscListener = function (e: KeyboardEvent): void {
       if (e.key === "Escape") {
-        document.removeEventListener("keydown", onEsc);
+        removeEscListener();
         minimized = true;
         showOverlay();
       }
-    }
-    document.addEventListener("keydown", onEsc);
+    };
+    document.addEventListener("keydown", activeEscListener);
   }
 
   function showBadge(): void {
@@ -331,10 +349,18 @@
     };
   }
 
+  function removeEscListener(): void {
+    if (activeEscListener) {
+      document.removeEventListener("keydown", activeEscListener);
+      activeEscListener = null;
+    }
+  }
+
   function clearAllErrors(): void {
     currentError = null;
     tscErrors = [];
     minimized = false;
+    removeEscListener();
     removeOverlayEl();
     removeBadge();
   }
