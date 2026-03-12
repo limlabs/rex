@@ -245,16 +245,12 @@ fn trim_package(dir: &Path, name: &str) {
                 "static.edge.js",
                 "static.node.js",
                 "server.bun.js",
-                "server.edge.js",
             ] {
                 let _ = fs::remove_file(dir.join(f));
             }
 
             // CJS bundles we don't need
-            remove_cjs_matching(
-                dir,
-                &["profiling", "test-utils", ".edge.", ".bun.", "static"],
-            );
+            remove_cjs_matching(dir, &["profiling", "test-utils", ".bun.", "static"]);
         }
         "scheduler" => {
             for f in ["unstable_mock.js", "unstable_post_task.js"] {
