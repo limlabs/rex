@@ -48,6 +48,10 @@ export function rm(path: string, options?: { recursive?: boolean; force?: boolea
     return Promise.resolve(rmSync(path, options));
 }
 
+export function realpath(path: string): Promise<string> {
+    return Promise.resolve(path); // No symlink resolution in V8 — passthrough
+}
+
 const fsPromises = {
     readFile,
     writeFile,
@@ -57,6 +61,7 @@ const fsPromises = {
     access,
     unlink,
     rm,
+    realpath,
 };
 
 export default fsPromises;

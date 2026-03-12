@@ -1,11 +1,13 @@
 // App router route handler (route.ts) — method-based dispatch.
 // Route handlers export named HTTP methods: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS.
 // Each handler receives (request, context) and returns a Response-like object.
+/* eslint-disable no-var -- ambient declarations require `declare var` in TypeScript */
 declare var __rex_app_route_handlers: Record<string, any> | undefined;
 declare var __rex_call_app_route_handler: (routePattern: string, reqJson: string) => string;
 declare var __rex_app_route_resolved: any;
 declare var __rex_app_route_rejected: any;
 declare var __rex_resolve_app_route: () => string;
+/* eslint-enable no-var */
 
 globalThis.__rex_call_app_route_handler = function(routePattern: string, reqJson: string): string {
     const handlers = globalThis.__rex_app_route_handlers;

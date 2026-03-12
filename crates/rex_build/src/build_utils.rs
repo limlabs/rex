@@ -213,6 +213,185 @@ pub(crate) fn runtime_client_dir() -> Result<PathBuf> {
     crate::embedded_runtime::client_dir()
 }
 
+/// Node.js polyfill aliases for server-side bundles (pages-router + RSC).
+pub fn node_polyfill_aliases(runtime_dir: &Path) -> Vec<(String, Vec<Option<String>>)> {
+    let modules: &[(&str, &str)] = &[
+        ("process", "process.ts"),
+        ("node:process", "process.ts"),
+        ("fs", "fs.ts"),
+        ("node:fs", "fs.ts"),
+        ("fs/promises", "fs-promises.ts"),
+        ("node:fs/promises", "fs-promises.ts"),
+        ("path", "path.ts"),
+        ("node:path", "path.ts"),
+        ("buffer", "buffer.ts"),
+        ("node:buffer", "buffer.ts"),
+        ("crypto", "crypto.ts"),
+        ("node:crypto", "crypto.ts"),
+        ("events", "events.cjs"),
+        ("node:events", "events.cjs"),
+        ("net", "net.ts"),
+        ("node:net", "net.ts"),
+        ("tls", "tls.ts"),
+        ("node:tls", "tls.ts"),
+        ("dns", "dns.ts"),
+        ("node:dns", "dns.ts"),
+        ("os", "os.ts"),
+        ("node:os", "os.ts"),
+        ("stream", "stream.ts"),
+        ("node:stream", "stream.ts"),
+        ("string_decoder", "string_decoder.ts"),
+        ("node:string_decoder", "string_decoder.ts"),
+        ("util", "util.ts"),
+        ("node:util", "util.ts"),
+        ("url", "url-module.ts"),
+        ("node:url", "url-module.ts"),
+        ("stream/web", "stream-web.ts"),
+        ("node:stream/web", "stream-web.ts"),
+        ("child_process", "child_process.ts"),
+        ("node:child_process", "child_process.ts"),
+        ("assert", "assert.ts"),
+        ("node:assert", "assert.ts"),
+        ("module", "module.ts"),
+        ("node:module", "module.ts"),
+        ("http", "http.ts"),
+        ("node:http", "http.ts"),
+        ("https", "https.ts"),
+        ("node:https", "https.ts"),
+        ("zlib", "zlib.ts"),
+        ("node:zlib", "zlib.ts"),
+        ("worker_threads", "worker_threads.ts"),
+        ("node:worker_threads", "worker_threads.ts"),
+        ("http2", "http2.ts"),
+        ("node:http2", "http2.ts"),
+        ("cloudflare:sockets", "cloudflare-sockets.ts"),
+        ("querystring", "querystring.ts"),
+        ("node:querystring", "querystring.ts"),
+        ("file-type", "file-type.ts"),
+        ("file-type/core", "file-type.ts"),
+        ("file-type/core.js", "file-type.ts"),
+        ("sharp", "sharp.ts"),
+    ];
+    let next_mappings: &[(&str, &str)] = &[
+        ("next/link", "next-link.ts"),
+        ("next/image", "next-image.ts"),
+        ("next/head", "head.ts"),
+        ("next/router", "next-router.ts"),
+        ("next/navigation", "next-navigation.ts"),
+        ("next/headers", "next-headers.ts"),
+        ("next/cache", "next-cache.ts"),
+        ("next/server", "next-server.ts"),
+        ("next/font/google", "next-font.ts"),
+        ("next/font/local", "next-font.ts"),
+        ("next/dynamic", "next-dynamic.ts"),
+        ("@vercel/og", "empty.ts"),
+        ("next/og", "empty.ts"),
+    ];
+    let mk = |s: &str, f: &str| {
+        (
+            s.to_string(),
+            vec![Some(runtime_dir.join(f).to_string_lossy().to_string())],
+        )
+    };
+    let mut aliases: Vec<_> = modules.iter().map(|(s, f)| mk(s, f)).collect();
+    aliases.extend(
+        next_mappings
+            .iter()
+            .filter(|(_, f)| runtime_dir.join(f).exists())
+            .map(|(s, f)| mk(s, f)),
+    );
+    aliases
+}
+
+/// Parse tsconfig.json `paths` from the project root and return rolldown-compatible
+/// resolve aliases. Handles wildcard patterns (e.g. `"@/*": ["./src/*"]`).
+///
+/// Returns an empty Vec if tsconfig.json doesn't exist or has no paths.
+pub(crate) fn tsconfig_path_aliases(project_root: &Path) -> Vec<(String, Vec<Option<String>>)> {
+    let tsconfig_path = project_root.join("tsconfig.json");
+    let content = match fs::read_to_string(&tsconfig_path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    // Strip single-line comments (tsconfig allows them)
+    let stripped: String = content
+        .lines()
+        .map(|line| {
+            if let Some(idx) = line.find("//") {
+                // Only strip if not inside a string
+                let before = &line[..idx];
+                if before.matches('"').count() % 2 == 0 {
+                    return before;
+                }
+            }
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let parsed: serde_json::Value = match serde_json::from_str(&stripped) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+
+    let paths = match parsed
+        .get("compilerOptions")
+        .and_then(|co| co.get("paths"))
+        .and_then(|p| p.as_object())
+    {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+
+    let base_url = parsed
+        .get("compilerOptions")
+        .and_then(|co| co.get("baseUrl"))
+        .and_then(|b| b.as_str())
+        .unwrap_or(".");
+    let base_dir = project_root.join(base_url);
+
+    let mut aliases = Vec::new();
+    for (key, value) in paths {
+        let targets = match value.as_array() {
+            Some(arr) => arr,
+            None => continue,
+        };
+        let target = match targets.first().and_then(|t| t.as_str()) {
+            Some(t) => t,
+            None => continue,
+        };
+
+        if key.ends_with("/*") && target.ends_with("/*") {
+            // Wildcard: "@/*" → "./src/*" becomes "@" → "{base}/src"
+            let alias_key = key[..key.len() - 2].to_string();
+            let alias_target = base_dir
+                .join(&target[..target.len() - 2])
+                .to_string_lossy()
+                .to_string();
+            aliases.push((alias_key, vec![Some(alias_target)]));
+        } else {
+            // Exact: "@payload-config" → "./payload.config.ts"
+            aliases.push((
+                key.clone(),
+                vec![Some(base_dir.join(target).to_string_lossy().to_string())],
+            ));
+        }
+    }
+
+    // Always map /public → {project_root}/public (Next.js convention for
+    // absolute-path asset imports like `/public/image.svg`)
+    let public_dir = project_root.join("public");
+    if public_dir.exists() {
+        aliases.push((
+            "/public".to_string(),
+            vec![Some(public_dir.to_string_lossy().to_string())],
+        ));
+    }
+
+    aliases
+}
+
 /// Get the path to the server runtime files.
 /// These are embedded in the source tree at runtime/server/.
 pub fn runtime_server_dir() -> Result<PathBuf> {

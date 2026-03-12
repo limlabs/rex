@@ -52,10 +52,11 @@ pub fn scan_app(app_dir: &Path) -> anyhow::Result<Option<AppScanResult>> {
     let mut routes = Vec::new();
     flatten_routes(
         &root,
-        &[], // pattern segments
-        &[], // layout chain
-        &[], // loading chain
-        &[], // error chain
+        &[],  // pattern segments
+        &[],  // layout chain
+        &[],  // loading chain
+        &[],  // error chain
+        None, // route group
         &mut routes,
     );
 
@@ -142,6 +143,7 @@ fn flatten_routes(
     layout_chain: &[PathBuf],
     loading_chain: &[Option<PathBuf>],
     error_chain: &[Option<PathBuf>],
+    route_group: Option<&str>,
     routes: &mut Vec<AppRoute>,
 ) {
     // Extend chains with this segment's components.
@@ -158,6 +160,15 @@ fn flatten_routes(
     // Build pattern parts for this segment.
     let mut current_parts = pattern_parts.to_vec();
     let is_group = is_route_group(&segment.segment);
+
+    // If this is a route group, capture its name for bundle splitting.
+    // The first (outermost) group wins — nested groups don't override.
+    let current_group = if is_group && route_group.is_none() {
+        // Strip parentheses: "(app)" → "app"
+        Some(&segment.segment[1..segment.segment.len() - 1])
+    } else {
+        route_group
+    };
 
     if !segment.segment.is_empty() && !is_group {
         // Add this segment to the URL pattern.
@@ -177,6 +188,7 @@ fn flatten_routes(
             error_chain: current_errors.clone(),
             dynamic_segments,
             specificity,
+            route_group: current_group.map(|s| s.to_string()),
         });
     }
 
@@ -188,6 +200,7 @@ fn flatten_routes(
             &current_layouts,
             &current_loadings,
             &current_errors,
+            current_group,
             routes,
         );
     }

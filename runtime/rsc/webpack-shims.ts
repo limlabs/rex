@@ -7,7 +7,7 @@
 // The SSR bundle uses __rex_ssr_modules__ for module resolution.
 //
 // NOTE: This file is injected as a banner (not processed by OXC), so it must
-// be valid JavaScript.  Types come from global.d.ts declarations.
+// be valid JavaScript. Types come from global.d.ts declarations.
 
 globalThis.__rex_client_modules__ = globalThis.__rex_client_modules__ || {};
 globalThis.__rex_ssr_modules__ = globalThis.__rex_ssr_modules__ || {};

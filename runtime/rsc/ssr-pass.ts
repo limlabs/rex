@@ -2,92 +2,173 @@
 //
 // Uses React's official APIs:
 //   - createFromReadableStream() from react-server-dom-webpack/client
-//   - renderToString() from react-dom/server
+//   - renderToReadableStream() from react-dom/server (streaming, Suspense-aware)
 //
 // The virtual entry sets these globals before this code runs:
 //   - __rex_createFromReadableStream: from react-server-dom-webpack/client
-//   - __rex_renderToString: from react-dom/server
+//   - __rex_renderToReadableStream_ssr: from react-dom/server
 //   - __rex_webpack_ssr_manifest: client-side module map for resolving client refs
+//
+// IMPORTANT: createFromReadableStream returns a thenable React root element.
+// This must be passed DIRECTLY to renderToReadableStream — React's server
+// renderer handles thenables natively (suspends until resolved). Awaiting
+// the thenable first yields raw tree data without proper $$typeof symbols.
 
-var _ssrPending = false;
-var _ssrResult: string | null = null;
+let _ssrPending = false;
+let _ssrResult: string | null = null;
+
+function _ssrSafeErrorString(e: unknown): string {
+    try {
+        if (e instanceof Error) {
+            if (e.stack) return e.stack;
+            return e.message || 'Unknown error';
+        }
+        return String(e);
+    } catch {
+        return 'Unknown error (serialization failed)';
+    }
+}
+
+function _ssrError(msg: string, flightString: string): string {
+    return JSON.stringify({
+        body: '<div style="color:red">' + msg.replace(/</g, '&lt;') + '</div>',
+        head: '',
+        flight: flightString
+    });
+}
+
+// Drain a ReadableStream of HTML chunks into a single string using the
+// trampoline pattern (avoids stack overflow when promises resolve sync in V8).
+function _drainHtmlStream(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    flightString: string,
+): void {
+    const chunks: (string | Uint8Array)[] = [];
+
+    function drain(): void {
+        let sync = true;
+        let loop = true;
+        while (loop) {
+            loop = false;
+            reader.read().then(function(result: ReadableStreamReadResult<Uint8Array>) {
+                if (result.done) {
+                    const decoder = new TextDecoder();
+                    const parts: string[] = [];
+                    for (let i = 0; i < chunks.length; i++) {
+                        const c = chunks[i];
+                        parts.push(typeof c === 'string' ? c : decoder.decode(c, { stream: true }));
+                    }
+                    // Flush any remaining bytes from the decoder
+                    parts.push(decoder.decode());
+                    _ssrResult = JSON.stringify({
+                        body: parts.join(''),
+                        head: '',
+                        flight: flightString
+                    });
+                    _ssrPending = false;
+                } else {
+                    chunks.push(result.value);
+                    if (sync) {
+                        loop = true;
+                    } else {
+                        drain();
+                    }
+                }
+            }, function(err: unknown) {
+                _ssrResult = _ssrError('SSR stream error: ' + _ssrSafeErrorString(err), flightString);
+                _ssrPending = false;
+            });
+        }
+        sync = false;
+    }
+    drain();
+}
+
+// Render a React element to HTML using the streaming renderToReadableStream API.
+// The element may be a thenable (from createFromReadableStream) — React's server
+// renderer handles this natively by suspending until it resolves.
+function _renderToHtml(element: unknown, flightString: string): void {
+    try {
+        const streamPromise = __rex_renderToReadableStream_ssr(element, {
+            onError: function(err: unknown) {
+                if (typeof console !== 'undefined') {
+                    console.error('[Rex SSR onError]', _ssrSafeErrorString(err));
+                }
+            }
+        });
+        Promise.resolve(streamPromise).then(function(htmlStream: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+            htmlStream.allReady.then(function() {
+                _drainHtmlStream(htmlStream.getReader(), flightString);
+            }, function(err: unknown) {
+                _ssrResult = _ssrError('SSR allReady error: ' + _ssrSafeErrorString(err), flightString);
+                _ssrPending = false;
+            });
+        }, function(err: unknown) {
+            _ssrResult = _ssrError('SSR render error: ' + _ssrSafeErrorString(err), flightString);
+            _ssrPending = false;
+        });
+    } catch(e) {
+        _ssrResult = _ssrError('SSR render error: ' + _ssrSafeErrorString(e), flightString);
+        _ssrPending = false;
+    }
+}
 
 globalThis.__rex_rsc_flight_to_html = function(flightString: string): string {
     _ssrPending = true;
     _ssrResult = null;
 
-    // Wrap flight string in a ReadableStream for createFromReadableStream
-    var encoder = new TextEncoder();
-    var encoded = encoder.encode(flightString);
-    var stream = new ReadableStream<Uint8Array>({
-        start: function(controller: ReadableStreamDefaultController<Uint8Array>) {
-            controller.enqueue(encoded);
-            controller.close();
-        }
-    });
+    // Use raw flight bytes if available (avoids UTF-8 round-trip that corrupts
+    // binary flight chunks like TypedArrays). Falls back to re-encoding the string.
+    const rawChunks: Uint8Array[] | null = globalThis.__rex_flight_raw_chunks || null;
+    let stream: ReadableStream<Uint8Array>;
 
-    var ssrManifest = globalThis.__rex_webpack_ssr_manifest || {};
-    var treeResult: unknown;
-    try {
-        treeResult = __rex_createFromReadableStream(stream, {
-            ssrManifest: {
-                moduleMap: ssrManifest,
-                moduleLoading: null
+    if (rawChunks && rawChunks.length > 0) {
+        let chunkIndex = 0;
+        stream = new ReadableStream<Uint8Array>({
+            pull: function(controller: ReadableStreamDefaultController<Uint8Array>) {
+                if (chunkIndex < rawChunks!.length) {
+                    controller.enqueue(rawChunks![chunkIndex++]);
+                } else {
+                    controller.close();
+                }
             }
         });
-    } catch(e) {
-        _ssrResult = JSON.stringify({
-            body: '<div style="color:red">RSC SSR Error: ' + String(e).replace(/</g, '&lt;') + '</div>',
-            head: '',
-            flight: flightString
+    } else {
+        const encoder = new TextEncoder();
+        const encoded = encoder.encode(flightString);
+        stream = new ReadableStream<Uint8Array>({
+            start: function(controller: ReadableStreamDefaultController<Uint8Array>) {
+                controller.enqueue(encoded);
+                controller.close();
+            }
         });
+    }
+
+    const ssrManifest = globalThis.__rex_webpack_ssr_manifest || {};
+    let treeResult: unknown;
+    try {
+        treeResult = __rex_createFromReadableStream(stream, {
+            serverConsumerManifest: {
+                moduleMap: ssrManifest,
+                serverModuleMap: {},
+                moduleLoading: null
+            }
+        } as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+    } catch(e) {
+        _ssrResult = _ssrError('RSC SSR Error: ' + _ssrSafeErrorString(e), flightString);
         _ssrPending = false;
         return _ssrResult;
     }
 
-    // createFromReadableStream returns a thenable
-    // For synchronous flight data, it may resolve immediately after microtask pump
-    if (treeResult && typeof (treeResult as PromiseLike<unknown>).then === 'function') {
-        (treeResult as PromiseLike<unknown>).then(function(tree: unknown) {
-            try {
-                var html = __rex_renderToString(tree);
-                _ssrResult = JSON.stringify({ body: html, head: '', flight: flightString });
-            } catch(e) {
-                _ssrResult = JSON.stringify({
-                    body: '<div style="color:red">SSR render error: ' + String(e).replace(/</g, '&lt;') + '</div>',
-                    head: '',
-                    flight: flightString
-                });
-            }
-            _ssrPending = false;
-        }, function(err: unknown) {
-            _ssrResult = JSON.stringify({
-                body: '<div style="color:red">SSR error: ' + String(err).replace(/</g, '&lt;') + '</div>',
-                head: '',
-                flight: flightString
-            });
-            _ssrPending = false;
-        });
-
-        if (!_ssrPending) {
-            return _ssrResult!;
-        }
-        return '__REX_SSR_ASYNC__';
+    // Pass the thenable directly to renderToReadableStream. React's server
+    // renderer handles thenables natively — it suspends until the flight data
+    // resolves, then renders the tree. Do NOT .then() this first, as the
+    // resolved value is raw tree data without $$typeof symbols.
+    _renderToHtml(treeResult, flightString);
+    if (!_ssrPending) {
+        return _ssrResult!;
     }
-
-    // Synchronous result — render directly
-    try {
-        var html = __rex_renderToString(treeResult);
-        _ssrResult = JSON.stringify({ body: html, head: '', flight: flightString });
-    } catch(e) {
-        _ssrResult = JSON.stringify({
-            body: '<div style="color:red">SSR render error: ' + String(e).replace(/</g, '&lt;') + '</div>',
-            head: '',
-            flight: flightString
-        });
-    }
-    _ssrPending = false;
-    return _ssrResult!;
+    return '__REX_SSR_ASYNC__';
 };
 
 globalThis.__rex_resolve_ssr_pending = function(): "pending" | "done" {

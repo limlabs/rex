@@ -60,6 +60,15 @@ impl SsrIsolate {
     pub fn new(server_bundle_js: &str, project_root: Option<&str>) -> Result<Self> {
         let mut isolate = v8::Isolate::new(v8::CreateParams::default());
 
+        // Use explicit microtask policy so microtasks only run during
+        // perform_microtask_checkpoint(). This prevents promise callbacks
+        // from firing during Rust→JS calls (e.g., push_data in poll_tcp_sockets),
+        // which would cause out-of-order execution in pg-pool's state machine.
+        isolate.set_microtasks_policy(v8::MicrotasksPolicy::Explicit);
+
+        // Log unhandled promise rejections for debugging
+        isolate.set_promise_reject_callback(promise_reject_callback);
+
         let (
             context,
             render_fn,
@@ -137,8 +146,24 @@ impl SsrIsolate {
                     .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
                 global.set(scope, k.into(), f.into());
 
+                // Install globalThis.queueMicrotask — V8 doesn't provide this
+                // built-in in bare isolates. Without it, the JS polyfill falls back
+                // to a synchronous `fn()` call, which breaks microtask ordering
+                // with promise .then() handlers (those go through V8's internal
+                // queue and are deferred until perform_microtask_checkpoint()).
+                let t = v8::FunctionTemplate::new(scope, queue_microtask_callback);
+                let f = t
+                    .get_function(scope)
+                    .ok_or_else(|| anyhow::anyhow!("Failed to create queueMicrotask"))?;
+                let k = v8::String::new(scope, "queueMicrotask")
+                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+                global.set(scope, k.into(), f.into());
+
                 // Register fs polyfill callbacks
                 crate::fs::register_fs_callbacks(scope, global)?;
+
+                // Register TCP socket callbacks (for cloudflare:sockets polyfill)
+                crate::tcp::register_tcp_callbacks(scope, global)?;
 
                 // Set project root for fs sandboxing
                 if let Some(root) = project_root {
@@ -535,7 +560,10 @@ fn build_process_env_script() -> String {
         }
         let _ = write!(pairs, "{key_json}:{val_json}");
     }
-    format!("globalThis.process = {{ env: {{{pairs}}} }};")
+    // Merge env into existing process object (don't overwrite polyfilled methods)
+    format!(
+        "if(!globalThis.process){{globalThis.process={{}}}};globalThis.process.env={{{pairs}}};"
+    )
 }
 
 fn format_args(scope: &mut v8::PinScope, args: &v8::FunctionCallbackArguments) -> String {
@@ -545,6 +573,22 @@ fn format_args(scope: &mut v8::PinScope, args: &v8::FunctionCallbackArguments) -
         parts.push(arg.to_rust_string_lossy(scope));
     }
     parts.join(" ")
+}
+
+#[allow(unsafe_code)]
+unsafe extern "C" fn promise_reject_callback(msg: v8::PromiseRejectMessage) {
+    let event = msg.get_event();
+    match event {
+        v8::PromiseRejectEvent::PromiseRejectWithNoHandler => {
+            tracing::warn!("Unhandled promise rejection (no handler attached)");
+        }
+        v8::PromiseRejectEvent::PromiseHandlerAddedAfterReject => {
+            // Handler was added later — suppress
+        }
+        _ => {
+            tracing::warn!("Promise reject event: {:?}", event);
+        }
+    }
 }
 
 fn console_log(scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _: v8::ReturnValue) {
@@ -561,4 +605,20 @@ fn console_error(
     _: v8::ReturnValue,
 ) {
     tracing::error!(target: "v8::console", "{}", format_args(scope, &args));
+}
+
+/// `queueMicrotask(fn)` — enqueues a function into V8's microtask queue.
+/// In bare V8 (no embedder), `queueMicrotask` is not a built-in global.
+/// Without this, the JS polyfill falls back to `fn()` (synchronous), which
+/// breaks ordering with promise `.then()` handlers.
+fn queue_microtask_callback(
+    scope: &mut v8::PinScope,
+    args: v8::FunctionCallbackArguments,
+    _ret: v8::ReturnValue,
+) {
+    if args.length() < 1 || !args.get(0).is_function() {
+        return;
+    }
+    let func = v8::Local::<v8::Function>::try_from(args.get(0)).expect("queueMicrotask arg");
+    scope.enqueue_microtask(func);
 }

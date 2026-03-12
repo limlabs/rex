@@ -18,6 +18,8 @@ pub(crate) struct RscBuildContext<'a> {
     pub build_id: &'a str,
     pub define: &'a [(String, String)],
     pub module_dirs: &'a [String],
+    /// Pre-compiled MDX file aliases (original path → compiled JSX path).
+    pub mdx_aliases: Vec<(String, Vec<Option<String>>)>,
 }
 
 impl<'a> RscBuildContext<'a> {
@@ -35,12 +37,18 @@ impl<'a> RscBuildContext<'a> {
             );
             config.project_root.clone()
         });
+        // Pre-compile MDX content files for rolldown alias resolution
+        let mdx_aliases =
+            crate::mdx::compile_all_mdx_files(&project_root, &config.server_build_dir())
+                .unwrap_or_default();
+
         Self {
             config,
             project_root,
             build_id,
             define,
             module_dirs,
+            mdx_aliases,
         }
     }
 
@@ -62,7 +70,8 @@ impl<'a> RscBuildContext<'a> {
         }
         // Binary assets → binary (prevents UTF-8 read errors)
         for ext in &[
-            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2", ".ttf", ".eot",
+            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".avif", ".bmp", ".tiff", ".woff",
+            ".woff2", ".ttf", ".eot", ".wasm",
         ] {
             m.insert((*ext).to_string(), rolldown::ModuleType::Binary);
         }

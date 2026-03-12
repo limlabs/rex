@@ -467,24 +467,48 @@ fn response_text_callback(
 /// Default timeout for the fetch loop (30 seconds).
 const FETCH_LOOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Call `globalThis.__rex_drain_timers()` — fires expired setTimeout callbacks.
+/// Returns true if any timer was fired.
+fn drain_js_timers(isolate: &mut v8::OwnedIsolate, context: &v8::Global<v8::Context>) -> bool {
+    v8::scope_with_context!(scope, isolate, context);
+    let global = context.open(scope).global(scope);
+
+    let Some(key) = v8::String::new(scope, "__rex_drain_timers") else {
+        return false;
+    };
+    let Some(func_val) = global.get(scope, key.into()) else {
+        return false;
+    };
+    let Ok(func) = v8::Local::<v8::Function>::try_from(func_val) else {
+        return false;
+    };
+
+    let recv = v8::undefined(scope);
+    match func.call(scope, recv.into(), &[]) {
+        Some(result) => result.boolean_value(scope),
+        None => false,
+    }
+}
+
 /// Run the batch-and-resolve loop until all async work is settled.
 ///
-/// This is the core pattern that enables `fetch()` in bare V8:
+/// This is the core IO loop that enables `fetch()` and TCP sockets in bare V8:
 /// 1. Run microtask checkpoint (resolves pending .then chains)
 /// 2. Drain the fetch queue
-/// 3. If queue is empty, break
-/// 4. Fire all queued requests concurrently via join_all
-/// 5. Resolve/reject promises
-/// 6. Repeat
+/// 3. Poll TCP sockets (push-based: non-blocking reads → call JS callbacks)
+/// 4. If progress was made, repeat (more microtasks may have been queued)
+/// 5. If no progress, sleep briefly and retry once before exiting
 ///
-/// Times out after 30 seconds to prevent runaway fetch chains.
+/// The caller (resolve_rsc_async / pump_action_loop) re-enters this function
+/// if the render/action is still pending, so the IO loop doesn't need to
+/// wait indefinitely for TCP data.
 pub fn run_fetch_loop(isolate: &mut v8::OwnedIsolate, context: &v8::Global<v8::Context>) {
     let deadline = std::time::Instant::now() + FETCH_LOOP_TIMEOUT;
 
     loop {
         if std::time::Instant::now() > deadline {
             tracing::error!(
-                "fetch loop timed out after {}s — possible infinite fetch chain",
+                "IO loop timed out after {}s — possible infinite fetch/IO chain",
                 FETCH_LOOP_TIMEOUT.as_secs()
             );
             // Reject all remaining queued fetches
@@ -493,7 +517,7 @@ pub fn run_fetch_loop(isolate: &mut v8::OwnedIsolate, context: &v8::Global<v8::C
                 v8::scope_with_context!(scope, isolate, context);
                 for req in remaining {
                     let resolver = v8::Local::new(scope, &req.resolver);
-                    if let Some(msg) = v8::String::new(scope, "fetch loop timed out") {
+                    if let Some(msg) = v8::String::new(scope, "IO loop timed out") {
                         let err = v8::Exception::error(scope, msg);
                         resolver.reject(scope, err);
                     }
@@ -504,26 +528,89 @@ pub fn run_fetch_loop(isolate: &mut v8::OwnedIsolate, context: &v8::Global<v8::C
 
         isolate.perform_microtask_checkpoint();
 
-        let pending = drain_fetch_queue();
-        if pending.is_empty() {
+        // Drain expired JS timers (setTimeout callbacks whose delay has elapsed)
+        let timer_progress = drain_js_timers(isolate, context);
+        if timer_progress {
+            // Timers may have queued microtasks — run checkpoint again
+            isolate.perform_microtask_checkpoint();
+        }
+
+        let pending_fetch = drain_fetch_queue();
+        let has_tcp = crate::tcp::has_active_tcp_sockets();
+        let had_fetch = !pending_fetch.is_empty();
+
+        if !had_fetch && !has_tcp && !timer_progress {
             break;
         }
 
-        let results = execute_fetch_batch(&pending);
+        let mut made_progress = timer_progress;
 
-        // Resolve/reject each promise
-        v8::scope_with_context!(scope, isolate, context);
+        // Process HTTP fetch requests
+        if had_fetch {
+            made_progress = true;
+            let results = execute_fetch_batch(&pending_fetch);
 
-        for (req, result) in pending.into_iter().zip(results) {
-            let resolver = v8::Local::new(scope, &req.resolver);
-            match result {
-                Ok(ref resp) => {
-                    resolve_fetch_promise!(scope, resolver, resp);
-                }
-                Err(ref e) => {
-                    reject_fetch_promise!(scope, resolver, e);
+            v8::scope_with_context!(scope, isolate, context);
+
+            for (req, result) in pending_fetch.into_iter().zip(results) {
+                let resolver = v8::Local::new(scope, &req.resolver);
+                match result {
+                    Ok(ref resp) => {
+                        resolve_fetch_promise!(scope, resolver, resp);
+                    }
+                    Err(ref e) => {
+                        reject_fetch_promise!(scope, resolver, e);
+                    }
                 }
             }
         }
+
+        // Poll TCP sockets (push-based reads)
+        if has_tcp {
+            let tcp_progress = crate::tcp::poll_tcp_sockets(isolate, context);
+            if tcp_progress {
+                made_progress = true;
+                // Data push callbacks may have queued microtasks (e.g., pg-pool
+                // schedules process.nextTick after receiving query results).
+                // Drain them now so connection state settles before next iteration.
+                isolate.perform_microtask_checkpoint();
+            }
+        }
+
+        if made_progress {
+            // Data was processed — loop to run microtask checkpoint and check
+            // for new work that may have been queued by JS callbacks.
+            continue;
+        }
+
+        // No progress. Wait briefly and retry once — the server may respond
+        // within a millisecond (typical for localhost database queries).
+        std::thread::sleep(std::time::Duration::from_millis(1));
+
+        isolate.perform_microtask_checkpoint();
+
+        // Drain timers again after sleep
+        if drain_js_timers(isolate, context) {
+            continue;
+        }
+
+        // Check if microtasks produced new fetch requests (without consuming them)
+        let new_fetch = FETCH_QUEUE.with(|q| !q.borrow().is_empty());
+        if new_fetch {
+            continue;
+        }
+
+        // Retry TCP poll after sleep
+        if has_tcp {
+            let tcp_progress = crate::tcp::poll_tcp_sockets(isolate, context);
+            if tcp_progress {
+                isolate.perform_microtask_checkpoint();
+                continue;
+            }
+        }
+
+        // Still no progress after retry — exit. The outer loop (resolve_rsc_async)
+        // will re-enter if the render/action is still pending.
+        break;
     }
 }

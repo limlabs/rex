@@ -87,6 +87,74 @@ export function rmSync(path: string, options?: { recursive?: boolean; force?: bo
     checkResult(globalThis.__rex_fs_rm_sync(root, path, options || undefined));
 }
 
+// Stub WriteStream class — PayloadCMS imports it but actual file streaming
+// isn't supported in V8. Provides shape-compatibility only.
+export class WriteStream {
+    writable = true;
+    path = '';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    write(_chunk: any): boolean { return true; }
+    end(): void { /* noop */ }
+    on(_event: string, _cb: (...args: unknown[]) => void): this { return this; }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export class ReadStream {
+    readable = true;
+    path = '';
+    on(_event: string, _cb: (...args: unknown[]) => void): this { return this; }
+    pipe<T>(dest: T): T { return dest; }
+}
+
+export function createWriteStream(path: string): WriteStream {
+    const s = new WriteStream();
+    s.path = path;
+    return s;
+}
+
+export function createReadStream(path: string): ReadStream {
+    const s = new ReadStream();
+    s.path = path;
+    return s;
+}
+
+export function realpathSync(path: string): string {
+    return path; // No symlink resolution in V8 — passthrough
+}
+
+// Inline promises object to avoid circular import with fs-promises.ts
+export const promises = {
+    readFile(path: string, options?: string | { encoding?: string }): Promise<string | Uint8Array> {
+        return Promise.resolve(readFileSync(path, options));
+    },
+    writeFile(path: string, data: string | Uint8Array, _options?: unknown): Promise<void> {
+        return Promise.resolve(writeFileSync(path, data, _options));
+    },
+    readdir(path: string): Promise<string[]> {
+        return Promise.resolve(readdirSync(path));
+    },
+    stat(path: string): Promise<StatResult> {
+        return Promise.resolve(statSync(path));
+    },
+    mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
+        return Promise.resolve(mkdirSync(path, options));
+    },
+    access(path: string): Promise<void> {
+        return existsSync(path)
+            ? Promise.resolve()
+            : Promise.reject(Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' }));
+    },
+    unlink(path: string): Promise<void> {
+        return Promise.resolve(unlinkSync(path));
+    },
+    rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void> {
+        return Promise.resolve(rmSync(path, options));
+    },
+    realpath(path: string): Promise<string> {
+        return Promise.resolve(path);
+    },
+};
+
 const fs = {
     readFileSync,
     writeFileSync,
@@ -96,6 +164,12 @@ const fs = {
     existsSync,
     unlinkSync,
     rmSync,
+    createWriteStream,
+    createReadStream,
+    realpathSync,
+    promises,
+    WriteStream,
+    ReadStream,
 };
 
 export default fs;

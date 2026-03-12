@@ -25,6 +25,8 @@ const SERVER_RUNTIME_TS: &[&str] = &[
 /// Order matters: text-encoding before buffer, buffer before crypto.
 const V8_POLYFILL_MODULES: &[&str] = &[
     "process",
+    "navigator",
+    "intl",
     "timers",
     "message-channel",
     "text-encoding",

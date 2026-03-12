@@ -55,6 +55,34 @@ pub fn ensure_builtin_modules(project_root: &Path) -> Result<PathBuf> {
     Ok(node_modules_dir)
 }
 
+/// Packages that Rex always provides, even when the project has its own
+/// package.json. These are internal deps needed by Rex's RSC runtime.
+const REX_INTERNAL_PACKAGES: &[&str] = &["react-server-dom-webpack"];
+
+/// Ensures Rex-internal packages are available in the project's node_modules,
+/// extracting them from the embedded binary if missing. Unlike
+/// `ensure_builtin_modules`, this does NOT wipe existing node_modules — it only
+/// adds missing packages.
+pub fn ensure_internal_packages(project_root: &Path) -> Result<()> {
+    let node_modules_dir = project_root.join("node_modules");
+    for &pkg in REX_INTERNAL_PACKAGES {
+        let pkg_dir = node_modules_dir.join(pkg);
+        if pkg_dir.join("package.json").exists() {
+            continue;
+        }
+        // Extract from embedded vendor directory
+        if let Some(embedded) = VENDOR_NODE_MODULES.get_dir(pkg) {
+            info!(
+                "Extracting built-in {pkg} to {}",
+                node_modules_dir.display()
+            );
+            fs::create_dir_all(&pkg_dir)?;
+            extract_dir(embedded, &node_modules_dir)?;
+        }
+    }
+    Ok(())
+}
+
 /// Recursively extracts an embedded directory to a filesystem path.
 fn extract_dir(dir: &Dir<'_>, dest: &Path) -> Result<()> {
     for file in dir.files() {

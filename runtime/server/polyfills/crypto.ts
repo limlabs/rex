@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// crypto polyfill — randomUUID(), randomBytes(), createHash('sha256')
+// crypto polyfill — randomUUID(), randomBytes(), createHash(), createHmac(), subtle
 (function() {
     const _crypto = (globalThis as any).crypto || {};
 
@@ -31,7 +31,8 @@
         return bytes;
     };
 
-    // SHA-256 constants (FIPS 180-4)
+    // ── SHA-256 (FIPS 180-4) ──────────────────────────────────────────────
+
     const _K256 = new Uint32Array([
         0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
         0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
@@ -96,72 +97,250 @@
         return out;
     }
 
-    _crypto.createHash = function(algorithm: string) {
-        const alg = algorithm.toLowerCase();
-        if (alg !== 'sha256' && alg !== 'sha-256') {
-            throw new Error('crypto.createHash: only sha256 is supported, got "' + algorithm + '"');
+    // ── MD5 (RFC 1321) — used by pg for legacy MD5 password auth ──────────
+
+    function _md5(data: Uint8Array): Uint8Array {
+        const S = [
+            7,12,17,22, 7,12,17,22, 7,12,17,22, 7,12,17,22,
+            5, 9,14,20, 5, 9,14,20, 5, 9,14,20, 5, 9,14,20,
+            4,11,16,23, 4,11,16,23, 4,11,16,23, 4,11,16,23,
+            6,10,15,21, 6,10,15,21, 6,10,15,21, 6,10,15,21
+        ];
+        const K = new Uint32Array(64);
+        for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 0x100000000) >>> 0;
+
+        let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+        const len = data.length;
+        const bitLen = len * 8;
+        const padded = len + 1 + 8;
+        const blocks = Math.ceil(padded / 64) * 64;
+        const msg = new Uint8Array(blocks);
+        msg.set(data);
+        msg[len] = 0x80;
+        // Little-endian bit length
+        msg[blocks - 8] = bitLen & 0xFF;
+        msg[blocks - 7] = (bitLen >>> 8) & 0xFF;
+        msg[blocks - 6] = (bitLen >>> 16) & 0xFF;
+        msg[blocks - 5] = (bitLen >>> 24) & 0xFF;
+
+        for (let offset = 0; offset < blocks; offset += 64) {
+            const M = new Uint32Array(16);
+            for (let j = 0; j < 16; j++) {
+                const p = offset + j * 4;
+                M[j] = msg[p] | (msg[p+1] << 8) | (msg[p+2] << 16) | (msg[p+3] << 24);
+            }
+            let A = a0, B = b0, C = c0, D = d0;
+            for (let i = 0; i < 64; i++) {
+                let F: number, g: number;
+                if (i < 16)      { F = (B & C) | (~B & D); g = i; }
+                else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) % 16; }
+                else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) % 16; }
+                else             { F = C ^ (B | ~D); g = (7 * i) % 16; }
+                F = (F + A + K[i] + M[g]) | 0;
+                A = D; D = C; C = B;
+                B = (B + ((F << S[i]) | (F >>> (32 - S[i])))) | 0;
+            }
+            a0 = (a0 + A) | 0; b0 = (b0 + B) | 0; c0 = (c0 + C) | 0; d0 = (d0 + D) | 0;
         }
-        const _chunks: Uint8Array[] = [];
-        let _totalLen = 0;
+        const out = new Uint8Array(16);
+        for (let i = 0; i < 4; i++) {
+            out[i]     = (a0 >>> (i * 8)) & 0xFF;
+            out[i+4]   = (b0 >>> (i * 8)) & 0xFF;
+            out[i+8]   = (c0 >>> (i * 8)) & 0xFF;
+            out[i+12]  = (d0 >>> (i * 8)) & 0xFF;
+        }
+        return out;
+    }
+
+    // ── HMAC-SHA-256 ──────────────────────────────────────────────────────
+
+    function _hmacSha256(key: Uint8Array, message: Uint8Array): Uint8Array {
+        const blockSize = 64;
+        let keyBlock = new Uint8Array(blockSize);
+        if (key.length > blockSize) {
+            keyBlock.set(_sha256(key));
+        } else {
+            keyBlock.set(key);
+        }
+        const ipad = new Uint8Array(blockSize + message.length);
+        const opad = new Uint8Array(blockSize + 32);
+        for (let i = 0; i < blockSize; i++) {
+            ipad[i] = keyBlock[i] ^ 0x36;
+            opad[i] = keyBlock[i] ^ 0x5c;
+        }
+        ipad.set(message, blockSize);
+        const innerHash = _sha256(ipad);
+        opad.set(innerHash, blockSize);
+        return _sha256(opad);
+    }
+
+    // ── PBKDF2 (RFC 2898) with HMAC-SHA-256 ───────────────────────────────
+
+    function _pbkdf2(password: Uint8Array, salt: Uint8Array, iterations: number, keyLen: number): Uint8Array {
+        const result = new Uint8Array(keyLen);
+        const numBlocks = Math.ceil(keyLen / 32);
+        for (let blockNum = 1; blockNum <= numBlocks; blockNum++) {
+            const saltBlock = new Uint8Array(salt.length + 4);
+            saltBlock.set(salt);
+            saltBlock[salt.length]     = (blockNum >>> 24) & 0xFF;
+            saltBlock[salt.length + 1] = (blockNum >>> 16) & 0xFF;
+            saltBlock[salt.length + 2] = (blockNum >>> 8) & 0xFF;
+            saltBlock[salt.length + 3] = blockNum & 0xFF;
+            let u = _hmacSha256(password, saltBlock);
+            const block = new Uint8Array(u);
+            for (let i = 1; i < iterations; i++) {
+                u = _hmacSha256(password, u);
+                for (let j = 0; j < 32; j++) block[j] ^= u[j];
+            }
+            const offset = (blockNum - 1) * 32;
+            const len = Math.min(32, keyLen - offset);
+            result.set(block.subarray(0, len), offset);
+        }
+        return result;
+    }
+
+    // ── Helper: convert input to Uint8Array ───────────────────────────────
+
+    function _toBytes(data: any, encoding?: string): Uint8Array {
+        if (typeof data === 'string') {
+            if (encoding === 'hex') {
+                const hlen = data.length >> 1;
+                const buf = new Uint8Array(hlen);
+                for (let i = 0; i < hlen; i++) buf[i] = parseInt(data.substr(i * 2, 2), 16);
+                return buf;
+            }
+            return new (globalThis as any).TextEncoder().encode(data);
+        }
+        if (data instanceof Uint8Array) return data;
+        if (data && data._isBuffer) return new Uint8Array(data.buffer, data.byteOffset, data.length);
+        if (data instanceof ArrayBuffer) return new Uint8Array(data);
+        return new Uint8Array(data);
+    }
+
+    function _digestToOutput(result: Uint8Array, encoding?: string): any {
+        if (!encoding || encoding === 'buffer') {
+            if ((globalThis as any).Buffer) return (globalThis as any).Buffer.from(result);
+            return result;
+        }
+        if (encoding === 'hex') {
+            let hex = '';
+            for (let i = 0; i < result.length; i++) hex += (result[i] < 16 ? '0' : '') + result[i].toString(16);
+            return hex;
+        }
+        if (encoding === 'base64') {
+            if ((globalThis as any).Buffer) return (globalThis as any).Buffer.from(result).toString('base64');
+            const b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+            let out = '';
+            for (let i = 0; i < result.length; i += 3) {
+                const aa = result[i], bb = result[i+1], cc = result[i+2];
+                out += b64[aa >> 2];
+                out += b64[((aa & 3) << 4) | ((bb || 0) >> 4)];
+                out += (i+1 < result.length) ? b64[((bb & 0xF) << 2) | ((cc || 0) >> 6)] : '=';
+                out += (i+2 < result.length) ? b64[cc & 0x3F] : '=';
+            }
+            return out;
+        }
+        throw new Error('Unsupported encoding "' + encoding + '"');
+    }
+
+    // ── createHash ────────────────────────────────────────────────────────
+
+    function _selectHash(alg: string): (data: Uint8Array) => Uint8Array {
+        if (alg === 'sha256' || alg === 'sha-256') return _sha256;
+        if (alg === 'md5') return _md5;
+        throw new Error('createHash: unsupported algorithm "' + alg + '"');
+    }
+
+    _crypto.createHash = function(algorithm: string) {
+        const hashFn = _selectHash(algorithm.toLowerCase());
+        const chunks: Uint8Array[] = [];
+        let totalLen = 0;
         const hashObj = {
-            update: function(data: any, encoding?: string) {
-                let buf: Uint8Array;
-                if (typeof data === 'string') {
-                    if (encoding === 'hex') {
-                        const hlen = data.length >> 1;
-                        buf = new Uint8Array(hlen);
-                        for (let i = 0; i < hlen; i++) buf[i] = parseInt(data.substr(i * 2, 2), 16);
-                    } else {
-                        buf = new (globalThis as any).TextEncoder().encode(data);
-                    }
-                } else if (data instanceof Uint8Array) {
-                    buf = data;
-                } else if (data && data._isBuffer) {
-                    buf = new Uint8Array(data.buffer, data.byteOffset, data.length);
-                } else if (data instanceof ArrayBuffer) {
-                    buf = new Uint8Array(data);
-                } else {
-                    buf = new Uint8Array(data);
-                }
-                _chunks.push(buf);
-                _totalLen += buf.length;
+            update(data: any, encoding?: string) {
+                const buf = _toBytes(data, encoding);
+                chunks.push(buf);
+                totalLen += buf.length;
                 return hashObj;
             },
-            digest: function(encoding?: string) {
-                const combined = new Uint8Array(_totalLen);
+            digest(encoding?: string) {
+                const combined = new Uint8Array(totalLen);
                 let pos = 0;
-                for (let i = 0; i < _chunks.length; i++) {
-                    combined.set(_chunks[i], pos);
-                    pos += _chunks[i].length;
-                }
-                const result = _sha256(combined);
-                if (!encoding || encoding === 'buffer') {
-                    if ((globalThis as any).Buffer) return (globalThis as any).Buffer.from(result);
-                    return result;
-                }
-                if (encoding === 'hex') {
-                    let hex = '';
-                    for (let i = 0; i < result.length; i++) hex += (result[i] < 16 ? '0' : '') + result[i].toString(16);
-                    return hex;
-                }
-                if (encoding === 'base64') {
-                    if ((globalThis as any).Buffer) return (globalThis as any).Buffer.from(result).toString('base64');
-                    const b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-                    let out = '';
-                    for (let i = 0; i < result.length; i += 3) {
-                        const aa = result[i], bb = result[i+1], cc = result[i+2];
-                        out += b64[aa >> 2];
-                        out += b64[((aa & 3) << 4) | ((bb || 0) >> 4)];
-                        out += (i+1 < result.length) ? b64[((bb & 0xF) << 2) | ((cc || 0) >> 6)] : '=';
-                        out += (i+2 < result.length) ? b64[cc & 0x3F] : '=';
-                    }
-                    return out;
-                }
-                throw new Error('crypto.createHash digest: unsupported encoding "' + encoding + '"');
+                for (const c of chunks) { combined.set(c, pos); pos += c.length; }
+                return _digestToOutput(hashFn(combined), encoding);
             }
         };
         return hashObj;
     };
+
+    // ── createHmac ────────────────────────────────────────────────────────
+
+    _crypto.createHmac = function(algorithm: string, key: any) {
+        const alg = algorithm.toLowerCase();
+        if (alg !== 'sha256' && alg !== 'sha-256') {
+            throw new Error('createHmac: unsupported algorithm "' + algorithm + '"');
+        }
+        const keyBytes = _toBytes(key);
+        const chunks: Uint8Array[] = [];
+        let totalLen = 0;
+        const hmacObj = {
+            update(data: any, encoding?: string) {
+                const buf = _toBytes(data, encoding);
+                chunks.push(buf);
+                totalLen += buf.length;
+                return hmacObj;
+            },
+            digest(encoding?: string) {
+                const combined = new Uint8Array(totalLen);
+                let pos = 0;
+                for (const c of chunks) { combined.set(c, pos); pos += c.length; }
+                return _digestToOutput(_hmacSha256(keyBytes, combined), encoding);
+            }
+        };
+        return hmacObj;
+    };
+
+    // ── SubtleCrypto (WebCrypto API for pg SCRAM-SHA-256 auth) ────────────
+
+    if (!_crypto.subtle) {
+        _crypto.subtle = {
+            async digest(algorithm: any, data: any): Promise<ArrayBuffer> {
+                const alg = (typeof algorithm === 'string' ? algorithm : algorithm.name || '').replace('-', '').toLowerCase();
+                const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+                if (alg === 'sha256') return _sha256(bytes).buffer as ArrayBuffer;
+                if (alg === 'md5') return _md5(bytes).buffer as ArrayBuffer;
+                throw new Error('subtle.digest: unsupported algorithm');
+            },
+            async importKey(_format: string, keyData: any, algorithm: any, extractable: boolean, usages: string[]): Promise<any> {
+                const data = keyData instanceof Uint8Array ? keyData : new Uint8Array(keyData);
+                return { type: 'raw', algorithm, data, extractable, usages };
+            },
+            async sign(algorithm: any, key: any, data: any): Promise<ArrayBuffer> {
+                const alg = typeof algorithm === 'string' ? algorithm : (algorithm.name || '');
+                if (alg === 'HMAC') {
+                    const msg = data instanceof Uint8Array ? data : new Uint8Array(data);
+                    return _hmacSha256(key.data, msg).buffer as ArrayBuffer;
+                }
+                throw new Error('subtle.sign: unsupported algorithm ' + alg);
+            },
+            async deriveBits(algorithm: any, key: any, length: number): Promise<ArrayBuffer> {
+                if (algorithm.name === 'PBKDF2') {
+                    const salt = algorithm.salt instanceof Uint8Array ? algorithm.salt : new Uint8Array(algorithm.salt);
+                    return _pbkdf2(key.data, salt, algorithm.iterations, length / 8).buffer as ArrayBuffer;
+                }
+                throw new Error('subtle.deriveBits: unsupported algorithm ' + algorithm.name);
+            },
+        };
+    }
+
+    // getRandomValues for SubtleCrypto usage
+    if (typeof _crypto.getRandomValues !== 'function') {
+        _crypto.getRandomValues = function(array: Uint8Array): Uint8Array {
+            for (let i = 0; i < array.length; i++) {
+                array[i] = (Math.random() * 256) | 0;
+            }
+            return array;
+        };
+    }
 
     (globalThis as any).crypto = _crypto;
 })();

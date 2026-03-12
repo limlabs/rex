@@ -31,7 +31,28 @@ macro_rules! v8_eval {
                         .exception()
                         .map(|e| e.to_rust_string_lossy(tc))
                         .unwrap_or_else(|| "Unknown error".into());
-                    Err(anyhow::anyhow!("V8 error in {}: {}", $filename, msg))
+                    let line_info = tc
+                        .message()
+                        .map(|m| {
+                            let line = m.get_line_number(tc).unwrap_or(0);
+                            let src_line = m
+                                .get_source_line(tc)
+                                .map(|s| s.to_rust_string_lossy(tc))
+                                .unwrap_or_default();
+                            let truncated = if src_line.len() > 200 {
+                                &src_line[..200]
+                            } else {
+                                &src_line
+                            };
+                            format!(" at line {line}: {truncated}")
+                        })
+                        .unwrap_or_default();
+                    Err(anyhow::anyhow!(
+                        "V8 error in {}: {}{}",
+                        $filename,
+                        msg,
+                        line_info
+                    ))
                 }
             },
             None => {

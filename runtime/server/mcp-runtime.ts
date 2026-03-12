@@ -1,11 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+/* eslint-disable no-var -- ambient declarations require `declare var` in TypeScript */
 declare var __rex_mcp_tools: Record<string, any> | undefined;
 declare var __rex_mcp_resolved: any;
 declare var __rex_mcp_rejected: any;
 declare var __rex_list_mcp_tools: () => string;
 declare var __rex_call_mcp_tool: (name: string, paramsJson: string) => string;
 declare var __rex_resolve_mcp: () => string;
+/* eslint-enable no-var */
 
 globalThis.__rex_mcp_resolved = null;
 globalThis.__rex_mcp_rejected = null;

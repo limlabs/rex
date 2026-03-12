@@ -248,6 +248,7 @@ export default function RootLayout({ children }) {
             error_chain: vec![None],
             dynamic_segments: vec![],
             specificity: 10,
+            route_group: None,
         }],
         api_routes: vec![],
         root_layout: Some(layout_path),

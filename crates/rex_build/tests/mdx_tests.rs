@@ -252,6 +252,7 @@ async fn test_integration_mdx_app_router_build() {
             error_chain: vec![],
             dynamic_segments: vec![],
             specificity: 1,
+            route_group: None,
         }],
         api_routes: vec![],
         root_layout: Some(layout_path),

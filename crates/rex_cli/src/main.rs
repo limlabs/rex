@@ -221,6 +221,7 @@ async fn main() -> Result<()> {
             no_tui,
         } => {
             let root = std::fs::canonicalize(&root)?;
+            load_dotenv(&root);
             let project_config = ProjectConfig::load(&root)?;
             let is_terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
             let tui_enabled = !no_tui && !project_config.dev.no_tui && is_terminal;
@@ -244,6 +245,8 @@ async fn main() -> Result<()> {
         }
         #[cfg(feature = "build")]
         Commands::Build { root } => {
+            let root_abs = std::fs::canonicalize(&root).unwrap_or(root.clone());
+            load_dotenv(&root_abs);
             init_plain_tracing();
             cmd_build(root).await
         }
@@ -259,6 +262,8 @@ async fn main() -> Result<()> {
             export::cmd_export(root, output, force, base_path, html_extensions).await
         }
         Commands::Start { port, host, root } => {
+            let root_abs = std::fs::canonicalize(&root).unwrap_or(root.clone());
+            load_dotenv(&root_abs);
             init_plain_tracing();
             cmd_start(root, port, host).await
         }
@@ -1581,6 +1586,43 @@ fn format_source(
         anyhow::bail!("parse error");
     }
     Ok(oxc_formatter::Formatter::new(&allocator, options.clone()).build(&parsed.program))
+}
+
+/// Load `.env` file from the project root into the process environment.
+/// Follows Next.js behavior: variables already set in the environment
+/// are NOT overwritten (env vars take precedence over `.env` file).
+fn load_dotenv(project_root: &std::path::Path) {
+    let env_path = project_root.join(".env");
+    let contents = match std::fs::read_to_string(&env_path) {
+        Ok(c) => c,
+        Err(_) => return, // No .env file — that's fine
+    };
+
+    for line in contents.lines() {
+        let line = line.trim();
+        // Skip empty lines and comments
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        // Split on first '='
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        // Strip surrounding quotes
+        let value = if (value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\''))
+        {
+            &value[1..value.len() - 1]
+        } else {
+            value
+        };
+        // Don't overwrite existing env vars
+        if std::env::var(key).is_err() {
+            std::env::set_var(key, value);
+        }
+    }
 }
 
 #[cfg(test)]
