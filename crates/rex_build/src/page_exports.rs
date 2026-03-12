@@ -277,6 +277,17 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_strategy_export_default_identifier() {
+        // Covers the ExportDefaultDeclaration branch
+        let source =
+            "function getServerSideProps() { return { props: {} }; }\nexport default getServerSideProps;\n";
+        assert_eq!(
+            detect_data_strategy_from_source(source).unwrap(),
+            DataStrategy::GetServerSideProps,
+        );
+    }
+
+    #[test]
     fn test_detect_strategy_reexport_syntax() {
         let source = r#"
             export default function Page() { return <div/>; }
