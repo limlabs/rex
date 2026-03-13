@@ -4631,6 +4631,7 @@ dependencies = [
  "rex_v8",
  "rolldown",
  "rolldown_common",
+ "rolldown_error",
  "rolldown_utils",
  "rustc-hash",
  "serde",
