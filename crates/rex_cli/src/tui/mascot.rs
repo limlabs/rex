@@ -44,19 +44,33 @@ const ERROR: [&str; 5] = [
 ];
 
 pub fn render_mascot(f: &mut Frame<'_>, area: Rect, state: MascotState) {
-    let (mascot_lines, color) = match state {
-        MascotState::Error => (&ERROR, Color::Red),
-        MascotState::TailFlick => (&TAIL_FLICK, EMERALD),
-        MascotState::Idle => (&IDLE, EMERALD),
+    let mascot_lines = match state {
+        MascotState::Error => &ERROR,
+        MascotState::TailFlick => &TAIL_FLICK,
+        MascotState::Idle => &IDLE,
     };
+
+    let is_error = matches!(state, MascotState::Error);
 
     let lines: Vec<Line<'_>> = mascot_lines
         .iter()
-        .map(|ml| {
-            Line::from(vec![
-                Span::raw("  "),
-                Span::styled(*ml, Style::default().fg(color)),
-            ])
+        .enumerate()
+        .map(|(i, ml)| {
+            let mut spans = vec![Span::raw("  ")];
+            // In error state, keep the body emerald but color the eye red.
+            // The eye 'X' is on line index 1; split around it.
+            if is_error && i == 1 {
+                if let Some(x_pos) = ml.find('X') {
+                    spans.push(Span::styled(&ml[..x_pos], Style::default().fg(EMERALD)));
+                    spans.push(Span::styled("x", Style::default().fg(Color::Red)));
+                    spans.push(Span::styled(&ml[x_pos + 1..], Style::default().fg(EMERALD)));
+                } else {
+                    spans.push(Span::styled(*ml, Style::default().fg(EMERALD)));
+                }
+            } else {
+                spans.push(Span::styled(*ml, Style::default().fg(EMERALD)));
+            }
+            Line::from(spans)
         })
         .collect();
 

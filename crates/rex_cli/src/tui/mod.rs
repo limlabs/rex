@@ -8,7 +8,7 @@ use futures::StreamExt;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 use std::time::Duration;
 use tracing::Level;
@@ -141,10 +141,19 @@ impl TuiApp {
     fn render_home(&self, f: &mut Frame<'_>) {
         let area = f.area();
 
+        let cw = area.width.saturating_sub(4).max(1) as usize;
         let error_lines = self
             .unresolved_error
             .as_ref()
-            .map(|e| e.message.lines().count().min(12) as u16 + 2) // +2 for header + gap
+            .map(|e| {
+                let wrapped: usize = e
+                    .message
+                    .lines()
+                    .take(12)
+                    .map(|l| l.chars().count().max(1).div_ceil(cw))
+                    .sum();
+                wrapped as u16 + 2
+            })
             .unwrap_or(0);
 
         let chunks = Layout::vertical([
@@ -182,14 +191,14 @@ impl TuiApp {
             ),
         ]));
 
-        // Stack trace lines
+        // Error message lines
         let max_lines = 12;
         let all_lines: Vec<&str> = err.message.lines().collect();
         let show = all_lines.len().min(max_lines);
         for line in &all_lines[..show] {
             lines.push(Line::from(vec![
                 Span::raw("  "),
-                Span::styled(*line, Style::default().fg(Color::DarkGray)),
+                Span::styled(*line, Style::default().fg(Color::Red)),
             ]));
         }
         if all_lines.len() > max_lines {
@@ -202,7 +211,7 @@ impl TuiApp {
             ]));
         }
 
-        let para = Paragraph::new(lines);
+        let para = Paragraph::new(lines).wrap(Wrap { trim: false });
         f.render_widget(para, area);
     }
 
@@ -288,21 +297,31 @@ impl TuiApp {
         }
         lines.push(Line::from(route_spans));
 
-        // Blank line then last log
+        // Blank line then last log — but omit if it duplicates the unresolved error
+        // (the error is already shown in the error section below).
         lines.push(Line::from(""));
-        let last_log_line = match self.log_buffer.last() {
-            Some(entry) => Line::from(vec![
-                Span::styled(
-                    level_symbol(&entry.level),
-                    Style::default().fg(level_color(&entry.level)),
-                ),
-                Span::raw(" "),
-                Span::styled(entry.message, Style::default().fg(Color::DarkGray)),
-            ]),
-            None => Line::from(vec![Span::styled(
-                "Waiting for activity...",
-                Style::default().fg(Color::DarkGray),
-            )]),
+        let last_entry = self.log_buffer.last();
+        let is_duplicate_error = match (&last_entry, &self.unresolved_error) {
+            (Some(entry), Some(err)) => entry.message == err.message,
+            _ => false,
+        };
+        let last_log_line = if is_duplicate_error {
+            Line::from("")
+        } else {
+            match last_entry {
+                Some(entry) => Line::from(vec![
+                    Span::styled(
+                        level_symbol(&entry.level),
+                        Style::default().fg(level_color(&entry.level)),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(entry.message, Style::default().fg(Color::DarkGray)),
+                ]),
+                None => Line::from(vec![Span::styled(
+                    "Waiting for activity...",
+                    Style::default().fg(Color::DarkGray),
+                )]),
+            }
         };
         lines.push(last_log_line);
 
