@@ -16,7 +16,7 @@ fn route_to_file_path_simple() {
     let output = Path::new("/out");
     assert_eq!(
         route_to_file_path(output, "/about"),
-        PathBuf::from("/out/about.html")
+        PathBuf::from("/out/about/index.html")
     );
 }
 
@@ -25,7 +25,7 @@ fn route_to_file_path_nested() {
     let output = Path::new("/out");
     assert_eq!(
         route_to_file_path(output, "/docs/intro"),
-        PathBuf::from("/out/docs/intro.html")
+        PathBuf::from("/out/docs/intro/index.html")
     );
 }
 

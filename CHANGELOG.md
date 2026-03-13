@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.17.3](https://github.com/limlabs/rex/compare/v0.17.2...v0.17.3) (2026-03-12)
+
+
+### Bug Fixes
+
+* **docs:** dismiss mobile menu on nav and highlight active link ([#191](https://github.com/limlabs/rex/issues/191)) ([5ab97f1](https://github.com/limlabs/rex/commit/5ab97f15170b1ad94db8a1da99968466adb26f24))
+* **export:** fix static export routing for GitHub Pages ([#190](https://github.com/limlabs/rex/issues/190)) ([4c1943f](https://github.com/limlabs/rex/commit/4c1943fb8923549c25aeaf062012ee1d31f4b0b0))
+* **init:** use react-jsx transform so React import is not required ([#188](https://github.com/limlabs/rex/issues/188)) ([86e24d0](https://github.com/limlabs/rex/commit/86e24d035e5a686ccc063f75446de31178f786c0))
+
 ## [0.17.2](https://github.com/limlabs/rex/compare/v0.17.1...v0.17.2) (2026-03-12)
 
 
