@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.18.0](https://github.com/limlabs/rex/compare/v0.17.3...v0.18.0) (2026-03-13)
+
+
+### Features
+
+* **docs:** add syntax highlighting to code blocks ([#196](https://github.com/limlabs/rex/issues/196)) ([da51644](https://github.com/limlabs/rex/commit/da51644db992bb2f5f24f9b0969d4628e879e699))
+* improve error experience in TUI and browser dev overlay ([#184](https://github.com/limlabs/rex/issues/184)) ([6a9ef43](https://github.com/limlabs/rex/commit/6a9ef433029a7bcbccd709f823e567ff9a3c0d4b))
+
+
+### Bug Fixes
+
+* **link:** add base path support to npm package Link ([#194](https://github.com/limlabs/rex/issues/194)) ([918418f](https://github.com/limlabs/rex/commit/918418fef73300346c6b9cb266d18e0830c72687))
+
+
+### Performance Improvements
+
+* **dev:** skip rescan and defer V8 reload for content-only HMR ([#185](https://github.com/limlabs/rex/issues/185)) ([95f5ca2](https://github.com/limlabs/rex/commit/95f5ca248e426420b6587e3642321e13a323585c))
+
 ## [0.17.3](https://github.com/limlabs/rex/compare/v0.17.2...v0.17.3) (2026-03-12)
 
 
