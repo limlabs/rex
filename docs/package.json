@@ -1,0 +1,9 @@
+{
+  "name": "rex-docs",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "highlight.js": "^11.11.1"
+  }
+}
