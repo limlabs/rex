@@ -79,15 +79,15 @@ struct TuiApp {
     auto_scroll: bool,
     /// Countdown ticks for the tail-flick animation on HMR rebuild.
     tail_flick_ticks: u8,
-    /// Last log message we saw, used to detect new rebuild events.
-    last_seen_msg: String,
+    /// Log counter at last tick, used to detect new entries.
+    last_seen_count: usize,
     /// Currently unresolved error. Set on ERROR log, cleared on successful rebuild.
     unresolved_error: Option<UnresolvedError>,
 }
 
 impl TuiApp {
     fn new(log_buffer: LogBuffer, startup_info: StartupInfo) -> Self {
-        let last_seen_msg = log_buffer.last().map(|e| e.message).unwrap_or_default();
+        let last_seen_count = log_buffer.total_count();
         Self {
             screen: Screen::Home,
             log_buffer,
@@ -98,26 +98,27 @@ impl TuiApp {
             searching: false,
             auto_scroll: true,
             tail_flick_ticks: 0,
-            last_seen_msg,
+            last_seen_count,
             unresolved_error: None,
         }
     }
 
     /// Advance animation state and detect HMR rebuilds.
     fn tick(&mut self) {
-        if let Some(entry) = self.log_buffer.last() {
-            if entry.message != self.last_seen_msg {
-                if entry.message.starts_with("Rebuild complete") {
-                    self.tail_flick_ticks = 4;
-                    self.unresolved_error = None;
-                } else if entry.level == Level::ERROR {
-                    self.unresolved_error = Some(UnresolvedError {
-                        message: entry.message.clone(),
-                    });
-                }
-                self.last_seen_msg = entry.message;
+        let (new_entries, new_count) = self.log_buffer.drain_since(self.last_seen_count);
+        self.last_seen_count = new_count;
+
+        for entry in new_entries {
+            if entry.message.starts_with("Rebuild complete") {
+                self.tail_flick_ticks = 4;
+                self.unresolved_error = None;
+            } else if entry.level == Level::ERROR {
+                self.unresolved_error = Some(UnresolvedError {
+                    message: entry.message,
+                });
             }
         }
+
         self.tail_flick_ticks = self.tail_flick_ticks.saturating_sub(1);
     }
 
