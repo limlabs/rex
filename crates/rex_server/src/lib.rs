@@ -9,5 +9,7 @@ pub mod rex;
 pub mod server;
 pub mod state;
 
+#[cfg(feature = "build")]
+pub use rex::EsmDevState;
 pub use rex::{PageResult, Rex, RexOptions};
 pub use server::{RexServer, ServerConfig};

@@ -55,9 +55,12 @@ declare global {
   interface RexHmrMessage {
     type: "connected" | "update" | "full-reload" | "error";
     path?: string;
+    timestamp?: number;
     manifest?: RexManifest;
     message?: string;
     file?: string;
+    /** When true, use /_rex/dev/{path}?t={timestamp} instead of bundled chunks */
+    dev_esm?: boolean;
   }
 
   /** RSC module map entry */

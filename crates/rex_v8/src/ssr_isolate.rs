@@ -1,6 +1,20 @@
+use crate::esm_loader::EsmModuleRegistry;
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::sync::Arc;
 use tracing::debug;
+
+/// Determines how the isolate loads JavaScript code.
+pub(crate) enum IsolateMode {
+    /// Traditional mode: self-contained IIFE bundle with React + all pages.
+    Bundled { last_bundle: Arc<String> },
+    /// ESM mode: deps loaded as IIFE, user code as individual ESM modules.
+    Esm {
+        registry: EsmModuleRegistry,
+        /// SSR runtime JS (appended to entry module).
+        ssr_runtime: String,
+    },
+}
 
 /// Result of SSR page rendering, containing both body HTML and head elements.
 #[derive(Debug, Clone, Deserialize)]
@@ -44,9 +58,8 @@ pub struct SsrIsolate {
     pub(crate) form_action_fn: Option<v8::Global<v8::Function>>,
     /// App router route handler dispatch (route.ts)
     pub(crate) app_route_handler_fn: Option<v8::Global<v8::Function>>,
-    /// Last successfully loaded bundle, used to restore state on failed reload.
-    /// Uses `Arc<String>` to share memory across pool isolates instead of cloning.
-    pub(crate) last_bundle: std::sync::Arc<String>,
+    /// How this isolate loads JavaScript code.
+    pub(crate) mode: IsolateMode,
 }
 
 impl SsrIsolate {
@@ -69,8 +82,15 @@ impl SsrIsolate {
         // Log unhandled promise rejections for debugging
         isolate.set_promise_reject_callback(promise_reject_callback);
 
+        // Phase 1: Create V8 context (requires its own scope)
+        let context = {
+            v8::scope!(scope, &mut isolate);
+            let ctx = v8::Context::new(scope, Default::default());
+            v8::Global::new(scope, ctx)
+        };
+
+        // Phase 2: Enter context, install globals, evaluate bundle, extract handles
         let (
-            context,
             render_fn,
             gssp_fn,
             gsp_fn,
@@ -86,102 +106,9 @@ impl SsrIsolate {
             form_action_fn,
             app_route_handler_fn,
         ) = {
-            v8::scope!(scope, &mut isolate);
+            v8::scope_with_context!(scope, &mut isolate, &context);
 
-            let context = v8::Context::new(scope, Default::default());
-            let scope = &mut v8::ContextScope::new(scope, context);
-
-            // Install console + globalThis
-            {
-                let global = context.global(scope);
-
-                let console = v8::Object::new(scope);
-
-                let t = v8::FunctionTemplate::new(scope, console_log);
-                let f = t
-                    .get_function(scope)
-                    .ok_or_else(|| anyhow::anyhow!("Failed to create console.log"))?;
-                let k = v8::String::new(scope, "log")
-                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
-                console.set(scope, k.into(), f.into());
-
-                let t = v8::FunctionTemplate::new(scope, console_warn);
-                let f = t
-                    .get_function(scope)
-                    .ok_or_else(|| anyhow::anyhow!("Failed to create console.warn"))?;
-                let k = v8::String::new(scope, "warn")
-                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
-                console.set(scope, k.into(), f.into());
-
-                let t = v8::FunctionTemplate::new(scope, console_error);
-                let f = t
-                    .get_function(scope)
-                    .ok_or_else(|| anyhow::anyhow!("Failed to create console.error"))?;
-                let k = v8::String::new(scope, "error")
-                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
-                console.set(scope, k.into(), f.into());
-
-                let t = v8::FunctionTemplate::new(scope, console_log);
-                let f = t
-                    .get_function(scope)
-                    .ok_or_else(|| anyhow::anyhow!("Failed to create console.info"))?;
-                let k = v8::String::new(scope, "info")
-                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
-                console.set(scope, k.into(), f.into());
-
-                let k = v8::String::new(scope, "console")
-                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
-                global.set(scope, k.into(), console.into());
-
-                let k = v8::String::new(scope, "globalThis")
-                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
-                global.set(scope, k.into(), global.into());
-
-                // Install globalThis.fetch
-                let t = v8::FunctionTemplate::new(scope, crate::fetch::fetch_callback);
-                let f = t
-                    .get_function(scope)
-                    .ok_or_else(|| anyhow::anyhow!("Failed to create fetch"))?;
-                let k = v8::String::new(scope, "fetch")
-                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
-                global.set(scope, k.into(), f.into());
-
-                // Install globalThis.queueMicrotask — V8 doesn't provide this
-                // built-in in bare isolates. Without it, the JS polyfill falls back
-                // to a synchronous `fn()` call, which breaks microtask ordering
-                // with promise .then() handlers (those go through V8's internal
-                // queue and are deferred until perform_microtask_checkpoint()).
-                let t = v8::FunctionTemplate::new(scope, queue_microtask_callback);
-                let f = t
-                    .get_function(scope)
-                    .ok_or_else(|| anyhow::anyhow!("Failed to create queueMicrotask"))?;
-                let k = v8::String::new(scope, "queueMicrotask")
-                    .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
-                global.set(scope, k.into(), f.into());
-
-                // Register fs polyfill callbacks
-                crate::fs::register_fs_callbacks(scope, global)?;
-
-                // Register TCP socket callbacks (for cloudflare:sockets polyfill)
-                crate::tcp::register_tcp_callbacks(scope, global)?;
-
-                // Set project root for fs sandboxing
-                if let Some(root) = project_root {
-                    let k = v8::String::new(scope, "__rex_project_root")
-                        .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
-                    let v = v8::String::new(scope, root)
-                        .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
-                    global.set(scope, k.into(), v.into());
-                }
-            }
-
-            // Inject process.env from Rust's environment variables.
-            // This runs before the bundle so the banner polyfill's
-            // `if (typeof globalThis.process === 'undefined')` check
-            // sees it already exists and skips the stub.
-            let process_env_script = build_process_env_script();
-            v8_eval!(scope, &process_env_script, "<process-env>")
-                .context("Failed to inject process.env")?;
+            setup_globals(scope, project_root)?;
 
             // Evaluate the self-contained server bundle
             v8_eval!(scope, server_bundle_js, "server-bundle.js")
@@ -195,35 +122,21 @@ impl SsrIsolate {
             let gssp_fn = v8_get_global_fn!(scope, global, "__rex_get_server_side_props")?;
             let gsp_fn = v8_get_global_fn!(scope, global, "__rex_get_static_props")?;
 
-            // API handler is optional — only present when api/ routes exist
             let api_handler_fn = v8_get_optional_fn!(scope, global, "__rex_call_api_handler");
-
-            // Document renderer is optional — only present when _document exists
             let document_fn = v8_get_optional_fn!(scope, global, "__rex_render_document");
-
-            // Middleware is optional — only present when middleware.ts exists
             let middleware_fn = v8_get_optional_fn!(scope, global, "__rex_run_middleware");
-
-            // RSC functions — only present when app/ routes exist
             let rsc_flight_fn = v8_get_optional_fn!(scope, global, "__rex_render_flight");
             let rsc_to_html_fn = v8_get_optional_fn!(scope, global, "__rex_render_rsc_to_html");
-
-            // MCP tools are optional — only present when mcp/ directory has tool files
             let mcp_call_fn = v8_get_optional_fn!(scope, global, "__rex_call_mcp_tool");
             let mcp_list_fn = v8_get_optional_fn!(scope, global, "__rex_list_mcp_tools");
-
-            // Server actions — only present when "use server" modules exist
             let server_action_fn = v8_get_optional_fn!(scope, global, "__rex_call_server_action");
             let server_action_encoded_fn =
                 v8_get_optional_fn!(scope, global, "__rex_call_server_action_encoded");
             let form_action_fn = v8_get_optional_fn!(scope, global, "__rex_call_form_action");
-
-            // App router route handlers — only present when app/**/route.ts files exist
             let app_route_handler_fn =
                 v8_get_optional_fn!(scope, global, "__rex_call_app_route_handler");
 
             (
-                v8::Global::new(scope, context),
                 v8::Global::new(scope, render_fn),
                 v8::Global::new(scope, gssp_fn),
                 v8::Global::new(scope, gsp_fn),
@@ -258,7 +171,9 @@ impl SsrIsolate {
             server_action_encoded_fn,
             form_action_fn,
             app_route_handler_fn,
-            last_bundle: std::sync::Arc::new(server_bundle_js.to_string()),
+            mode: IsolateMode::Bundled {
+                last_bundle: Arc::new(server_bundle_js.to_string()),
+            },
         })
     }
 
@@ -484,8 +399,16 @@ impl SsrIsolate {
         }
     }
 
-    /// Reload the server bundle (for dev mode hot reload)
+    /// Reload the server bundle (for dev mode hot reload).
+    /// Only valid in Bundled mode.
     pub fn reload(&mut self, server_bundle_js: &str) -> Result<()> {
+        let last_bundle = match &self.mode {
+            IsolateMode::Bundled { last_bundle } => last_bundle.clone(),
+            IsolateMode::Esm { .. } => {
+                anyhow::bail!("Cannot reload IIFE bundle in ESM mode; use invalidate_module()");
+            }
+        };
+
         v8::scope_with_context!(scope, &mut self.isolate, &self.context);
 
         // Clear page registry and try the new bundle
@@ -494,7 +417,7 @@ impl SsrIsolate {
             // Restore the last working bundle so the isolate remains functional
             tracing::warn!("New bundle failed, restoring previous: {e}");
             v8_eval!(scope, "globalThis.__rex_pages = {};", "<restore>")?;
-            v8_eval!(scope, &self.last_bundle, "server-bundle.js")
+            v8_eval!(scope, &last_bundle, "server-bundle.js")
                 .context("Failed to restore previous server bundle")?;
             return Err(e.context("Failed to evaluate updated server bundle"));
         }
@@ -537,10 +460,106 @@ impl SsrIsolate {
         self.app_route_handler_fn =
             v8_get_optional_fn!(scope, global, "__rex_call_app_route_handler");
 
-        self.last_bundle = std::sync::Arc::new(server_bundle_js.to_string());
+        self.mode = IsolateMode::Bundled {
+            last_bundle: Arc::new(server_bundle_js.to_string()),
+        };
         debug!("SSR isolate reloaded");
         Ok(())
     }
+}
+
+/// Set up globalThis with console, fetch, queueMicrotask, fs, tcp, project root.
+/// Extracted from `new()` for reuse in `new_esm()`.
+///
+/// Must be called within a `v8::scope_with_context!` block.
+pub(crate) fn setup_globals<'s, 'i>(
+    scope: &mut v8::PinScope<'s, 'i>,
+    project_root: Option<&str>,
+) -> Result<()> {
+    let context = scope.get_current_context();
+    let global = context.global(scope);
+
+    let console = v8::Object::new(scope);
+
+    let t = v8::FunctionTemplate::new(scope, console_log);
+    let f = t
+        .get_function(scope)
+        .ok_or_else(|| anyhow::anyhow!("Failed to create console.log"))?;
+    let k =
+        v8::String::new(scope, "log").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+    console.set(scope, k.into(), f.into());
+
+    let t = v8::FunctionTemplate::new(scope, console_warn);
+    let f = t
+        .get_function(scope)
+        .ok_or_else(|| anyhow::anyhow!("Failed to create console.warn"))?;
+    let k =
+        v8::String::new(scope, "warn").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+    console.set(scope, k.into(), f.into());
+
+    let t = v8::FunctionTemplate::new(scope, console_error);
+    let f = t
+        .get_function(scope)
+        .ok_or_else(|| anyhow::anyhow!("Failed to create console.error"))?;
+    let k =
+        v8::String::new(scope, "error").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+    console.set(scope, k.into(), f.into());
+
+    let t = v8::FunctionTemplate::new(scope, console_log);
+    let f = t
+        .get_function(scope)
+        .ok_or_else(|| anyhow::anyhow!("Failed to create console.info"))?;
+    let k =
+        v8::String::new(scope, "info").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+    console.set(scope, k.into(), f.into());
+
+    let k = v8::String::new(scope, "console")
+        .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+    global.set(scope, k.into(), console.into());
+
+    let k = v8::String::new(scope, "globalThis")
+        .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+    global.set(scope, k.into(), global.into());
+
+    // Install globalThis.fetch
+    let t = v8::FunctionTemplate::new(scope, crate::fetch::fetch_callback);
+    let f = t
+        .get_function(scope)
+        .ok_or_else(|| anyhow::anyhow!("Failed to create fetch"))?;
+    let k =
+        v8::String::new(scope, "fetch").ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+    global.set(scope, k.into(), f.into());
+
+    // Install globalThis.queueMicrotask
+    let t = v8::FunctionTemplate::new(scope, queue_microtask_callback);
+    let f = t
+        .get_function(scope)
+        .ok_or_else(|| anyhow::anyhow!("Failed to create queueMicrotask"))?;
+    let k = v8::String::new(scope, "queueMicrotask")
+        .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+    global.set(scope, k.into(), f.into());
+
+    // Register fs polyfill callbacks
+    crate::fs::register_fs_callbacks(scope, global)?;
+
+    // Register TCP socket callbacks
+    crate::tcp::register_tcp_callbacks(scope, global)?;
+
+    // Set project root for fs sandboxing
+    if let Some(root) = project_root {
+        let k = v8::String::new(scope, "__rex_project_root")
+            .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+        let v = v8::String::new(scope, root)
+            .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+        global.set(scope, k.into(), v.into());
+    }
+
+    // Inject process.env
+    let process_env_script = build_process_env_script();
+    v8_eval!(scope, &process_env_script, "<process-env>")
+        .context("Failed to inject process.env")?;
+
+    Ok(())
 }
 
 /// Build a JS snippet that sets `globalThis.process` with `env` populated
@@ -576,7 +595,7 @@ fn format_args(scope: &mut v8::PinScope, args: &v8::FunctionCallbackArguments) -
 }
 
 #[allow(unsafe_code)]
-unsafe extern "C" fn promise_reject_callback(msg: v8::PromiseRejectMessage) {
+pub(crate) unsafe extern "C" fn promise_reject_callback(msg: v8::PromiseRejectMessage) {
     let event = msg.get_event();
     match event {
         v8::PromiseRejectEvent::PromiseRejectWithNoHandler => {

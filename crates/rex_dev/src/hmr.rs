@@ -14,6 +14,10 @@ pub enum HmrMessage {
         timestamp: u64,
         /// Serialized manifest ({ build_id, pages }) for the client to hot-swap chunks
         manifest: serde_json::Value,
+        /// When true, client uses `/_rex/dev/{path}?t={timestamp}` instead of
+        /// bundled chunk URLs from the manifest.
+        #[serde(default)]
+        dev_esm: bool,
     },
     #[serde(rename = "full-reload")]
     FullReload,
@@ -65,6 +69,23 @@ impl HmrBroadcast {
             path: path.to_string(),
             timestamp,
             manifest,
+            dev_esm: false,
+        });
+    }
+
+    /// Send a dev ESM update. The client imports from `/_rex/dev/{path}?t={timestamp}`
+    /// instead of looking up bundled chunk URLs in the manifest.
+    pub fn send_dev_esm_update(&self, path: &str) {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before UNIX epoch")
+            .as_millis() as u64;
+
+        let _ = self.tx.send(HmrMessage::Update {
+            path: path.to_string(),
+            timestamp,
+            manifest: serde_json::Value::Null,
+            dev_esm: true,
         });
     }
 

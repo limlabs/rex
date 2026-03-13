@@ -310,6 +310,7 @@ fn assemble_static_html(
         &client_scripts,
         doc_descriptor,
         &manifest.font_preloads,
+        None,
     );
 
     let tail = assemble_body_tail(
@@ -320,6 +321,7 @@ fn assemble_static_html(
         manifest.app_script.as_deref(),
         false, // never dev mode for pre-rendered pages
         Some(manifest_json),
+        false,
     );
 
     format!("{shell}{tail}")

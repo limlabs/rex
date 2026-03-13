@@ -3,11 +3,12 @@ use crate::watcher::{FileEvent, FileEventKind};
 use anyhow::Result;
 use rex_build::build_bundles;
 use rex_build::bundler::BuildResult;
+use rex_build::transform::TransformCache;
 use rex_core::RexConfig;
 use rex_router::{scan_project, RouteTrie, ScanResult};
 use rex_server::handlers;
 use rex_server::state::{AppState, HotState};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info};
@@ -371,6 +372,69 @@ pub async fn handle_file_event(
             hmr.send_full_reload();
 
             debug!("Full rebuild complete (route added/removed)");
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle a file change in ESM dev mode (unbundled fast path).
+///
+/// Instead of running rolldown to rebuild all bundles, this:
+/// 1. OXC-transforms only the changed file (~3ms)
+/// 2. Invalidates the module in all V8 isolates (~3ms)
+/// 3. Sends an HMR update with a dev URL for the browser to reimport
+///
+/// For structural changes (page added/removed), falls back to a full reload.
+pub async fn handle_esm_file_event(
+    event: FileEvent,
+    config: &RexConfig,
+    state: &Arc<AppState>,
+    hmr: &HmrBroadcast,
+    transform_cache: &Arc<TransformCache>,
+    page_sources: &Arc<Vec<(String, PathBuf)>>,
+) -> Result<()> {
+    debug!(path = %event.path.display(), kind = ?event.kind, "ESM file change");
+
+    match event.kind {
+        FileEventKind::PageModified | FileEventKind::SourceModified => {
+            let t0 = Instant::now();
+
+            // Read and OXC-transform the changed file
+            let source = std::fs::read_to_string(&event.path)?;
+            let transformed = transform_cache.transform(&event.path, &source)?;
+            let t_transform = t0.elapsed();
+
+            // Invalidate the module in all V8 isolates
+            state
+                .isolate_pool
+                .invalidate_module(event.path.clone(), transformed, page_sources.clone())
+                .await?;
+            let t_invalidate = t0.elapsed();
+
+            info!(
+                transform_ms = t_transform.as_millis(),
+                v8_ms = (t_invalidate - t_transform).as_millis(),
+                total_ms = t_invalidate.as_millis(),
+                "ESM hot update"
+            );
+
+            // Notify HMR client with dev URL
+            let rel_path = event
+                .path
+                .strip_prefix(&config.project_root)
+                .unwrap_or(&event.path);
+            hmr.send_dev_esm_update(&rel_path.to_string_lossy());
+        }
+        FileEventKind::CssModified => {
+            // CSS changes don't need V8 invalidation — just notify browser to reload
+            hmr.send_full_reload();
+        }
+        FileEventKind::PageRemoved
+        | FileEventKind::MiddlewareModified
+        | FileEventKind::McpModified => {
+            // Structural changes require full reload
+            hmr.send_full_reload();
         }
     }
 

@@ -1,3 +1,4 @@
+pub mod dev_middleware;
 pub mod hmr;
 pub mod rebuild;
 pub mod tailwind;

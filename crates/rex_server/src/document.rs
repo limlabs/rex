@@ -24,6 +24,10 @@ pub struct DocumentParams<'a> {
     pub doc_descriptor: Option<&'a DocumentDescriptor>,
     pub manifest_json: Option<&'a str>,
     pub font_preloads: &'a [String],
+    /// Browser import map JSON for dev ESM mode.
+    /// When set, injects `<script type="importmap">` in head and treats
+    /// `client_scripts` / `app_script` as full URLs (no `/_rex/static/` prefix).
+    pub import_map_json: Option<&'a str>,
 }
 
 /// Assemble the final HTML document
@@ -59,6 +63,13 @@ pub fn assemble_document(params: &DocumentParams<'_>) -> String {
             html.push_str(&desc.head_content);
             html.push('\n');
         }
+    }
+
+    // Import map for dev ESM mode (must come before any module scripts)
+    if let Some(import_map) = params.import_map_json {
+        html.push_str(&format!(
+            "  <script type=\"importmap\">{import_map}</script>\n"
+        ));
     }
 
     // Font preloads: start fetching font files early to prevent layout shift
@@ -107,18 +118,32 @@ pub fn assemble_document(params: &DocumentParams<'_>) -> String {
         ));
     }
 
+    let dev_esm = params.import_map_json.is_some();
+
     // _app client chunk (must load before page scripts for hydration wrapping)
     if let Some(app) = params.app_script {
-        html.push_str(&format!(
-            "  <script type=\"module\" src=\"/_rex/static/{app}\"></script>\n"
-        ));
+        if dev_esm {
+            html.push_str(&format!(
+                "  <script type=\"module\" src=\"{app}\"></script>\n"
+            ));
+        } else {
+            html.push_str(&format!(
+                "  <script type=\"module\" src=\"/_rex/static/{app}\"></script>\n"
+            ));
+        }
     }
 
-    // Client chunks (ESM bundles produced by rolldown)
+    // Client chunks (ESM bundles produced by rolldown, or dev URLs in ESM mode)
     for script in params.client_scripts {
-        html.push_str(&format!(
-            "  <script type=\"module\" src=\"/_rex/static/{script}\"></script>\n"
-        ));
+        if dev_esm {
+            html.push_str(&format!(
+                "  <script type=\"module\" src=\"{script}\"></script>\n"
+            ));
+        } else {
+            html.push_str(&format!(
+                "  <script type=\"module\" src=\"/_rex/static/{script}\"></script>\n"
+            ));
+        }
     }
 
     // Client-side router (must load after page scripts register __REX_RENDER__)
@@ -187,6 +212,7 @@ fn sanitize_tag_attrs(s: &str) -> String {
 ///
 /// This is flushed to the browser immediately so it can start fetching CSS/JS
 /// resources while the server renders the page body in V8.
+#[allow(clippy::too_many_arguments)]
 pub fn assemble_head_shell(
     css_files: &[String],
     css_contents: &HashMap<String, String>,
@@ -195,6 +221,7 @@ pub fn assemble_head_shell(
     client_scripts: &[String],
     doc_descriptor: Option<&DocumentDescriptor>,
     font_preloads: &[String],
+    import_map_json: Option<&str>,
 ) -> String {
     let mut html = String::with_capacity(2048);
 
@@ -220,6 +247,13 @@ pub fn assemble_head_shell(
         }
     }
 
+    // Import map for dev ESM mode (must come before any module scripts)
+    if let Some(import_map) = import_map_json {
+        html.push_str(&format!(
+            "  <script type=\"importmap\">{import_map}</script>\n"
+        ));
+    }
+
     // Font preloads: start fetching font files early to prevent layout shift
     for font_file in font_preloads {
         html.push_str(&format!(
@@ -240,23 +274,23 @@ pub fn assemble_head_shell(
         }
     }
 
-    // Modulepreload hints: browser starts fetching + compiling JS immediately,
-    // eliminating the import waterfall where entry modules must be fetched and
-    // parsed before shared dependencies (React, etc.) are discovered.
-    for chunk in shared_chunks {
-        html.push_str(&format!(
-            "  <link rel=\"modulepreload\" href=\"/_rex/static/{chunk}\" />\n"
-        ));
-    }
-    if let Some(app) = app_script {
-        html.push_str(&format!(
-            "  <link rel=\"modulepreload\" href=\"/_rex/static/{app}\" />\n"
-        ));
-    }
-    for script in client_scripts {
-        html.push_str(&format!(
-            "  <link rel=\"modulepreload\" href=\"/_rex/static/{script}\" />\n"
-        ));
+    // Modulepreload hints: skip in dev ESM mode (browser discovers imports via ESM)
+    if import_map_json.is_none() {
+        for chunk in shared_chunks {
+            html.push_str(&format!(
+                "  <link rel=\"modulepreload\" href=\"/_rex/static/{chunk}\" />\n"
+            ));
+        }
+        if let Some(app) = app_script {
+            html.push_str(&format!(
+                "  <link rel=\"modulepreload\" href=\"/_rex/static/{app}\" />\n"
+            ));
+        }
+        for script in client_scripts {
+            html.push_str(&format!(
+                "  <link rel=\"modulepreload\" href=\"/_rex/static/{script}\" />\n"
+            ));
+        }
     }
 
     html.push_str("</head>\n<body");
@@ -271,6 +305,7 @@ pub fn assemble_head_shell(
 }
 
 /// Assemble the body content and closing tags, sent after SSR render completes.
+#[allow(clippy::too_many_arguments)]
 pub fn assemble_body_tail(
     ssr_html: &str,
     head_html: &str,
@@ -279,6 +314,7 @@ pub fn assemble_body_tail(
     app_script: Option<&str>,
     is_dev: bool,
     manifest_json: Option<&str>,
+    dev_esm: bool,
 ) -> String {
     let escaped_props = escape_script_content(props_json);
 
@@ -310,16 +346,28 @@ pub fn assemble_body_tail(
 
     // _app client chunk (must load before page scripts for hydration wrapping)
     if let Some(app) = app_script {
-        html.push_str(&format!(
-            "  <script type=\"module\" src=\"/_rex/static/{app}\"></script>\n"
-        ));
+        if dev_esm {
+            html.push_str(&format!(
+                "  <script type=\"module\" src=\"{app}\"></script>\n"
+            ));
+        } else {
+            html.push_str(&format!(
+                "  <script type=\"module\" src=\"/_rex/static/{app}\"></script>\n"
+            ));
+        }
     }
 
-    // Client chunks (ESM bundles produced by rolldown)
+    // Client chunks (ESM bundles produced by rolldown, or dev URLs in ESM mode)
     for script in client_scripts {
-        html.push_str(&format!(
-            "  <script type=\"module\" src=\"/_rex/static/{script}\"></script>\n"
-        ));
+        if dev_esm {
+            html.push_str(&format!(
+                "  <script type=\"module\" src=\"{script}\"></script>\n"
+            ));
+        } else {
+            html.push_str(&format!(
+                "  <script type=\"module\" src=\"/_rex/static/{script}\"></script>\n"
+            ));
+        }
     }
 
     // Client-side router (must load after page scripts register __REX_RENDER__)

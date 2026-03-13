@@ -80,6 +80,7 @@ fn assemble_document_escapes_inline_css() {
         doc_descriptor: None,
         manifest_json: None,
         font_preloads: &[],
+        import_map_json: None,
     };
     let html = assemble_document(&params);
     // The </style> inside the CSS must be escaped so the style block isn't closed prematurely

@@ -661,8 +661,8 @@ fn fs_rm_sync(
 }
 
 /// Register all `__rex_fs_*` callbacks on the V8 global object.
-pub fn register_fs_callbacks(
-    scope: &mut v8::ContextScope<v8::HandleScope>,
+pub fn register_fs_callbacks<'s, 'i>(
+    scope: &mut v8::PinScope<'s, 'i>,
     global: v8::Local<v8::Object>,
 ) -> Result<()> {
     macro_rules! register_fn {

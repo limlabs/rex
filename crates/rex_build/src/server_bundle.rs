@@ -357,6 +357,11 @@ pub const V8_POLYFILLS: &str = include_str!(concat!(env!("OUT_DIR"), "/v8-polyfi
 /// These are bundled into the IIFE by rolldown alongside React and page code.
 const SSR_RUNTIME: &str = include_str!(concat!(env!("OUT_DIR"), "/ssr-runtime.js"));
 
+/// Get the SSR runtime source. Used by the ESM dev mode startup path.
+pub fn ssr_runtime_source() -> &'static str {
+    SSR_RUNTIME
+}
+
 /// MCP tool runtime functions appended to the virtual entry when mcp/ tools exist.
 /// Defines __rex_list_mcp_tools() and __rex_call_mcp_tool(name, paramsJson).
 const MCP_RUNTIME: &str = include_str!(concat!(env!("OUT_DIR"), "/mcp-runtime.js"));

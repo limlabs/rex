@@ -1,5 +1,8 @@
+use crate::esm_loader::EsmModuleRegistry;
 use anyhow::Result;
 use crossbeam_channel::{bounded, Sender};
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
@@ -174,6 +177,124 @@ impl IsolatePool {
         }
 
         debug!("All V8 isolates reloaded");
+        Ok(())
+    }
+
+    /// Create a new pool in ESM mode with `size` isolates.
+    ///
+    /// Each isolate is initialized with the dep IIFE + OXC-transformed user sources.
+    /// The `ssr_runtime` JS is appended to each isolate's entry module.
+    pub fn new_esm(
+        size: usize,
+        dep_iife: Arc<String>,
+        sources: HashMap<PathBuf, String>,
+        resolve_aliases: HashMap<String, PathBuf>,
+        ssr_runtime: Arc<String>,
+        page_sources: Arc<Vec<(String, PathBuf)>>,
+        project_root: PathBuf,
+    ) -> Result<Self> {
+        let mut senders = Vec::with_capacity(size);
+        let mut threads = Vec::with_capacity(size);
+
+        let pending = Arc::new(PendingReload {
+            generation: AtomicU64::new(0),
+            bundle: RwLock::new(Arc::new(String::new())), // unused in ESM mode
+        });
+
+        for i in 0..size {
+            let (tx, rx) = bounded::<WorkItem>(64);
+            let dep_iife = dep_iife.clone();
+            let sources = sources.clone();
+            let aliases = resolve_aliases.clone();
+            let ssr_rt = ssr_runtime.clone();
+            let pages = page_sources.clone();
+            let root = project_root.clone();
+
+            let handle = thread::Builder::new()
+                .name(format!("rex-v8-isolate-{i}"))
+                .stack_size(16 * 1024 * 1024)
+                .spawn(move || {
+                    crate::init_v8();
+
+                    let registry = EsmModuleRegistry::new(dep_iife, sources, aliases, root.clone());
+                    let root_str = root.to_string_lossy().to_string();
+
+                    let mut isolate = match crate::SsrIsolate::new_esm(
+                        registry,
+                        &ssr_rt,
+                        &pages,
+                        Some(&root_str),
+                    ) {
+                        Ok(iso) => iso,
+                        Err(e) => {
+                            error!("Failed to create ESM V8 isolate {i}: {e:#}");
+                            return;
+                        }
+                    };
+
+                    debug!("V8 ESM isolate {i} ready");
+
+                    while let Ok(work) = rx.recv() {
+                        work(&mut isolate);
+                    }
+
+                    debug!("V8 ESM isolate {i} shutting down");
+                })?;
+
+            senders.push(Some(tx));
+            threads.push(Some(handle));
+        }
+
+        debug!(count = size, "V8 ESM isolate pool created");
+
+        Ok(Self {
+            senders,
+            threads,
+            next: AtomicUsize::new(0),
+            size,
+            pending,
+        })
+    }
+
+    /// Invalidate a module across all isolates (ESM mode).
+    ///
+    /// Dispatches `invalidate_module()` to each isolate thread and waits for
+    /// all to complete.
+    pub async fn invalidate_module(
+        &self,
+        path: PathBuf,
+        new_source: String,
+        page_sources: Arc<Vec<(String, PathBuf)>>,
+    ) -> Result<()> {
+        let path = Arc::new(path);
+        let new_source = Arc::new(new_source);
+        let mut handles = Vec::new();
+
+        for i in 0..self.size {
+            let path = path.clone();
+            let source = new_source.clone();
+            let pages = page_sources.clone();
+            let (tx, rx) = tokio::sync::oneshot::channel();
+
+            let work: WorkItem = Box::new(move |isolate| {
+                let result = isolate.invalidate_module((*path).clone(), (*source).clone(), &pages);
+                let _ = tx.send(result);
+            });
+
+            self.senders[i]
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("V8 isolate pool is shut down"))?
+                .send(work)
+                .map_err(|_| anyhow::anyhow!("V8 isolate thread has shut down"))?;
+
+            handles.push(rx);
+        }
+
+        for handle in handles {
+            handle.await??;
+        }
+
+        debug!("Module invalidated across all V8 isolates");
         Ok(())
     }
 

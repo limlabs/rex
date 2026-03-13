@@ -12,6 +12,23 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tracing::debug;
 
+/// ESM dev mode state returned from `Rex::new_esm()`.
+///
+/// Contains shared resources needed by the dev middleware and ESM rebuild handler.
+#[cfg(feature = "build")]
+pub struct EsmDevState {
+    /// Shared transform cache for OXC source transforms.
+    pub transform_cache: Arc<rex_build::transform::TransformCache>,
+    /// Pre-bundled client dependency ESM files (filename → JS content).
+    pub client_deps: HashMap<String, String>,
+    /// Browser import map JSON for bare specifier resolution.
+    pub import_map: serde_json::Value,
+    /// Page source pairs: `(module_name, abs_path)` for V8 module invalidation.
+    pub page_sources: Arc<Vec<(String, PathBuf)>>,
+    /// Route pattern → relative file path, for dev-entry module generation.
+    pub page_entries: HashMap<String, String>,
+}
+
 /// Options for creating a Rex instance.
 #[derive(Debug, Clone)]
 pub struct RexOptions {
@@ -166,6 +183,119 @@ impl Rex {
             opts.host,
         )
         .await
+    }
+
+    /// Create a new Rex instance in ESM dev mode (unbundled).
+    ///
+    /// Instead of running rolldown to bundle everything, this:
+    /// 1. Pre-bundles only dependencies (React, polyfills) once
+    /// 2. OXC-transforms user source files individually
+    /// 3. Creates V8 isolates in ESM mode (per-module loading)
+    ///
+    /// Returns `(Rex, EsmDevState)` — the ESM state is used by the dev middleware
+    /// and rebuild handler in `cmd_dev.rs`.
+    #[cfg(feature = "build")]
+    pub async fn new_esm(opts: RexOptions) -> Result<(Self, EsmDevState)> {
+        let root = std::fs::canonicalize(&opts.root)?;
+        let config = RexConfig::new(root).with_dev(true).with_port(opts.port);
+        config.validate()?;
+
+        let project_config = ProjectConfig::load(&config.project_root)?;
+
+        debug!("Scanning routes...");
+        let scan = scan_project(&config.project_root, &config.pages_dir, &config.app_dir)?;
+        debug!(routes = scan.routes.len(), "Routes scanned");
+
+        // Resolve module dirs and pre-bundle dependencies
+        let module_dirs = rex_build::resolve_modules_dirs(&config)?;
+        debug!("Pre-bundling dependencies...");
+        let dep_bundle = rex_build::dep_bundle::prebundle_deps(&config, &module_dirs).await?;
+
+        // Build page sources and resolve aliases
+        let page_sources = Arc::new(rex_build::esm_utils::esm_page_sources(&scan));
+        let resolve_aliases = rex_build::esm_utils::esm_resolve_aliases()?;
+        let ssr_runtime = Arc::new(rex_build::esm_utils::ssr_runtime_source().to_string());
+
+        // OXC-transform all page sources
+        let transform_cache = Arc::new(rex_build::transform::TransformCache::new());
+        let mut sources = HashMap::new();
+        for (_, abs_path) in page_sources.iter() {
+            let source = std::fs::read_to_string(abs_path)?;
+            let transformed = transform_cache.transform(abs_path, &source)?;
+            sources.insert(abs_path.clone(), transformed);
+        }
+        debug!(pages = sources.len(), "Page sources transformed");
+
+        // Initialize V8
+        init_v8();
+
+        let pool_size = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .min(4);
+
+        debug!(pool_size, "Creating V8 ESM isolate pool");
+        let pool = IsolatePool::new_esm(
+            pool_size,
+            dep_bundle.server_iife,
+            sources,
+            resolve_aliases,
+            ssr_runtime,
+            page_sources.clone(),
+            config.project_root.clone(),
+        )?;
+
+        // Build dev-mode manifest with dev entry URLs
+        let build_id = format!(
+            "dev-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock before UNIX epoch")
+                .as_millis()
+        );
+        let mut manifest = AssetManifest::new(build_id.clone());
+        let mut page_entries = HashMap::new();
+        for route in &scan.routes {
+            let rel_path = route
+                .abs_path
+                .strip_prefix(&config.project_root)
+                .unwrap_or(&route.file_path);
+            let rel_str = rel_path.to_string_lossy().to_string();
+            let js_url = format!("/_rex/dev-entry/{rel_str}");
+            let strategy = rex_build::esm_utils::detect_data_strategy(&route.abs_path);
+            manifest.add_page(
+                &route.pattern,
+                &js_url,
+                strategy,
+                !route.dynamic_segments.is_empty(),
+            );
+            page_entries.insert(route.pattern.clone(), rel_str);
+        }
+
+        let static_dir = config.client_build_dir();
+
+        let rex = Self::init_from_parts(
+            config,
+            scan,
+            pool,
+            manifest,
+            build_id,
+            static_dir,
+            project_config,
+            opts.port,
+            opts.host,
+        )
+        .await?;
+
+        let esm_state = EsmDevState {
+            transform_cache,
+            client_deps: dep_bundle.client_deps,
+            import_map: dep_bundle.import_map,
+            page_sources,
+            page_entries,
+        };
+
+        Ok((rex, esm_state))
     }
 
     /// Create a Rex instance from a pre-built manifest (for `rex start`).

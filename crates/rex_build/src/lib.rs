@@ -2,11 +2,14 @@ pub mod builtin_modules;
 pub mod bundler;
 pub mod client_manifest;
 pub mod dce;
+pub mod dep_bundle;
 pub mod embedded_runtime;
+pub mod esm_utils;
 pub mod manifest;
 pub mod rsc_bundler;
 pub mod rsc_graph;
 pub mod server_action_manifest;
+pub mod transform;
 
 // Internal modules extracted from bundler.rs
 pub mod build_utils;

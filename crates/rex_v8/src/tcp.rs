@@ -503,8 +503,8 @@ pub fn poll_tcp_sockets(isolate: &mut v8::OwnedIsolate, context: &v8::Global<v8:
 }
 
 /// Register all `__rex_tcp_*` callbacks on the V8 global object.
-pub fn register_tcp_callbacks(
-    scope: &mut v8::ContextScope<v8::HandleScope>,
+pub fn register_tcp_callbacks<'s, 'i>(
+    scope: &mut v8::PinScope<'s, 'i>,
     global: v8::Local<v8::Object>,
 ) -> Result<()> {
     macro_rules! register_fn {

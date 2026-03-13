@@ -26,13 +26,23 @@ pub(crate) async fn cmd_dev(
         print_mascot_header(env!("CARGO_PKG_VERSION"), "");
     }
 
-    let rex = rex_server::Rex::new(rex_server::RexOptions {
+    let esm_mode = std::env::var("REX_ESM_DEV").is_ok();
+
+    let opts = rex_server::RexOptions {
         root: root.clone(),
         dev: true,
         port,
         host,
-    })
-    .await?;
+    };
+
+    // Initialize Rex — ESM mode uses unbundled V8, standard mode uses rolldown
+    let (rex, esm_state) = if esm_mode {
+        let (rex, state) = rex_server::Rex::new_esm(opts).await?;
+        (rex, Some(state))
+    } else {
+        let rex = rex_server::Rex::new(opts).await?;
+        (rex, None)
+    };
 
     let config = rex.config().clone();
     let scan = rex.scan().clone();
@@ -53,6 +63,10 @@ pub(crate) async fn cmd_dev(
         eprintln!("  {} {}", dim("◇"), dim("TypeScript (watching)"));
     }
 
+    if !tui_enabled && esm_mode {
+        eprintln!("  {} {}", dim("◇"), dim("ESM dev mode (unbundled)"));
+    }
+
     // Start file watcher (watches project root for CSS changes too)
     let event_rx =
         rex_dev::start_watcher(&config.project_root, &config.pages_dir, &config.app_dir)?;
@@ -65,7 +79,7 @@ pub(crate) async fn cmd_dev(
         }
     });
 
-    // Build server with HMR websocket route
+    // Build server with HMR websocket route + dev middleware (ESM mode)
     let hmr_route = axum::routing::get({
         let hmr_clone = hmr.clone();
         move |ws: axum::extract::ws::WebSocketUpgrade| async move {
@@ -73,35 +87,74 @@ pub(crate) async fn cmd_dev(
         }
     });
 
-    let extra_routes = axum::Router::new().route("/_rex/hmr", hmr_route).route(
+    let mut extra_routes = axum::Router::new().route("/_rex/hmr", hmr_route).route(
         "/_rex/hmr-client.js",
         axum::routing::get(hmr_client_handler),
     );
 
+    // In ESM mode, add dev middleware routes for serving transformed sources and deps
+    if let Some(ref esm) = esm_state {
+        let dev_mw = rex_dev::dev_middleware::DevMiddleware::new(
+            esm.transform_cache.clone(),
+            esm.client_deps.clone(),
+            config.project_root.clone(),
+            esm.page_entries.clone(),
+        );
+        extra_routes = extra_routes.merge(dev_mw.into_router());
+    }
+
     let router = rex.router_with_extra(extra_routes);
 
-    // Spawn async rebuild handler: rebuild bundles + reload V8 isolates on file changes
+    // Spawn async rebuild handler
     {
         let rebuild_config = config.clone();
         let rebuild_hmr = hmr.clone();
         let rebuild_state = state.clone();
         let mut last_scan = Some(scan.clone());
+
+        // ESM mode: use fast path (OXC transform + V8 module invalidation)
+        // Standard mode: full rolldown rebuild
+        let esm_transform_cache = esm_state.as_ref().map(|e| e.transform_cache.clone());
+        let esm_page_sources = esm_state.as_ref().map(|e| e.page_sources.clone());
+
         tokio::spawn(async move {
             while let Some(event) = rebuild_rx.recv().await {
-                info!(path = %event.path.display(), "Rebuilding...");
-                match rex_dev::rebuild::handle_file_event(
-                    event,
-                    &rebuild_config,
-                    &rebuild_state,
-                    &rebuild_hmr,
-                    &mut last_scan,
-                )
-                .await
+                if let (Some(ref cache), Some(ref pages)) =
+                    (&esm_transform_cache, &esm_page_sources)
                 {
-                    Ok(()) => {}
-                    Err(e) => {
-                        tracing::error!("Rebuild failed: {e}");
-                        rebuild_hmr.send_error(&e.to_string(), None);
+                    info!(path = %event.path.display(), "ESM rebuilding...");
+                    match rex_dev::rebuild::handle_esm_file_event(
+                        event,
+                        &rebuild_config,
+                        &rebuild_state,
+                        &rebuild_hmr,
+                        cache,
+                        pages,
+                    )
+                    .await
+                    {
+                        Ok(()) => {}
+                        Err(e) => {
+                            tracing::error!("ESM rebuild failed: {e}");
+                            rebuild_hmr.send_error(&e.to_string(), None);
+                        }
+                    }
+                } else {
+                    info!(path = %event.path.display(), "Rebuilding...");
+                    match rex_dev::rebuild::handle_file_event(
+                        event,
+                        &rebuild_config,
+                        &rebuild_state,
+                        &rebuild_hmr,
+                        &mut last_scan,
+                    )
+                    .await
+                    {
+                        Ok(()) => {}
+                        Err(e) => {
+                            tracing::error!("Rebuild failed: {e}");
+                            rebuild_hmr.send_error(&e.to_string(), None);
+                        }
                     }
                 }
             }

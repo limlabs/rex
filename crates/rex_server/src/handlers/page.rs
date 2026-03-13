@@ -479,6 +479,7 @@ pub(super) async fn page_handler_inner(
         &client_scripts,
         hot.document_descriptor.as_ref(),
         &hot.manifest.font_preloads,
+        None,
     );
 
     // Stream response in two chunks: shell (immediate) → render + tail (after V8)
@@ -519,6 +520,7 @@ pub(super) async fn page_handler_inner(
             app_script.as_deref(),
             is_dev,
             Some(&manifest_json),
+            false,
         );
 
         Ok::<_, std::convert::Infallible>(tail)

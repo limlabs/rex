@@ -108,6 +108,12 @@
   // --- Hot update: re-import changed page module and re-render in place ---
 
   function hotUpdate(msg: RexHmrMessage): void {
+    // Dev ESM mode: import the updated source directly via /_rex/dev/
+    if (msg.dev_esm) {
+      hotUpdateDevEsm(msg);
+      return;
+    }
+
     const manifest = window.__REX_MANIFEST__;
     const newManifest = msg.manifest;
 
@@ -204,6 +210,63 @@
           "[Rex HMR] Hot update failed, falling back to full reload:",
           err,
         );
+        window.location.reload();
+      });
+  }
+
+  // Dev ESM hot update: import the changed module directly via /_rex/dev/
+  // and re-render using the new default export.
+  function hotUpdateDevEsm(msg: RexHmrMessage): void {
+    const devUrl = "/_rex/dev/" + msg.path + "?t=" + msg.timestamp;
+    console.log("[Rex HMR] Dev ESM update:", msg.path);
+
+    window.__REX_NAVIGATING__ = true;
+    import(devUrl)
+      .then(function (mod) {
+        window.__REX_NAVIGATING__ = false;
+
+        // Update the page registry with the new module
+        const router = window.__REX_ROUTER;
+        const currentPattern = router && router.state ? router.state.route : null;
+        if (currentPattern && window.__REX_PAGES) {
+          window.__REX_PAGES[currentPattern] = mod;
+        }
+
+        // Fetch fresh GSSP data
+        const manifest = window.__REX_MANIFEST__;
+        const buildId = manifest ? manifest.build_id : null;
+        if (!buildId) {
+          // No manifest — just re-render with current props
+          if (mod.default && window.__REX_RENDER__) {
+            const dataEl = document.getElementById("__REX_DATA__");
+            const props = dataEl ? JSON.parse(dataEl.textContent || "{}") as Record<string, unknown> : {};
+            window.__REX_RENDER__(mod.default, props);
+            console.log("[Rex HMR] Dev ESM hot update applied");
+          }
+          return;
+        }
+
+        const dataUrl =
+          "/_rex/data/" + buildId + window.location.pathname + ".json";
+        return fetch(dataUrl).then(function (res) {
+          if (!res.ok) throw new Error("Data fetch failed: " + res.status);
+          return res.json() as Promise<{ props?: Record<string, unknown> }>;
+        }).then(function (data) {
+          const props = (data && data.props ? data.props : {}) as Record<string, unknown>;
+
+          const dataEl = document.getElementById("__REX_DATA__");
+          if (dataEl) dataEl.textContent = JSON.stringify(props);
+
+          if (mod.default && window.__REX_RENDER__) {
+            window.__REX_RENDER__(mod.default, props);
+            console.log("[Rex HMR] Dev ESM hot update applied");
+          } else {
+            window.location.reload();
+          }
+        });
+      })
+      .catch(function (err) {
+        console.error("[Rex HMR] Dev ESM update failed, full reload:", err);
         window.location.reload();
       });
   }

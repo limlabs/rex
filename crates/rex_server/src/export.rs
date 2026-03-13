@@ -304,6 +304,7 @@ async fn export_404_page(
         &client_scripts,
         ctx.doc_descriptor,
         &ctx.manifest.font_preloads,
+        None,
     );
     let tail = crate::document::assemble_body_tail(
         &render_result.body,
@@ -313,6 +314,7 @@ async fn export_404_page(
         ctx.manifest.app_script.as_deref(),
         false,
         Some(ctx.manifest_json),
+        false,
     );
     let combined = format!("{shell}{tail}");
     let html = if config.html_extensions {
