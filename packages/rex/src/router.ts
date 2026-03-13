@@ -43,6 +43,16 @@ function getRouter(): InternalRouter | null {
   return window.__REX_ROUTER ?? null;
 }
 
+function getBasePath(): string {
+  return ((window as any).__REX_BASE_PATH || '').replace(/\/+$/, '');
+}
+
+export function withBasePath(href: string): string {
+  const bp = getBasePath();
+  if (!bp || !href.startsWith('/') || href.startsWith('//')) return href;
+  return bp + href;
+}
+
 /**
  * Navigate to a new path via client-side routing.
  */
@@ -50,7 +60,7 @@ export function navigateTo(path: string): void {
   // RSC app router navigation (fetches flight data, re-renders in place)
   const rscNavigate = (window as any).__REX_RSC_NAVIGATE;
   if (rscNavigate) {
-    history.pushState(null, '', path);
+    history.pushState(null, '', withBasePath(path));
     rscNavigate(path);
     return;
   }
