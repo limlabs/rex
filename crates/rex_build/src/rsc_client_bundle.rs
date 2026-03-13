@@ -150,10 +150,12 @@ pub(crate) async fn build_rsc_client_bundles(
     let mut bundler = rolldown::Bundler::new(options)
         .map_err(|e| anyhow::anyhow!("Failed to create RSC client bundler: {e}"))?;
 
-    let output = bundler
-        .write()
-        .await
-        .map_err(|e| anyhow::anyhow!("RSC client bundle failed: {e:?}"))?;
+    let output = bundler.write().await.map_err(|e| {
+        anyhow::anyhow!(
+            "RSC client bundle failed:\n{}",
+            crate::diagnostics::format_build_diagnostics(&e)
+        )
+    })?;
 
     // Clean up temporary entry files
     let _ = fs::remove_dir_all(&entries_dir);

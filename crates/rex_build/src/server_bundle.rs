@@ -640,14 +640,12 @@ pub(crate) async fn build_server_bundle(
     .map_err(|e| anyhow::anyhow!("Failed to create rolldown bundler: {e}"))?;
 
     if let Err(e) = bundler.write().await {
-        let debug = format!("{e:?}");
         // Allow MissingExport diagnostics when shim_missing_exports is on
-        let all_missing_export = e.iter().all(|d| {
-            let ds = format!("{d:?}");
-            ds.contains("MissingExport")
-        });
-        if !all_missing_export {
-            return Err(anyhow::anyhow!("Server bundle failed: {debug}"));
+        if !crate::diagnostics::is_all_missing_exports(&e) {
+            return Err(anyhow::anyhow!(
+                "Server bundle failed:\n{}",
+                crate::diagnostics::format_build_diagnostics(&e)
+            ));
         }
         tracing::warn!("Server bundle had {} shimmed missing export(s)", e.len());
     }

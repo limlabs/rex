@@ -508,9 +508,11 @@ globalThis.__rex_resolve_api = function() {
         .map_err(|e| anyhow::anyhow!("Failed to create server bundler: {e}"))?;
 
     if let Err(e) = bundler.write().await {
-        let all_missing_export = e.iter().all(|d| format!("{d:?}").contains("MissingExport"));
-        if !all_missing_export {
-            return Err(anyhow::anyhow!("Server bundle failed: {e:?}"));
+        if !crate::diagnostics::is_all_missing_exports(&e) {
+            return Err(anyhow::anyhow!(
+                "Server bundle failed:\n{}",
+                crate::diagnostics::format_build_diagnostics(&e)
+            ));
         }
         tracing::warn!(
             "Minimal server bundle had {} shimmed missing export(s)",
