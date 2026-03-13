@@ -91,7 +91,7 @@ pub fn validate_exportability(
 /// Context needed for exporting a static site.
 pub struct ExportContext<'a> {
     pub pool: &'a IsolatePool,
-    pub manifest: &'a AssetManifest,
+    pub manifest: &'a mut AssetManifest,
     pub routes: &'a [Route],
     pub manifest_json: &'a str,
     pub doc_descriptor: Option<&'a DocumentDescriptor>,
@@ -108,7 +108,7 @@ pub struct ExportContext<'a> {
 /// 4. Writes `router.js` to `_rex/`
 /// 5. Copies `public/` directory contents to the output root
 pub async fn export_site(
-    ctx: &ExportContext<'_>,
+    ctx: &mut ExportContext<'_>,
     config: &ExportConfig,
 ) -> anyhow::Result<ExportResult> {
     let output = &config.output_dir;
@@ -121,8 +121,8 @@ pub async fn export_site(
     let static_dir = output.join("_rex").join("static");
     std::fs::create_dir_all(&static_dir)?;
 
-    // 1. Pre-render pages router pages
-    let prerendered_pages = prerender::prerender_static_pages(
+    // 1a. Pre-render pages router pages (automatic static optimization)
+    let mut prerendered_pages = prerender::prerender_static_pages(
         ctx.pool,
         ctx.manifest,
         ctx.routes,
@@ -130,6 +130,17 @@ pub async fn export_site(
         ctx.doc_descriptor,
     )
     .await;
+
+    // 1b. Pre-render getStaticPaths pages (dynamic routes with known paths)
+    let static_path_pages = prerender::prerender_static_path_pages(
+        ctx.pool,
+        ctx.manifest,
+        ctx.routes,
+        ctx.manifest_json,
+        ctx.doc_descriptor,
+    )
+    .await;
+    prerendered_pages.extend(static_path_pages);
 
     // Create data directory for client-side navigation
     let data_dir = output
@@ -158,9 +169,16 @@ pub async fn export_site(
         result.pages_exported += 1;
     }
 
-    // Record skipped pages
+    // Record skipped pages — getStaticPaths pages that were prerendered have
+    // concrete paths in the map (e.g., "/posts/first"), not the route pattern
+    // (e.g., "/posts/:id"), so we check has_static_paths to avoid false skips.
     for (pattern, assets) in &ctx.manifest.pages {
         if prerendered_pages.contains_key(pattern) {
+            continue;
+        }
+        // getStaticPaths pages are prerendered under their concrete paths,
+        // not the route pattern — don't flag them as skipped
+        if assets.has_static_paths {
             continue;
         }
         let reason = match assets.data_strategy {

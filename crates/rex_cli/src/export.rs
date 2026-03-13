@@ -29,7 +29,7 @@ pub async fn cmd_export(
 
     // 2. Build bundles
     let project_config = ProjectConfig::load(&config.project_root)?;
-    let build_result = build_bundles(&config, &scan, &project_config).await?;
+    let mut build_result = build_bundles(&config, &scan, &project_config).await?;
     debug!(build_id = %build_result.build_id, "Build complete");
 
     // 3. Validate exportability
@@ -104,9 +104,9 @@ pub async fn cmd_export(
         html_extensions,
     };
 
-    let ctx = ExportContext {
+    let mut ctx = ExportContext {
         pool: &pool,
-        manifest: &build_result.manifest,
+        manifest: &mut build_result.manifest,
         routes: &scan.routes,
         manifest_json: &manifest_json,
         doc_descriptor: document_descriptor.as_ref(),
@@ -114,7 +114,7 @@ pub async fn cmd_export(
         project_root: &config.project_root,
     };
 
-    let result = export_site(&ctx, &export_config).await?;
+    let result = export_site(&mut ctx, &export_config).await?;
 
     let elapsed = start.elapsed();
 
