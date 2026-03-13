@@ -8,7 +8,7 @@ use futures::StreamExt;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use ratatui::Frame;
 use std::time::Duration;
 use tracing::Level;
@@ -142,18 +142,12 @@ impl TuiApp {
     fn render_home(&self, f: &mut Frame<'_>) {
         let area = f.area();
 
-        let cw = area.width.saturating_sub(4).max(1) as usize;
         let error_lines = self
             .unresolved_error
             .as_ref()
             .map(|e| {
-                let wrapped: usize = e
-                    .message
-                    .lines()
-                    .take(12)
-                    .map(|l| l.chars().count().max(1).div_ceil(cw))
-                    .sum();
-                wrapped as u16 + 2
+                let count = e.message.lines().take(12).count();
+                count as u16 + 2
             })
             .unwrap_or(0);
 
@@ -212,7 +206,7 @@ impl TuiApp {
             ]));
         }
 
-        let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+        let para = Paragraph::new(lines);
         f.render_widget(para, area);
     }
 

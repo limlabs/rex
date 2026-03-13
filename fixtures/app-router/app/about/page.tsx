@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 
 export default function About() {
   const description = "Rex is a Next.js Pages Router reimplemented in Rust.";
