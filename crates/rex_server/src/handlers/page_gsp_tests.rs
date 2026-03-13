@@ -227,6 +227,42 @@ async fn test_page_gsp_not_found() {
 }
 
 #[tokio::test]
+async fn test_static_paths_dev_mode_skips_fallback_false() {
+    // In dev mode, getStaticPaths pages should always SSR on demand,
+    // even with fallback: false (matches Next.js dev behavior).
+    let app = TestAppBuilder::new()
+        .routes(
+            vec![make_route(
+                "/posts/:id",
+                "posts/[id].tsx",
+                vec![DynamicSegment::Single("id".into())],
+            )],
+            vec![(
+                "posts/[id]",
+                "function Post(props) { return React.createElement('p', null, props.id); }",
+                Some("GSP:function(ctx) { return { props: { id: ctx.params.id } }; }"),
+            )],
+        )
+        .page_strategy("/posts/:id", DataStrategy::GetStaticProps)
+        .static_paths_page("/posts/:id", Fallback::False)
+        .dev_mode()
+        .build();
+
+    // In prod this would 404, but dev mode should SSR it
+    let resp = app
+        .oneshot(Request::get("/posts/unknown").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = body_string(resp.into_body()).await;
+    assert!(
+        html.contains("<p>unknown</p>"),
+        "dev mode should SSR getStaticPaths pages on demand: {html}"
+    );
+}
+
+#[tokio::test]
 async fn test_static_paths_fallback_blocking_with_gsp() {
     let app = TestAppBuilder::new()
         .routes(

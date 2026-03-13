@@ -43,12 +43,15 @@ pub async fn data_handler(
             .expect("response build");
     }
 
-    // If this is a getStaticPaths page with fallback: false, return 404
-    if let Some(page_assets) = hot.manifest.pages.get(&route_match.route.pattern) {
-        if page_assets.has_static_paths && page_assets.fallback == Fallback::False {
-            return StatusCode::NOT_FOUND.into_response();
+    // If this is a getStaticPaths page with fallback: false, return 404.
+    // In dev mode, skip this check — always SSR on demand (matches Next.js behavior).
+    if !state.is_dev {
+        if let Some(page_assets) = hot.manifest.pages.get(&route_match.route.pattern) {
+            if page_assets.has_static_paths && page_assets.fallback == Fallback::False {
+                return StatusCode::NOT_FOUND.into_response();
+            }
+            // fallback: "blocking" — continue to SSR below
         }
-        // fallback: "blocking" — continue to SSR below
     }
 
     let route_key = route_match.route.module_name();
@@ -325,6 +328,42 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_data_handler_static_paths_dev_mode_skips_fallback_false() {
+        let app = TestAppBuilder::new()
+            .routes(
+                vec![make_route(
+                    "/posts/:id",
+                    "posts/[id].tsx",
+                    vec![DynamicSegment::Single("id".into())],
+                )],
+                vec![(
+                    "posts/[id]",
+                    "function Post(props) { return React.createElement('p', null, props.id); }",
+                    Some("GSP:function(ctx) { return { props: { id: ctx.params.id } }; }"),
+                )],
+            )
+            .page_strategy("/posts/:id", DataStrategy::GetStaticProps)
+            .static_paths_page("/posts/:id", Fallback::False)
+            .dev_mode()
+            .build();
+
+        // In prod this would 404, but dev mode should SSR it
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/data/test-build-id/posts/unknown.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_string(resp.into_body()).await;
+        let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(val["props"]["id"], "unknown");
     }
 
     #[tokio::test]

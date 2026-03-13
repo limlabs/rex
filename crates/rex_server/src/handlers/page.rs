@@ -297,20 +297,23 @@ pub(super) async fn page_handler_inner(
             .expect("response build");
     }
 
-    // If this is a getStaticPaths page with fallback: false, return 404
-    if let Some(page_assets) = hot.manifest.pages.get(&route_match.route.pattern) {
-        if page_assets.has_static_paths && page_assets.fallback == Fallback::False {
-            debug!(path, "getStaticPaths fallback: false — returning 404");
-            if hot.has_custom_404 {
-                return render_error_page(state, hot, "404", StatusCode::NOT_FOUND, "{}").await;
+    // If this is a getStaticPaths page with fallback: false, return 404.
+    // In dev mode, skip this check — always SSR on demand (matches Next.js behavior).
+    if !state.is_dev {
+        if let Some(page_assets) = hot.manifest.pages.get(&route_match.route.pattern) {
+            if page_assets.has_static_paths && page_assets.fallback == Fallback::False {
+                debug!(path, "getStaticPaths fallback: false — returning 404");
+                if hot.has_custom_404 {
+                    return render_error_page(state, hot, "404", StatusCode::NOT_FOUND, "{}").await;
+                }
+                return (
+                    StatusCode::NOT_FOUND,
+                    Html("404 - Page Not Found".to_string()),
+                )
+                    .into_response();
             }
-            return (
-                StatusCode::NOT_FOUND,
-                Html("404 - Page Not Found".to_string()),
-            )
-                .into_response();
+            // fallback: "blocking" — continue to SSR below
         }
-        // fallback: "blocking" — continue to SSR below
     }
 
     let route_key = route_match.route.module_name();
