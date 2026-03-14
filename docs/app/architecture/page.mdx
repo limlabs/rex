@@ -1,39 +1,41 @@
 # Architecture
 
-Rex is a Rust-native React framework. The server, router, build pipeline, and SSR engine are all written in Rust, while your application code remains standard React (TSX/JSX).
+Rex is a Rust-native React framework. The server, router, build pipeline, and SSR engine are all written in Rust, while your application code remains standard React (TSX/JSX). Read more about [why we built Rex](/architecture/motivations).
 
-## Motivations
+## Overview
 
-The web is evolving. The hyper-growth of AI and its reshaping of human-computer interaction demand that interfaces become faster, more flexible, and can respond to the needs of both humans and their agentic counterparts.
+```mermaid
+graph TD
+    A["HTTP Request"] --> B
 
-Today's web frameworks have the _ingredients_ needed to serve this dynamic, ever-changing ecosystem of web content. Indeed, a wide array of components are needed for the modern full stack app:
+    B["rex_server · Axum\nMiddleware · Static files · WebSocket · API routes"]
+    B --> C
 
-- UI and data fetching libraries/frameworks
-- Platform integrations - OAuth, Docker/k8s, cloud services, internal/external APIs, CDNs
-- Tooling - bundling, minification, type checking, linting, testing
-- REST, gRPC, MCP, and other machine-readable interfaces
-- Observability - logging, metrics, performance monitoring
+    C["rex_router · Trie\nScans pages/ or app/ · Builds route trie · Matches URL"]
+    C --> D
+    C --> E
 
-The list goes on. Yet today's developers, from vibe coders, to principal full stack engineers, to autonomous agent swarms must frequently understand and decide how to put these ingredients together.
+    D["rex_v8 · SSR\nV8 isolate pool · Page rendering\ngetServerSideProps · React Server Components"]
+    E["rex_build · Rolldown\nServer bundle IIFE · Client bundles ESM\nCode splitting · OXC transforms"]
 
-Each micro-decision increases the cognitive load required when returning to a project, as well as increases the knowledge gap between code authors and wider community of users and maintainers.
+    D --> F["Document Assembly\nHTML · head · SSR output · Client scripts · CSS"]
+    F --> G["HTTP Response\nFull HTML page · Browser hydrates with ESM bundle"]
 
-Paradoxically, adding too much documentation _also_ increases cognitive load, requiring engineers with questions to navigate a wider potential space of potentially relevant (or irrelevant) information.
+    H["rex_core\nShared types: config, routes, pages"]
+    I["rex_dev\nFile watcher · HMR WebSocket"]
+    J["rex_cli\nCommands: dev · build · start"]
 
-So how does one cope? Abstraction. To use an analogy familiar to many: If cars required us to understand how the engine, drivetrain, brakes, wheels, and electronic components worked in order to drive them, few people would be on the road. 
-
-However, by exposing a simplified, constrained interface -- pedals, gauges, buttons, and dials -- how a car operates becomes less relevant. People can just sort of get in and start driving with some basic instructions and training.
-
-For Rex, we aim to be the abstraction that lets developers "shut up and drive", eliminating micro-decisions in favor of sensible, familiar defaults when developing full stack applications. Success for Rex means helping developers of all experience levels build the modern Web faster and hassle-free, unlocking its boundless potential.
-
-## Guiding Principles
-
-- **Minimal boilerplate.** Boilerplate adds ambiguity and cognitive load: similar code _looks_ like the same behavior, but offers few guarantees. Rex avoids boilerplate in favor of clear, simple conventions where possible.
-- **Familiarity.** Rather than reinvent the wheel, Rex builds on existing conventions already widely used in full stack development, allowing developers to re-use their existing knowledge and assumptions right away.
-- **Predictability.** If most people agree a Rex feature should work a certain way, it probably should indeed work that way. 
-- **Open-Closed.** Inspired from the object-oriented concept of the same name, Rex aims to be open for extension, but closed for modification. In practice, this means limiting the ability to patch or use internal APIs in favor of well-defined extension points, such as plugin interfaces.
-- **Speed.** Faster tools unlock faster iteration for developers. Faster web pages and APIs offer smooth experiences to users. Rex aims to serve developers and users equally with high-speed, efficient implementations, beating the performance of current-gen competitors.
-- **Agent DX matters.** Developers are increasingly relying on coding agents to write their React and Typescript code. However, with today's limited context windows, recall relies on well-curated memories and files like AGENTS.md or CLAUDE.md. These artifacts quickly become a burden to synchronize with the rapid pace of agent-driven development. We believe that these now are framework-level concerns, which Rex tackles through extending its conventions, documentation, and features to accomodate the agentic audience as first-class citizens in the ecosystem.
+    style A fill:#0f172a,stroke:#475569,color:#e2e8f0
+    style B fill:#334155,stroke:#475569,color:#e2e8f0
+    style C fill:#334155,stroke:#475569,color:#e2e8f0
+    style D fill:#334155,stroke:#475569,color:#e2e8f0
+    style E fill:#334155,stroke:#475569,color:#e2e8f0
+    style F fill:#334155,stroke:#475569,color:#e2e8f0
+    style G fill:#0f172a,stroke:#475569,color:#e2e8f0
+    style H fill:#1e293b,stroke:#475569,color:#94a3b8
+    style I fill:#1e293b,stroke:#475569,color:#94a3b8
+    style J fill:#1e293b,stroke:#475569,color:#94a3b8
+```
 
 ## How a request flows
 

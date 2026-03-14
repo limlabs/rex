@@ -1,4 +1,5 @@
 import React from "react";
+import Mermaid from "./Mermaid";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
@@ -42,6 +43,11 @@ export default function CodeBlock({ children }: CodeBlockProps) {
   const className = child?.props?.className || "";
   const lang = className.replace("language-", "");
   const code = child?.props?.children || "";
+
+  // Render mermaid diagrams
+  if (lang === "mermaid") {
+    return <Mermaid chart={code.trim()} />;
+  }
 
   // Highlight if we recognize the language, otherwise render plain
   if (lang && hljs.getLanguage(lang)) {
