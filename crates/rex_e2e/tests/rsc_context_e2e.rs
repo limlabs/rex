@@ -4,7 +4,7 @@
 //!
 //! Prerequisites:
 //!   - `cargo build` (debug or release)
-//!   - `cd fixtures/context && npm install`
+//!   - No `npm install` needed — this is a zero-config fixture
 
 #[allow(clippy::unwrap_used)]
 mod context {
