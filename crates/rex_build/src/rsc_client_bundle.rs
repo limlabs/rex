@@ -62,6 +62,9 @@ pub(crate) async fn build_rsc_client_bundles(
 
     // Rex built-in aliases for client bundle (rex/link → client runtime, etc.)
     let mut client_aliases = build_rex_aliases()?;
+    // Manual tsconfig paths (since we disable tsconfig auto-resolution to
+    // prevent "jsx": "preserve" from leaving raw JSX in the bundle).
+    client_aliases.extend(crate::build_utils::tsconfig_path_aliases(&ctx.project_root));
 
     // Generate server action stubs for "use server" modules in the client bundle.
     // Each stub replaces the real module with createServerReference calls.
@@ -126,7 +129,10 @@ pub(crate) async fn build_rsc_client_bundles(
         platform: Some(rolldown::Platform::Browser),
         module_types: Some(ctx.non_js_empty_module_types()),
         define: Some(ctx.define.iter().cloned().collect()),
-        tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
+        // Disable tsconfig auto-resolution — we manually parse paths into
+        // aliases above. This prevents "jsx": "preserve" in tsconfig from
+        // leaving raw JSX in the output.
+        tsconfig: Some(rolldown_common::TsConfig::Auto(false)),
         minify: ctx.minify_options(),
         treeshake: react_treeshake_options(),
         manual_code_splitting: Some(rolldown_common::ManualCodeSplittingOptions {
