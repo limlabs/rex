@@ -25,6 +25,7 @@ type AliasList = Vec<(String, Vec<Option<String>>)>;
 ///
 /// When routes span multiple route groups, builds a core IIFE plus per-group
 /// IIFEs and concatenates them. Otherwise builds a single IIFE as before.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn build_rsc_server_bundle(
     ctx: &RscBuildContext<'_>,
     app_scan: &AppScanResult,
@@ -33,6 +34,7 @@ pub(crate) async fn build_rsc_server_bundle(
     stub_aliases: &[(PathBuf, PathBuf)],
     client_manifest: &ClientReferenceManifest,
     server_action_manifest: &ServerActionManifest,
+    inline_action_targets: &[PathBuf],
 ) -> Result<PathBuf> {
     let groups = app_scan.routes_by_group();
     let has_route_groups = groups.len() > 1 || groups.iter().any(|(g, _)| g.is_some());
@@ -46,6 +48,7 @@ pub(crate) async fn build_rsc_server_bundle(
             client_manifest,
             server_action_manifest,
             &groups,
+            inline_action_targets,
         )
         .await
     } else {
@@ -56,6 +59,7 @@ pub(crate) async fn build_rsc_server_bundle(
             stub_aliases,
             client_manifest,
             server_action_manifest,
+            inline_action_targets,
         )
         .await
     }
@@ -69,6 +73,7 @@ async fn build_single(
     stub_aliases: &[(PathBuf, PathBuf)],
     client_manifest: &ClientReferenceManifest,
     server_action_manifest: &ServerActionManifest,
+    inline_action_targets: &[PathBuf],
 ) -> Result<PathBuf> {
     let entries_dir = output_dir.join("_rsc_server_entry");
     fs::create_dir_all(&entries_dir)?;
@@ -86,7 +91,16 @@ async fn build_single(
     add_react_core_aliases(&mut aliases, ctx, &runtime_dir);
     apply_stub_overrides(&mut aliases, stub_aliases);
 
-    let plugins = build_plugins(output_dir, &runtime_dir);
+    let mut plugins = build_plugins(output_dir, &runtime_dir);
+    if !inline_action_targets.is_empty() {
+        plugins.push(std::sync::Arc::new(
+            crate::server_action_extract::InlineServerActionPlugin::new(
+                inline_action_targets.to_vec(),
+                ctx.project_root.clone(),
+                ctx.build_id.to_string(),
+            ),
+        ));
+    }
     let bundle_path = output_dir.join("rsc-server-bundle.js");
 
     run_iife_build(
@@ -109,6 +123,7 @@ async fn build_single(
 }
 
 /// Build core IIFE + per-group IIFEs, concatenated into a single output file.
+#[allow(clippy::too_many_arguments)]
 async fn build_grouped(
     ctx: &RscBuildContext<'_>,
     app_scan: &AppScanResult,
@@ -117,6 +132,7 @@ async fn build_grouped(
     client_manifest: &ClientReferenceManifest,
     server_action_manifest: &ServerActionManifest,
     groups: &[(Option<String>, Vec<&AppRoute>)],
+    inline_action_targets: &[PathBuf],
 ) -> Result<PathBuf> {
     let entries_dir = output_dir.join("_rsc_server_entry");
     fs::create_dir_all(&entries_dir)?;
@@ -140,7 +156,16 @@ async fn build_grouped(
 
     let core_out_dir = output_dir.join("_rsc_core");
     fs::create_dir_all(&core_out_dir)?;
-    let core_plugins = build_plugins(&core_out_dir, &runtime_dir);
+    let mut core_plugins = build_plugins(&core_out_dir, &runtime_dir);
+    if !inline_action_targets.is_empty() {
+        core_plugins.push(std::sync::Arc::new(
+            crate::server_action_extract::InlineServerActionPlugin::new(
+                inline_action_targets.to_vec(),
+                ctx.project_root.clone(),
+                ctx.build_id.to_string(),
+            ),
+        ));
+    }
 
     run_iife_build(
         ctx,
@@ -171,7 +196,16 @@ async fn build_grouped(
 
         let group_out_dir = output_dir.join(format!("_rsc_group_{label}"));
         fs::create_dir_all(&group_out_dir)?;
-        let group_plugins = build_plugins(&group_out_dir, &runtime_dir);
+        let mut group_plugins = build_plugins(&group_out_dir, &runtime_dir);
+        if !inline_action_targets.is_empty() {
+            group_plugins.push(std::sync::Arc::new(
+                crate::server_action_extract::InlineServerActionPlugin::new(
+                    inline_action_targets.to_vec(),
+                    ctx.project_root.clone(),
+                    ctx.build_id.to_string(),
+                ),
+            ));
+        }
 
         let filename = format!("rsc-group-{label}.js");
         run_iife_build(

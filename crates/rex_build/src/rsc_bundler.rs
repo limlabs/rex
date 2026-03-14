@@ -147,19 +147,33 @@ pub async fn build_rsc_bundles(
         }
     }
 
-    // Warn about inline "use server" directives that Rex can't extract
+    // Extract inline "use server" functions from JSX. Register extracted
+    // actions in the manifest; the InlineServerActionPlugin handles source
+    // transformation at bundle time (preserving relative import resolution).
+    let mut inline_action_targets: Vec<PathBuf> = Vec::new();
     for module in graph.unextracted_server_action_modules() {
+        let Ok(source) = std::fs::read_to_string(&module.path) else {
+            continue;
+        };
+        let Some(result) =
+            crate::server_action_extract::extract_inline_server_actions(&source, &module.path)
+        else {
+            continue;
+        };
+
+        inline_action_targets.push(module.path.clone());
         let rel_path = module
             .path
             .strip_prefix(&config.project_root)
             .unwrap_or(&module.path)
-            .display();
-        tracing::warn!(
-            file = %rel_path,
-            "Inline \"use server\" in JSX is not yet supported. \
-             Extract the server action to a separate file with \"use server\" at the top. \
-             See: https://react.dev/reference/rsc/use-server"
-        );
+            .to_string_lossy()
+            .replace('\\', "/");
+        for action in &result.actions {
+            let action_id =
+                crate::server_action_manifest::server_action_id(&rel_path, &action.name, build_id);
+            server_action_manifest.add(&action_id, rel_path.clone(), action.name.clone());
+        }
+        tracing::debug!(file = %rel_path, count = result.actions.len(), "Extracted inline server actions");
     }
 
     // Build rex/* → stub aliases for client boundaries discovered via rex/* imports.
@@ -203,6 +217,7 @@ pub async fn build_rsc_bundles(
         &stub_aliases,
         &client_manifest,
         &server_action_manifest,
+        &inline_action_targets,
     )
     .await?;
 
