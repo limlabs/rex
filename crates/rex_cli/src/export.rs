@@ -120,17 +120,21 @@ pub async fn cmd_export(
 
     // 7. Print summary
     eprintln!();
+    for path in &result.pages_exported_list {
+        eprintln!("    \x1b[32m\u{25cb}\x1b[0m \x1b[2m{path}\x1b[0m");
+    }
+    eprintln!();
     eprintln!(
-        "  \x1b[32;1m✓ Exported {} pages in {:.1}s\x1b[0m",
+        "  \x1b[32;1m\u{2713} Exported {} pages in {:.1}s\x1b[0m",
         result.pages_exported,
         elapsed.as_secs_f64()
     );
-    eprintln!("  \x1b[2m→ {}\x1b[0m", output_dir.display());
+    eprintln!("  \x1b[2m\u{2192} {}\x1b[0m", output_dir.display());
 
     if !result.pages_skipped.is_empty() {
         eprintln!();
         for (pattern, reason) in &result.pages_skipped {
-            eprintln!("  \x1b[2m○ {pattern} (skipped: {reason})\x1b[0m");
+            eprintln!("  \x1b[2m\u{25cb} {pattern} (skipped: {reason})\x1b[0m");
         }
     }
 

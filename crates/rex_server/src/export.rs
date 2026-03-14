@@ -26,6 +26,8 @@ pub struct ExportConfig {
 pub struct ExportResult {
     /// Number of pages successfully exported as HTML.
     pub pages_exported: usize,
+    /// Paths that were exported, sorted.
+    pub pages_exported_list: Vec<String>,
     /// Pages that were skipped, with (route_pattern, reason).
     pub pages_skipped: Vec<(String, String)>,
 }
@@ -114,6 +116,7 @@ pub async fn export_site(
     let output = &config.output_dir;
     let mut result = ExportResult {
         pages_exported: 0,
+        pages_exported_list: Vec::new(),
         pages_skipped: Vec::new(),
     };
 
@@ -166,6 +169,7 @@ pub async fn export_site(
         write_html_file(&data_path, &data_json)?;
 
         debug!(pattern, path = %file_path.display(), "Exported page");
+        result.pages_exported_list.push(pattern.clone());
         result.pages_exported += 1;
     }
 
@@ -222,6 +226,7 @@ pub async fn export_site(
         write_html_file(&rsc_path, &flight_data)?;
 
         debug!(pattern, path = %file_path.display(), "Exported app route");
+        result.pages_exported_list.push(pattern.clone());
         result.pages_exported += 1;
     }
 
@@ -253,6 +258,8 @@ pub async fn export_site(
         copy_dir_recursive(&public_dir, output)?;
         debug!(path = %public_dir.display(), "Copied public/ directory");
     }
+
+    result.pages_exported_list.sort();
 
     info!(
         exported = result.pages_exported,
@@ -346,6 +353,7 @@ async fn export_404_page(
         warn!(error = %e, "Failed to write 404.html");
     } else {
         debug!("Exported 404.html");
+        result.pages_exported_list.push("/404".to_string());
         result.pages_exported += 1;
     }
 }
