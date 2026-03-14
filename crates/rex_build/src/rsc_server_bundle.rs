@@ -327,16 +327,14 @@ fn build_plugins(
         std::sync::Arc::new(crate::use_client_detect::UseClientDetectPlugin::new());
 
     // Stub packages that use Node.js native modules and can never run in V8.
-    // NOT for framework-specific packages — those should be handled by proper
-    // "use client"/"use server" boundary detection and route group isolation.
+    // pg/pg-pool/pg-protocol are NOT stubbed here — the RSC server bundle needs
+    // real database access via Rex's net.Socket TCP polyfill. They ARE stubbed
+    // in the SSR bundle (rsc_ssr_bundle.rs) which only hydrates HTML.
     let heavy_stub_plugin: std::sync::Arc<dyn rolldown::plugin::Pluginable> =
         std::sync::Arc::new(crate::server_bundle::HeavyPackageStubPlugin::new(vec![
             "node_modules/@aws-sdk/".to_string(),
             "node_modules/@smithy/".to_string(),
-            "node_modules/pg/".to_string(),
             "node_modules/pg-native/".to_string(),
-            "node_modules/pg-pool/".to_string(),
-            "node_modules/pg-protocol/".to_string(),
             "node_modules/@node-rs/".to_string(),
             "node_modules/undici/".to_string(),
         ]));

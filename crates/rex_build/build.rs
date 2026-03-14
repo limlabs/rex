@@ -41,6 +41,8 @@ const V8_POLYFILL_MODULES: &[&str] = &[
     "buffer",
     "crypto",
     "formdata",
+    "web-apis",
+    "require",
 ];
 
 fn strip_typescript(source: &str) -> String {

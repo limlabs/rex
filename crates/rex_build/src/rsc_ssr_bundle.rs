@@ -136,6 +136,8 @@ pub(crate) async fn build_rsc_ssr_bundle(
     let _ = fs::remove_dir_all(&entries_dir);
 
     let bundle_path = output_dir.join("rsc-ssr-bundle.js");
+    crate::cjs_interop::patch_to_common_js(&bundle_path)?;
+
     debug!(path = %bundle_path.display(), "RSC SSR bundle written");
     Ok(bundle_path)
 }

@@ -147,6 +147,21 @@ pub async fn build_rsc_bundles(
         }
     }
 
+    // Warn about inline "use server" directives that Rex can't extract
+    for module in graph.unextracted_server_action_modules() {
+        let rel_path = module
+            .path
+            .strip_prefix(&config.project_root)
+            .unwrap_or(&module.path)
+            .display();
+        tracing::warn!(
+            file = %rel_path,
+            "Inline \"use server\" in JSX is not yet supported. \
+             Extract the server action to a separate file with \"use server\" at the top. \
+             See: https://react.dev/reference/rsc/use-server"
+        );
+    }
+
     // Build rex/* → stub aliases for client boundaries discovered via rex/* imports.
     // The stub_aliases map absolute paths, but rolldown also needs the specifier alias
     // (e.g. "rex/link" → stub) for when source code uses `import Link from 'rex/link'`.

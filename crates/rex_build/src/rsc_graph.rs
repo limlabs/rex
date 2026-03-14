@@ -25,6 +25,10 @@ pub struct ModuleInfo {
     /// Exported functions that have function-level `"use server"` directives.
     /// Only populated for modules without a module-level `"use server"` directive.
     pub server_functions: Vec<String>,
+    /// Whether this module contains `"use server"` strings beyond what was
+    /// extracted into `server_functions`. True when inline server actions
+    /// are used inside JSX expressions — these can't be extracted by Rex yet.
+    pub has_unextracted_server_directives: bool,
 }
 
 /// The analyzed module graph.
@@ -55,6 +59,15 @@ impl ModuleGraph {
         self.modules
             .values()
             .filter(|m| !m.is_server && !m.server_functions.is_empty())
+            .collect()
+    }
+
+    /// Return modules with inline `"use server"` directives that Rex couldn't
+    /// extract (e.g. server actions defined inside JSX expressions).
+    pub fn unextracted_server_action_modules(&self) -> Vec<&ModuleInfo> {
+        self.modules
+            .values()
+            .filter(|m| m.has_unextracted_server_directives)
             .collect()
     }
 
@@ -155,6 +168,7 @@ fn analyze_module(path: &Path, root: &Path) -> Result<ModuleInfo> {
                 imports: Vec::new(),
                 exports: vec!["default".to_string()],
                 server_functions: Vec::new(),
+                has_unextracted_server_directives: false,
             });
         }
     }
@@ -282,6 +296,20 @@ fn analyze_module(path: &Path, root: &Path) -> Result<ModuleInfo> {
         }
     }
 
+    // Detect unextracted "use server" directives: if the source text contains
+    // the string "use server" beyond the module-level directive and any extracted
+    // function-level directives, there are inline server actions in JSX that Rex
+    // can't extract. This produces a build-time warning.
+    let has_unextracted_server_directives = if !is_server && !is_client {
+        // Count how many times "use server" appears in the source
+        let total_occurrences =
+            source.matches("\"use server\"").count() + source.matches("'use server'").count();
+        // Subtract the ones we already extracted
+        total_occurrences > server_functions.len()
+    } else {
+        false
+    };
+
     Ok(ModuleInfo {
         path: path.to_path_buf(),
         is_client,
@@ -290,6 +318,7 @@ fn analyze_module(path: &Path, root: &Path) -> Result<ModuleInfo> {
         imports,
         exports,
         server_functions,
+        has_unextracted_server_directives,
     })
 }
 

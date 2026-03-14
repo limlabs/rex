@@ -628,6 +628,7 @@ mod tests {
                 imports: vec![],
                 exports: vec!["default".to_string()],
                 server_functions: vec![],
+                has_unextracted_server_directives: false,
             },
         );
         ModuleGraph { modules }
