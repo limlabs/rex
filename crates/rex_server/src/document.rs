@@ -468,6 +468,13 @@ fn assemble_rsc_head_shell_with_attrs(
     html.push_str(
         "<script>\
          if(typeof process===\"undefined\")globalThis.process={env:{}};\
+         (function(){var _m=performance.measure.bind(performance);\
+         performance.measure=function(n,o,e){\
+           try{if(o&&typeof o===\"object\"){\
+             if(!isFinite(o.start))o.start=0;\
+             if(!isFinite(o.end))o.end=o.start;\
+           }return _m(n,o,e)}catch(x){return null}\
+         }})();\
          var __rexModuleCache={};\
          globalThis.__webpack_require__=function(id){return __rexModuleCache[id]||{}};\
          globalThis.__webpack_require__.u=function(c){return c};\
