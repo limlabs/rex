@@ -118,10 +118,15 @@ pub async fn cmd_export(
 
     let elapsed = start.elapsed();
 
-    // 7. Print summary
+    // 7. Print summary (truncate long lists)
+    const MAX_SHOWN: usize = 20;
     eprintln!();
-    for path in &result.pages_exported_list {
+    for path in result.pages_exported_list.iter().take(MAX_SHOWN) {
         eprintln!("    \x1b[32m\u{25cb}\x1b[0m \x1b[2m{path}\x1b[0m");
+    }
+    if result.pages_exported_list.len() > MAX_SHOWN {
+        let remaining = result.pages_exported_list.len() - MAX_SHOWN;
+        eprintln!("    \x1b[2m... +{remaining} pages\x1b[0m");
     }
     eprintln!();
     eprintln!(
