@@ -8,6 +8,7 @@ use crate::client_manifest::ClientReferenceManifest;
 use crate::rsc_build_config::{build_rex_aliases, react_treeshake_options, RscBuildContext};
 use crate::rsc_entries::generate_ssr_entry;
 use crate::rsc_graph::ModuleGraph;
+use crate::server_action_manifest::ServerActionManifest;
 use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,12 +26,19 @@ pub(crate) async fn build_rsc_ssr_bundle(
     graph: &ModuleGraph,
     output_dir: &Path,
     client_manifest: &ClientReferenceManifest,
+    server_action_manifest: &ServerActionManifest,
 ) -> Result<PathBuf> {
     let entries_dir = output_dir.join("_rsc_ssr_entry");
     fs::create_dir_all(&entries_dir)?;
 
     // Generate entry source (pure function)
-    let entry_source = generate_ssr_entry(graph, client_manifest, &ctx.project_root, ctx.build_id);
+    let entry_source = generate_ssr_entry(
+        graph,
+        client_manifest,
+        server_action_manifest,
+        &ctx.project_root,
+        ctx.build_id,
+    );
 
     let entry_path = entries_dir.join("rsc-ssr-entry.ts");
     fs::write(&entry_path, &entry_source)?;
@@ -136,6 +144,8 @@ pub(crate) async fn build_rsc_ssr_bundle(
     let _ = fs::remove_dir_all(&entries_dir);
 
     let bundle_path = output_dir.join("rsc-ssr-bundle.js");
+    crate::cjs_interop::patch_to_common_js(&bundle_path)?;
+
     debug!(path = %bundle_path.display(), "RSC SSR bundle written");
     Ok(bundle_path)
 }

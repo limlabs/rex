@@ -90,9 +90,15 @@ function _drainHtmlStream(
 function _renderToHtml(element: unknown, flightString: string): void {
     try {
         const streamPromise = __rex_renderToReadableStream_ssr(element, {
-            onError: function(err: unknown) {
+            onError: function(err: unknown, errorInfo?: { componentStack?: string }) {
                 if (typeof console !== 'undefined') {
                     console.error('[Rex SSR onError]', _ssrSafeErrorString(err));
+                    if (errorInfo && errorInfo.componentStack) {
+                        console.error('[Rex SSR component stack]', errorInfo.componentStack);
+                    }
+                    if (err instanceof Error && err.stack) {
+                        console.error('[Rex SSR stack]', err.stack);
+                    }
                 }
             }
         });
@@ -145,12 +151,13 @@ globalThis.__rex_rsc_flight_to_html = function(flightString: string): string {
     }
 
     const ssrManifest = globalThis.__rex_webpack_ssr_manifest || {};
+    const serverModuleMap = globalThis.__rex_webpack_server_module_map || {};
     let treeResult: unknown;
     try {
         treeResult = __rex_createFromReadableStream(stream, {
             serverConsumerManifest: {
                 moduleMap: ssrManifest,
-                serverModuleMap: {},
+                serverModuleMap: serverModuleMap,
                 moduleLoading: null
             }
         } as any); // eslint-disable-line @typescript-eslint/no-explicit-any

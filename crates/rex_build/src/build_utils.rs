@@ -56,63 +56,57 @@ pub(crate) fn runtime_client_dir() -> Result<PathBuf> {
 
 /// Node.js polyfill aliases for server-side bundles (pages-router + RSC).
 pub fn node_polyfill_aliases(runtime_dir: &Path) -> Vec<(String, Vec<Option<String>>)> {
-    let modules: &[(&str, &str)] = &[
+    // Node.js builtins: each entry generates both bare and `node:` prefixed aliases
+    let node_builtins: &[(&str, &str)] = &[
         ("process", "process.ts"),
-        ("node:process", "process.ts"),
         ("fs", "fs.ts"),
-        ("node:fs", "fs.ts"),
         ("fs/promises", "fs-promises.ts"),
-        ("node:fs/promises", "fs-promises.ts"),
         ("path", "path.ts"),
-        ("node:path", "path.ts"),
         ("buffer", "buffer.ts"),
-        ("node:buffer", "buffer.ts"),
         ("crypto", "crypto.ts"),
-        ("node:crypto", "crypto.ts"),
         ("events", "events.cjs"),
-        ("node:events", "events.cjs"),
         ("net", "net.ts"),
-        ("node:net", "net.ts"),
         ("tls", "tls.ts"),
-        ("node:tls", "tls.ts"),
         ("dns", "dns.ts"),
-        ("node:dns", "dns.ts"),
         ("os", "os.ts"),
-        ("node:os", "os.ts"),
         ("stream", "stream.ts"),
-        ("node:stream", "stream.ts"),
         ("string_decoder", "string_decoder.ts"),
-        ("node:string_decoder", "string_decoder.ts"),
         ("util", "util.ts"),
-        ("node:util", "util.ts"),
         ("url", "url-module.ts"),
-        ("node:url", "url-module.ts"),
         ("stream/web", "stream-web.ts"),
-        ("node:stream/web", "stream-web.ts"),
         ("child_process", "child_process.ts"),
-        ("node:child_process", "child_process.ts"),
         ("assert", "assert.ts"),
-        ("node:assert", "assert.ts"),
         ("module", "module.ts"),
-        ("node:module", "module.ts"),
         ("http", "http.ts"),
-        ("node:http", "http.ts"),
         ("https", "https.ts"),
-        ("node:https", "https.ts"),
         ("zlib", "zlib.ts"),
-        ("node:zlib", "zlib.ts"),
         ("worker_threads", "worker_threads.ts"),
-        ("node:worker_threads", "worker_threads.ts"),
         ("http2", "http2.ts"),
-        ("node:http2", "http2.ts"),
-        ("cloudflare:sockets", "cloudflare-sockets.ts"),
+        ("tty", "tty.ts"),
+        ("readline", "readline.ts"),
         ("querystring", "querystring.ts"),
-        ("node:querystring", "querystring.ts"),
+    ];
+    let mk = |s: &str, f: &str| {
+        (
+            s.to_string(),
+            vec![Some(runtime_dir.join(f).to_string_lossy().to_string())],
+        )
+    };
+    let mut aliases: Vec<_> = Vec::new();
+    for &(name, file) in node_builtins {
+        aliases.push(mk(name, file));
+        aliases.push(mk(&format!("node:{name}"), file));
+    }
+    // Non-node: aliases
+    for &(name, file) in &[
+        ("cloudflare:sockets", "cloudflare-sockets.ts"),
         ("file-type", "file-type.ts"),
         ("file-type/core", "file-type.ts"),
         ("file-type/core.js", "file-type.ts"),
         ("sharp", "sharp.ts"),
-    ];
+    ] {
+        aliases.push(mk(name, file));
+    }
     let next_mappings: &[(&str, &str)] = &[
         ("next/link", "next-link.ts"),
         ("next/image", "next-image.ts"),
@@ -128,13 +122,6 @@ pub fn node_polyfill_aliases(runtime_dir: &Path) -> Vec<(String, Vec<Option<Stri
         ("@vercel/og", "empty.ts"),
         ("next/og", "empty.ts"),
     ];
-    let mk = |s: &str, f: &str| {
-        (
-            s.to_string(),
-            vec![Some(runtime_dir.join(f).to_string_lossy().to_string())],
-        )
-    };
-    let mut aliases: Vec<_> = modules.iter().map(|(s, f)| mk(s, f)).collect();
     aliases.extend(
         next_mappings
             .iter()

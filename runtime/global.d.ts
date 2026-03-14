@@ -146,6 +146,7 @@ declare global {
   var __rex_app_metadata_sources: Record<string, Record<string, any>[]>;
   var __rex_webpack_bundler_config: Record<string, unknown>;
   var __rex_webpack_ssr_manifest: Record<string, unknown>;
+  var __rex_webpack_server_module_map: Record<string, unknown>;
   var __rex_client_modules__: Record<string, unknown>;
   var __rex_ssr_modules__: Record<string, unknown>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

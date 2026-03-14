@@ -116,6 +116,21 @@ if (typeof (globalThis as any).require !== 'function') {
         pushSchema: async () => ({ apply: async () => {}, hasDataLoss: false, warnings: [] }),
         upPgSnapshot: (snapshot: any) => snapshot,
     };
+    // tty — used by pino/pino-pretty for color detection
+    modules['node:tty'] = {
+        isatty() { return false; },
+        ReadStream: class ReadStream { isTTY = false; },
+        WriteStream: class WriteStream { isTTY = false; columns = 80; rows = 24; },
+    };
+    // readline — used by pino-pretty interactive mode
+    modules['node:readline'] = {
+        createInterface() {
+            return { on() { return this; }, close() {}, question(_q: any, cb: any) { if (cb) cb(''); } };
+        },
+        clearLine() {},
+        cursorTo() {},
+        moveCursor() {},
+    };
     modules['querystring'] = modules['node:querystring'];
     modules['diagnostics_channel'] = modules['node:diagnostics_channel'];
     modules['util'] = modules['node:util'];
@@ -125,6 +140,8 @@ if (typeof (globalThis as any).require !== 'function') {
     modules['http2'] = modules['node:http2'];
     modules['perf_hooks'] = modules['node:perf_hooks'];
     modules['async_hooks'] = modules['node:async_hooks'];
+    modules['tty'] = modules['node:tty'];
+    modules['readline'] = modules['node:readline'];
 
     (globalThis as any).require = function require(id: string): any {
         if (id in modules) return modules[id];
