@@ -222,7 +222,14 @@ pub async fn build_rsc_bundles(
     .await?;
 
     // Build SSR bundle (after client build so manifest is populated)
-    let ssr_bundle_path = build_rsc_ssr_bundle(&ctx, &graph, &server_dir, &client_manifest).await?;
+    let ssr_bundle_path = build_rsc_ssr_bundle(
+        &ctx,
+        &graph,
+        &server_dir,
+        &client_manifest,
+        &server_action_manifest,
+    )
+    .await?;
 
     // Clean up stubs
     let _ = fs::remove_dir_all(&stubs_dir);

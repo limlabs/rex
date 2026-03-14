@@ -151,12 +151,13 @@ globalThis.__rex_rsc_flight_to_html = function(flightString: string): string {
     }
 
     const ssrManifest = globalThis.__rex_webpack_ssr_manifest || {};
+    const serverModuleMap = globalThis.__rex_webpack_server_module_map || {};
     let treeResult: unknown;
     try {
         treeResult = __rex_createFromReadableStream(stream, {
             serverConsumerManifest: {
                 moduleMap: ssrManifest,
-                serverModuleMap: {},
+                serverModuleMap: serverModuleMap,
                 moduleLoading: null
             }
         } as any); // eslint-disable-line @typescript-eslint/no-explicit-any
