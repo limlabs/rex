@@ -461,9 +461,13 @@ fn assemble_rsc_head_shell_with_attrs(
         "<script>window.__REX_RSC_MODULE_MAP__={escaped_manifest}</script>"
     ));
 
-    // Webpack shims — react-server-dom-webpack/client accesses __webpack_require__ during init
+    // Webpack shims — react-server-dom-webpack/client accesses __webpack_require__ during init.
+    // Process shim: Next.js internals (router, image loader) reference process.env.__NEXT_*
+    // which doesn't exist in the browser. Provide a minimal shim so lookups return undefined.
+    // NODE_ENV is already replaced by rolldown define; this just prevents runtime crashes.
     html.push_str(
         "<script>\
+         if(typeof process===\"undefined\")globalThis.process={env:{}};\
          var __rexModuleCache={};\
          globalThis.__webpack_require__=function(id){return __rexModuleCache[id]||{}};\
          globalThis.__webpack_require__.u=function(c){return c};\
