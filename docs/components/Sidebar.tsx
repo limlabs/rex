@@ -24,6 +24,7 @@ const navigation: NavSection[] = [
   {
     title: "How Rex Works",
     items: [
+      { title: "Motivations", href: "/architecture/motivations" },
       { title: "Architecture", href: "/architecture" },
       { title: "Differences from Next.js", href: "/architecture/differences" },
     ],
