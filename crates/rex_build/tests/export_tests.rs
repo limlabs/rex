@@ -30,7 +30,7 @@ async fn test_export_static_pages_creates_html_files() {
         None,
     );
 
-    let (result, pool) = build_and_load(&config, &scan).await;
+    let (mut result, pool) = build_and_load(&config, &scan).await;
 
     let manifest_json =
         rex_server::state::HotState::compute_manifest_json(&result.build_id, &result.manifest);
@@ -43,9 +43,9 @@ async fn test_export_static_pages_creates_html_files() {
         html_extensions: false,
     };
 
-    let ctx = ExportContext {
+    let mut ctx = ExportContext {
         pool: &pool,
-        manifest: &result.manifest,
+        manifest: &mut result.manifest,
         routes: &scan.routes,
         manifest_json: &manifest_json,
         doc_descriptor: None,
@@ -53,7 +53,7 @@ async fn test_export_static_pages_creates_html_files() {
         project_root: &config.project_root,
     };
 
-    let export_result = rex_server::export::export_site(&ctx, &export_config)
+    let export_result = rex_server::export::export_site(&mut ctx, &export_config)
         .await
         .unwrap();
 
@@ -101,7 +101,7 @@ async fn test_export_creates_static_asset_dir() {
         None,
     );
 
-    let (result, pool) = build_and_load(&config, &scan).await;
+    let (mut result, pool) = build_and_load(&config, &scan).await;
     let manifest_json =
         rex_server::state::HotState::compute_manifest_json(&result.build_id, &result.manifest);
 
@@ -113,9 +113,9 @@ async fn test_export_creates_static_asset_dir() {
         html_extensions: false,
     };
 
-    let ctx = ExportContext {
+    let mut ctx = ExportContext {
         pool: &pool,
-        manifest: &result.manifest,
+        manifest: &mut result.manifest,
         routes: &scan.routes,
         manifest_json: &manifest_json,
         doc_descriptor: None,
@@ -123,7 +123,7 @@ async fn test_export_creates_static_asset_dir() {
         project_root: &config.project_root,
     };
 
-    rex_server::export::export_site(&ctx, &export_config)
+    rex_server::export::export_site(&mut ctx, &export_config)
         .await
         .unwrap();
 
@@ -147,7 +147,7 @@ async fn test_export_cleans_output_on_rerun() {
         None,
     );
 
-    let (result, pool) = build_and_load(&config, &scan).await;
+    let (mut result, pool) = build_and_load(&config, &scan).await;
     let manifest_json =
         rex_server::state::HotState::compute_manifest_json(&result.build_id, &result.manifest);
 
@@ -164,9 +164,9 @@ async fn test_export_cleans_output_on_rerun() {
         html_extensions: false,
     };
 
-    let ctx = ExportContext {
+    let mut ctx = ExportContext {
         pool: &pool,
-        manifest: &result.manifest,
+        manifest: &mut result.manifest,
         routes: &scan.routes,
         manifest_json: &manifest_json,
         doc_descriptor: None,
@@ -174,7 +174,7 @@ async fn test_export_cleans_output_on_rerun() {
         project_root: &config.project_root,
     };
 
-    rex_server::export::export_site(&ctx, &export_config)
+    rex_server::export::export_site(&mut ctx, &export_config)
         .await
         .unwrap();
 

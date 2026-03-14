@@ -358,6 +358,23 @@ impl ProjectConfig {
     }
 }
 
+/// Fallback behaviour for `getStaticPaths`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum Fallback {
+    /// Unknown paths return 404.
+    #[default]
+    False,
+    /// Unknown paths are server-rendered on demand.
+    Blocking,
+}
+
+impl Fallback {
+    /// Returns `true` when fallback is `False` (the default).
+    pub fn is_false(&self) -> bool {
+        *self == Fallback::False
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {

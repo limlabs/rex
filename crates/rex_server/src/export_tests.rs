@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use super::*;
+use rex_core::Fallback;
 
 #[test]
 fn route_to_file_path_root() {
@@ -67,6 +68,53 @@ fn validate_exportability_dynamic_fails() {
 
     let err = validate_exportability(&manifest, false).unwrap_err();
     assert!(err.to_string().contains("dynamic segments"));
+}
+
+#[test]
+fn validate_exportability_dynamic_with_static_paths_passes() {
+    let mut manifest = AssetManifest::new("test".into());
+    manifest.add_page("/posts/:id", "posts.js", DataStrategy::GetStaticProps, true);
+    // Mark as having getStaticPaths — should be exportable
+    if let Some(page) = manifest.pages.get_mut("/posts/:id") {
+        page.has_static_paths = true;
+        page.fallback = Fallback::False;
+    }
+
+    let warnings = validate_exportability(&manifest, false).unwrap();
+    assert!(warnings.is_empty());
+}
+
+#[test]
+fn validate_exportability_dynamic_force_with_warnings() {
+    let mut manifest = AssetManifest::new("test".into());
+    manifest.add_page("/blog/:slug", "slug.js", DataStrategy::None, true);
+
+    let warnings = validate_exportability(&manifest, true).unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("dynamic segments"));
+}
+
+#[test]
+fn inject_static_export_flag_basic() {
+    let html = "<html><head><meta /></head><body></body></html>";
+    let result = inject_static_export_flag(html, false);
+    assert!(result.contains("__REX_STATIC_EXPORT=true"));
+    assert!(!result.contains("__REX_STATIC_HTML_EXT"));
+}
+
+#[test]
+fn inject_static_export_flag_with_html_extensions() {
+    let html = "<html><head><meta /></head><body></body></html>";
+    let result = inject_static_export_flag(html, true);
+    assert!(result.contains("__REX_STATIC_EXPORT=true"));
+    assert!(result.contains("__REX_STATIC_HTML_EXT=true"));
+}
+
+#[test]
+fn inject_static_export_flag_no_head() {
+    let html = "<html><body>no head</body></html>";
+    let result = inject_static_export_flag(html, false);
+    assert_eq!(result, html);
 }
 
 #[test]

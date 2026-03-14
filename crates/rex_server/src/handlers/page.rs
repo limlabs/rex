@@ -3,7 +3,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
 use futures::stream::{self, StreamExt};
-use rex_core::{DataStrategy, MiddlewareAction, ServerSidePropsContext};
+use rex_core::{DataStrategy, Fallback, MiddlewareAction, ServerSidePropsContext};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info};
@@ -282,14 +282,38 @@ pub(super) async fn page_handler_inner(
         }
     };
 
-    // Automatic static optimization: serve pre-rendered HTML without V8
-    if let Some(page) = hot.prerendered.get(&route_match.route.pattern) {
+    // Automatic static optimization: serve pre-rendered HTML without V8.
+    // For getStaticPaths pages, look up by concrete request path (not route pattern).
+    if let Some(page) = hot
+        .prerendered
+        .get(path)
+        .or_else(|| hot.prerendered.get(&route_match.route.pattern))
+    {
         debug!(path, "Serving pre-rendered static page");
         return Response::builder()
             .header("content-type", "text/html; charset=utf-8")
             .header("x-rex-render-mode", "static")
             .body(Body::from(page.html.clone()))
             .expect("response build");
+    }
+
+    // If this is a getStaticPaths page with fallback: false, return 404.
+    // In dev mode, skip this check — always SSR on demand (matches Next.js behavior).
+    if !state.is_dev {
+        if let Some(page_assets) = hot.manifest.pages.get(&route_match.route.pattern) {
+            if page_assets.has_static_paths && page_assets.fallback == Fallback::False {
+                debug!(path, "getStaticPaths fallback: false — returning 404");
+                if hot.has_custom_404 {
+                    return render_error_page(state, hot, "404", StatusCode::NOT_FOUND, "{}").await;
+                }
+                return (
+                    StatusCode::NOT_FOUND,
+                    Html("404 - Page Not Found".to_string()),
+                )
+                    .into_response();
+            }
+            // fallback: "blocking" — continue to SSR below
+        }
     }
 
     let route_key = route_match.route.module_name();
@@ -632,6 +656,10 @@ pub(super) async fn handle_app_route_handler(
 #[cfg(test)]
 #[path = "page_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "page_gsp_tests.rs"]
+mod gsp_tests;
 
 #[cfg(test)]
 #[path = "app_route_tests.rs"]

@@ -44,6 +44,8 @@ pub struct SsrIsolate {
     pub(crate) form_action_fn: Option<v8::Global<v8::Function>>,
     /// App router route handler dispatch (route.ts)
     pub(crate) app_route_handler_fn: Option<v8::Global<v8::Function>>,
+    /// getStaticPaths execution function
+    pub(crate) gsp_paths_fn: Option<v8::Global<v8::Function>>,
     /// Last successfully loaded bundle, used to restore state on failed reload.
     /// Uses `Arc<String>` to share memory across pool isolates instead of cloning.
     pub(crate) last_bundle: std::sync::Arc<String>,
@@ -85,6 +87,7 @@ impl SsrIsolate {
             server_action_encoded_fn,
             form_action_fn,
             app_route_handler_fn,
+            gsp_paths_fn,
         ) = {
             v8::scope!(scope, &mut isolate);
 
@@ -222,6 +225,9 @@ impl SsrIsolate {
             let app_route_handler_fn =
                 v8_get_optional_fn!(scope, global, "__rex_call_app_route_handler");
 
+            // getStaticPaths — optional, only present when pages export getStaticPaths
+            let gsp_paths_fn = v8_get_optional_fn!(scope, global, "__rex_get_static_paths");
+
             (
                 v8::Global::new(scope, context),
                 v8::Global::new(scope, render_fn),
@@ -238,6 +244,7 @@ impl SsrIsolate {
                 server_action_encoded_fn,
                 form_action_fn,
                 app_route_handler_fn,
+                gsp_paths_fn,
             )
         };
 
@@ -258,6 +265,7 @@ impl SsrIsolate {
             server_action_encoded_fn,
             form_action_fn,
             app_route_handler_fn,
+            gsp_paths_fn,
             last_bundle: std::sync::Arc::new(server_bundle_js.to_string()),
         })
     }
@@ -537,9 +545,50 @@ impl SsrIsolate {
         self.app_route_handler_fn =
             v8_get_optional_fn!(scope, global, "__rex_call_app_route_handler");
 
+        // Re-lookup getStaticPaths function (may be added/removed on reload)
+        self.gsp_paths_fn = v8_get_optional_fn!(scope, global, "__rex_get_static_paths");
+
         self.last_bundle = std::sync::Arc::new(server_bundle_js.to_string());
         debug!("SSR isolate reloaded");
         Ok(())
+    }
+
+    /// Call __rex_get_static_paths(routeKey) and return JSON.
+    /// Handles async getStaticPaths functions by pumping V8's microtask queue.
+    pub fn get_static_paths(&mut self, route_key: &str) -> Result<String> {
+        let paths_fn = self
+            .gsp_paths_fn
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("getStaticPaths runtime not loaded"))?;
+
+        let result_str = {
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+            let func = v8::Local::new(scope, paths_fn);
+            let undef = v8::undefined(scope);
+            let arg0 = v8::String::new(scope, route_key)
+                .ok_or_else(|| anyhow::anyhow!("V8 string alloc failed"))?;
+
+            let result = v8_call!(scope, func, undef.into(), &[arg0.into()])
+                .map_err(|e| anyhow::anyhow!("getStaticPaths error: {e}"))?;
+
+            result.to_rust_string_lossy(scope)
+        };
+
+        if result_str == "__REX_GSP_PATHS_ASYNC__" {
+            crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
+
+            v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+            let resolve_result = v8_eval!(
+                scope,
+                "globalThis.__rex_resolve_static_paths()",
+                "<gsp-paths-resolve>"
+            )
+            .map_err(|e| anyhow::anyhow!("getStaticPaths error: {e}"))?;
+            Ok(resolve_result.to_rust_string_lossy(scope))
+        } else {
+            Ok(result_str)
+        }
     }
 }
 

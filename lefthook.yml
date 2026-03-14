@@ -47,3 +47,15 @@ pre-push:
     e2e:
       run: cargo build -p rex_cli && cargo test -p rex_e2e --lib -- --ignored
       fail_text: "E2E tests must pass before pushing"
+    coverage:
+      run: |
+        COVERAGE_THRESHOLD=$(cat .coverage-threshold | tr -d '[:space:]')
+        cargo llvm-cov --workspace --exclude rex_python --ignore-filename-regex 'tests/' --json --output-path coverage.json
+        COVERAGE=$(jq '.data[0].totals.lines.percent | floor' coverage.json)
+        echo "Line coverage: ${COVERAGE}% (threshold: ${COVERAGE_THRESHOLD}%)"
+        if [ "$COVERAGE" -lt "$COVERAGE_THRESHOLD" ]; then
+          echo "Coverage ${COVERAGE}% is below threshold ${COVERAGE_THRESHOLD}%"
+          exit 1
+        fi
+        rm -f coverage.json
+      fail_text: "Coverage is below the threshold in .coverage-threshold"

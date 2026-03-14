@@ -107,6 +107,12 @@ declare global {
     ReactDOM?: typeof import("react-dom/client");
   }
 
+  // getStaticPaths globals (V8 SSR environment)
+  var __rex_gsp_paths_resolved: unknown;
+  var __rex_gsp_paths_rejected: unknown;
+  var __rex_get_static_paths: (routeKey: string) => string;
+  var __rex_resolve_static_paths: () => string;
+
   // Server-side globals (V8 SSR environment)
   var __rex_head_elements: ReactElement[];
   var __rex_doc_html_attrs: Record<string, string>;

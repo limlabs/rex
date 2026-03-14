@@ -91,6 +91,7 @@ pub struct TestPage<'a> {
     pub component: &'a str,
     pub gssp: Option<&'a str>,
     pub gsp: Option<&'a str>,
+    pub gsp_paths: Option<&'a str>,
 }
 
 /// Build a minimal server bundle JS with given page definitions.
@@ -102,6 +103,7 @@ pub fn make_server_bundle(pages: &[(&str, &str, Option<&str>)]) -> String {
             component,
             gssp: *gssp,
             gsp: None,
+            gsp_paths: None,
         })
         .collect();
     make_server_bundle_ext(&test_pages)
@@ -123,6 +125,9 @@ pub fn make_server_bundle_ext(pages: &[TestPage]) -> String {
         }
         if let Some(gsp_code) = page.gsp {
             bundle.push_str(&format!("  exports.getStaticProps = {};\n", gsp_code));
+        }
+        if let Some(gsp_paths_code) = page.gsp_paths {
+            bundle.push_str(&format!("  exports.getStaticPaths = {};\n", gsp_paths_code));
         }
         bundle.push_str("  return exports;\n})();\n\n");
     }
@@ -217,6 +222,31 @@ globalThis.__rex_resolve_gsp = function() {
     if (globalThis.__rex_gsp_rejected) throw globalThis.__rex_gsp_rejected;
     if (globalThis.__rex_gsp_resolved !== null) return JSON.stringify(globalThis.__rex_gsp_resolved);
     throw new Error('GSP promise did not resolve');
+};
+
+globalThis.__rex_gsp_paths_resolved = null;
+globalThis.__rex_gsp_paths_rejected = null;
+
+globalThis.__rex_get_static_paths = function(routeKey) {
+    var page = globalThis.__rex_pages[routeKey];
+    if (!page || !page.getStaticPaths) return JSON.stringify({ paths: [], fallback: false });
+    var result = page.getStaticPaths();
+    if (result && typeof result.then === 'function') {
+        globalThis.__rex_gsp_paths_resolved = null;
+        globalThis.__rex_gsp_paths_rejected = null;
+        result.then(
+            function(v) { globalThis.__rex_gsp_paths_resolved = v; },
+            function(e) { globalThis.__rex_gsp_paths_rejected = e; }
+        );
+        return '__REX_GSP_PATHS_ASYNC__';
+    }
+    return JSON.stringify(result);
+};
+
+globalThis.__rex_resolve_static_paths = function() {
+    if (globalThis.__rex_gsp_paths_rejected) throw globalThis.__rex_gsp_paths_rejected;
+    if (globalThis.__rex_gsp_paths_resolved !== null) return JSON.stringify(globalThis.__rex_gsp_paths_resolved);
+    throw new Error('getStaticPaths promise did not resolve');
 };
 "#,
     );

@@ -1,9 +1,10 @@
 #![allow(clippy::unwrap_used)]
 
 use super::*;
+use crate::prerender::PrerenderedPage;
 use axum::routing::get;
 use axum::Router;
-use rex_core::{DataStrategy, DynamicSegment, PageType, Route};
+use rex_core::{DataStrategy, DynamicSegment, Fallback, PageType, Route};
 use rex_router::RouteTrie;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -61,7 +62,12 @@ pub(super) fn make_server_bundle(pages: &[(&str, &str, Option<&str>)]) -> String
         ));
         bundle.push_str(&format!("  exports.default = {};\n", component));
         if let Some(gssp_code) = gssp {
-            bundle.push_str(&format!("  exports.getServerSideProps = {};\n", gssp_code));
+            // Check if code is tagged for getStaticProps
+            if let Some(gsp_code) = gssp_code.strip_prefix("GSP:") {
+                bundle.push_str(&format!("  exports.getStaticProps = {gsp_code};\n"));
+            } else {
+                bundle.push_str(&format!("  exports.getServerSideProps = {gssp_code};\n"));
+            }
         }
         bundle.push_str("  return exports;\n})();\n\n");
     }
@@ -149,6 +155,31 @@ globalThis.__rex_resolve_gsp = function() {
     if (globalThis.__rex_gsp_resolved !== null) return JSON.stringify(globalThis.__rex_gsp_resolved);
     throw new Error('GSP promise did not resolve');
 };
+
+globalThis.__rex_gsp_paths_resolved = null;
+globalThis.__rex_gsp_paths_rejected = null;
+
+globalThis.__rex_get_static_paths = function(routeKey) {
+    var page = globalThis.__rex_pages[routeKey];
+    if (!page || !page.getStaticPaths) return JSON.stringify({ paths: [], fallback: false });
+    var result = page.getStaticPaths();
+    if (result && typeof result.then === 'function') {
+        globalThis.__rex_gsp_paths_resolved = null;
+        globalThis.__rex_gsp_paths_rejected = null;
+        result.then(
+            function(v) { globalThis.__rex_gsp_paths_resolved = v; },
+            function(e) { globalThis.__rex_gsp_paths_rejected = e; }
+        );
+        return '__REX_GSP_PATHS_ASYNC__';
+    }
+    return JSON.stringify(result);
+};
+
+globalThis.__rex_resolve_static_paths = function() {
+    if (globalThis.__rex_gsp_paths_rejected) throw globalThis.__rex_gsp_paths_rejected;
+    if (globalThis.__rex_gsp_paths_resolved !== null) return JSON.stringify(globalThis.__rex_gsp_paths_resolved);
+    throw new Error('getStaticPaths promise did not resolve');
+};
 "#,
     );
     bundle
@@ -188,6 +219,9 @@ pub(super) struct TestAppBuilder {
     is_dev: bool,
     has_custom_404: bool,
     has_custom_error: bool,
+    prerendered: std::collections::HashMap<String, PrerenderedPage>,
+    static_paths_pages: Vec<(String, Fallback)>,
+    strategy_overrides: Vec<(String, DataStrategy)>,
 }
 
 impl TestAppBuilder {
@@ -207,6 +241,9 @@ impl TestAppBuilder {
             is_dev: false,
             has_custom_404: false,
             has_custom_error: false,
+            prerendered: std::collections::HashMap::new(),
+            static_paths_pages: Vec::new(),
+            strategy_overrides: Vec::new(),
         }
     }
 
@@ -266,6 +303,29 @@ impl TestAppBuilder {
         self
     }
 
+    pub fn prerendered(mut self, path: &str, html: &str, props_json: &str) -> Self {
+        self.prerendered.insert(
+            path.to_string(),
+            PrerenderedPage {
+                html: html.to_string(),
+                props_json: props_json.to_string(),
+            },
+        );
+        self
+    }
+
+    pub fn page_strategy(mut self, pattern: &str, strategy: DataStrategy) -> Self {
+        self.strategy_overrides
+            .push((pattern.to_string(), strategy));
+        self
+    }
+
+    pub fn static_paths_page(mut self, pattern: &str, fallback: Fallback) -> Self {
+        self.static_paths_pages
+            .push((pattern.to_string(), fallback));
+        self
+    }
+
     pub fn extra_bundle(mut self, js: &str) -> Self {
         self.extra_bundle = Some(js.to_string());
         self
@@ -306,6 +366,21 @@ impl TestAppBuilder {
             };
             let has_dynamic = !route.dynamic_segments.is_empty();
             manifest.add_page(&route.pattern, "test.js", strategy, has_dynamic);
+        }
+
+        // Apply data strategy overrides
+        for (pattern, strategy) in &self.strategy_overrides {
+            if let Some(page) = manifest.pages.get_mut(pattern.as_str()) {
+                page.data_strategy = strategy.clone();
+            }
+        }
+
+        // Mark pages with getStaticPaths metadata
+        for (pattern, fallback) in &self.static_paths_pages {
+            if let Some(page) = manifest.pages.get_mut(pattern.as_str()) {
+                page.has_static_paths = true;
+                page.fallback = *fallback;
+            }
         }
 
         let build_id = "test-build-id".to_string();
@@ -354,7 +429,7 @@ impl TestAppBuilder {
                     Some(RouteTrie::from_routes(&self.app_api_routes))
                 },
                 has_mcp_tools: false,
-                prerendered: std::collections::HashMap::new(),
+                prerendered: self.prerendered,
                 prerendered_app: std::collections::HashMap::new(),
             })),
         });

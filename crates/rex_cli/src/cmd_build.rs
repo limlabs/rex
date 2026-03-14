@@ -110,35 +110,43 @@ struct RouteInfo {
 
 /// Classify routes by render mode and count static vs. server-rendered pages.
 ///
-/// Returns (route_infos, static_count, dynamic_count) sorted by pattern.
+/// Returns (route_infos, static_count, ssg_count, dynamic_count) sorted by pattern.
 fn classify_routes(
     routes: &[rex_core::Route],
     manifest: &AssetManifest,
-) -> (Vec<RouteInfo>, usize, usize) {
+) -> (Vec<RouteInfo>, usize, usize, usize) {
     use rex_core::RenderMode;
 
     let mut sorted: Vec<_> = routes.iter().collect();
     sorted.sort_by(|a, b| a.pattern.cmp(&b.pattern));
 
     let mut static_count = 0usize;
+    let mut ssg_count = 0usize;
     let mut dynamic_count = 0usize;
     let mut infos = Vec::with_capacity(sorted.len());
 
     for route in &sorted {
-        let render_mode = manifest
-            .pages
-            .get(&route.pattern)
+        let page_assets = manifest.pages.get(&route.pattern);
+
+        let render_mode = page_assets
             .map(|p| p.render_mode)
             .unwrap_or(RenderMode::ServerRendered);
 
-        let (icon, label) = match render_mode {
-            RenderMode::Static => {
-                static_count += 1;
-                ("\u{25cb}", "static") // ○
-            }
-            RenderMode::ServerRendered => {
-                dynamic_count += 1;
-                ("\u{03bb}", "server") // λ
+        let has_static_paths = page_assets.is_some_and(|p| p.has_static_paths);
+
+        let (icon, label) = if has_static_paths {
+            ssg_count += 1;
+            ("\u{25cf}", "SSG") // ●
+        } else {
+            match render_mode {
+                RenderMode::Static => {
+                    static_count += 1;
+                    ("\u{25cb}", "static") // ○
+                }
+                RenderMode::ServerRendered => {
+                    dynamic_count += 1;
+                    ("\u{03bb}", "server") // λ
+                }
             }
         };
 
@@ -149,7 +157,7 @@ fn classify_routes(
         });
     }
 
-    (infos, static_count, dynamic_count)
+    (infos, static_count, ssg_count, dynamic_count)
 }
 
 /// Classify app routes into static/server-rendered categories.
@@ -200,7 +208,7 @@ fn print_route_summary_with_manifest(
         return;
     }
 
-    let (infos, mut static_count, mut dynamic_count) = classify_routes(routes, manifest);
+    let (infos, mut static_count, ssg_count, mut dynamic_count) = classify_routes(routes, manifest);
 
     // Pages router routes
     for info in &infos {
@@ -242,6 +250,9 @@ fn print_route_summary_with_manifest(
     let mut legend = Vec::new();
     if static_count > 0 {
         legend.push(format!("\u{25cb} static ({static_count})"));
+    }
+    if ssg_count > 0 {
+        legend.push(format!("\u{25cf} SSG ({ssg_count})"));
     }
     if dynamic_count > 0 {
         legend.push(format!("\u{03bb} server ({dynamic_count})"));
@@ -312,7 +323,7 @@ mod tests {
         manifest.add_page("/about", "about.js", DataStrategy::None, false);
         manifest.add_page("/blog/:slug", "slug.js", DataStrategy::None, true);
 
-        let (infos, static_count, dynamic_count) = classify_routes(&routes, &manifest);
+        let (infos, static_count, _ssg_count, dynamic_count) = classify_routes(&routes, &manifest);
 
         // Sorted by pattern
         assert_eq!(infos[0].pattern, "/");
@@ -340,7 +351,7 @@ mod tests {
             false,
         );
 
-        let (infos, static_count, dynamic_count) = classify_routes(&routes, &manifest);
+        let (infos, static_count, _ssg_count, dynamic_count) = classify_routes(&routes, &manifest);
 
         assert_eq!(static_count, 0);
         assert_eq!(dynamic_count, 1);
@@ -356,10 +367,34 @@ mod tests {
         let mut manifest = AssetManifest::new("test".into());
         manifest.add_page("/posts", "posts.js", DataStrategy::GetStaticProps, false);
 
-        let (_, static_count, dynamic_count) = classify_routes(&routes, &manifest);
+        let (_, static_count, _ssg_count, dynamic_count) = classify_routes(&routes, &manifest);
 
         assert_eq!(static_count, 1);
         assert_eq!(dynamic_count, 0);
+    }
+
+    #[test]
+    fn classify_routes_static_paths_is_ssg() {
+        use rex_core::DataStrategy;
+
+        let routes = vec![make_route(
+            "/posts/:id",
+            vec![rex_core::DynamicSegment::Single("id".into())],
+        )];
+
+        let mut manifest = AssetManifest::new("test".into());
+        manifest.add_page("/posts/:id", "posts.js", DataStrategy::GetStaticProps, true);
+        if let Some(page) = manifest.pages.get_mut("/posts/:id") {
+            page.has_static_paths = true;
+        }
+
+        let (infos, static_count, ssg_count, dynamic_count) = classify_routes(&routes, &manifest);
+
+        assert_eq!(static_count, 0);
+        assert_eq!(ssg_count, 1);
+        assert_eq!(dynamic_count, 0);
+        assert_eq!(infos[0].label, "SSG");
+        assert_eq!(infos[0].icon, "\u{25cf}");
     }
 
     #[test]

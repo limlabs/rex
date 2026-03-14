@@ -17,7 +17,7 @@ use oxc_syntax::node::NodeId;
 use oxc_syntax::symbol::SymbolId;
 
 /// Names of server-only exports to eliminate from client bundles.
-const SERVER_EXPORTS: &[&str] = &["getServerSideProps", "getStaticProps"];
+const SERVER_EXPORTS: &[&str] = &["getServerSideProps", "getStaticProps", "getStaticPaths"];
 
 /// Strip server-only exports and their exclusive dependencies from source code.
 ///
