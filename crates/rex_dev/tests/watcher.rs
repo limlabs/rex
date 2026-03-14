@@ -147,6 +147,44 @@ fn node_modules_changes_are_ignored() {
 }
 
 #[test]
+fn source_file_outside_pages_triggers_source_modified() {
+    let (_tmp, root, rx) = setup_watcher();
+    let components_dir = root.join("components");
+    fs::create_dir_all(&components_dir).unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+
+    let component = components_dir.join("Button.tsx");
+    fs::write(&component, "export function Button() { return <button/>; }").unwrap();
+
+    let events = collect_events(&rx, Duration::from_secs(3));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e.kind, FileEventKind::SourceModified)),
+        "Expected SourceModified for components/Button.tsx, got: {events:?}"
+    );
+}
+
+#[test]
+fn lib_file_outside_pages_triggers_source_modified() {
+    let (_tmp, root, rx) = setup_watcher();
+    let lib_dir = root.join("lib");
+    fs::create_dir_all(&lib_dir).unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+
+    let util = lib_dir.join("utils.ts");
+    fs::write(&util, "export const add = (a: number, b: number) => a + b;").unwrap();
+
+    let events = collect_events(&rx, Duration::from_secs(3));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e.kind, FileEventKind::SourceModified)),
+        "Expected SourceModified for lib/utils.ts, got: {events:?}"
+    );
+}
+
+#[test]
 fn app_dir_page_removal_triggers_page_removed() {
     let (_tmp, root, rx) = setup_watcher();
     let page = root.join("app/page.tsx");

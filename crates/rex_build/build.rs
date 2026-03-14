@@ -5,12 +5,16 @@ use std::process::Command;
 const REACT_VERSION: &str = "19.2.4";
 const SCHEDULER_VERSION: &str = "0.27.0";
 const TAILWIND_VERSION: &str = "4.2.1";
+const TYPES_REACT_VERSION: &str = "19.2.14";
+const TYPES_REACT_DOM_VERSION: &str = "19.2.3";
 
 const PACKAGES: &[(&str, &str)] = &[
     ("react", REACT_VERSION),
     ("react-dom", REACT_VERSION),
     ("react-server-dom-webpack", REACT_VERSION),
     ("scheduler", SCHEDULER_VERSION),
+    ("@types/react", TYPES_REACT_VERSION),
+    ("@types/react-dom", TYPES_REACT_DOM_VERSION),
 ];
 
 /// Server runtime TypeScript files to compile to JavaScript at build time.
@@ -100,7 +104,7 @@ fn main() {
     let stamp = out_dir.join(".vendor-stamp");
 
     let expected = format!(
-        "react@{REACT_VERSION} rsdw@{REACT_VERSION} scheduler@{SCHEDULER_VERSION} tailwind@{TAILWIND_VERSION}"
+        "react@{REACT_VERSION} rsdw@{REACT_VERSION} scheduler@{SCHEDULER_VERSION} tailwind@{TAILWIND_VERSION} types-react@{TYPES_REACT_VERSION} types-react-dom@{TYPES_REACT_DOM_VERSION} rex-types@1"
     );
 
     // Skip download on incremental rebuilds when stamp matches
@@ -127,6 +131,10 @@ fn main() {
     download_npm_package(&node_modules, "tailwindcss", TAILWIND_VERSION);
     bundle_tailwind_compiler(out_dir);
 
+    // Embed @limlabs/rex source files so `rex/*` path aliases resolve in
+    // zero-config projects (IDE / TypeScript).
+    embed_rex_types(Path::new(&manifest_dir), &node_modules);
+
     fs::write(&stamp, &expected).expect("failed to write stamp");
 }
 
@@ -135,7 +143,14 @@ fn download_npm_package(node_modules: &Path, name: &str, version: &str) {
     let pkg_dir = node_modules.join(name);
     fs::create_dir_all(&pkg_dir).expect("failed to create package dir");
 
-    let url = format!("https://registry.npmjs.org/{name}/-/{name}-{version}.tgz");
+    // Scoped packages (e.g. @types/react) use only the unscoped name in the
+    // tarball filename: @types/react/-/react-19.2.14.tgz
+    let tarball_name = if let Some(pos) = name.rfind('/') {
+        &name[pos + 1..]
+    } else {
+        name
+    };
+    let url = format!("https://registry.npmjs.org/{name}/-/{tarball_name}-{version}.tgz");
 
     let status = Command::new("sh")
         .arg("-c")
@@ -245,16 +260,12 @@ fn trim_package(dir: &Path, name: &str) {
                 "static.edge.js",
                 "static.node.js",
                 "server.bun.js",
-                "server.edge.js",
             ] {
                 let _ = fs::remove_file(dir.join(f));
             }
 
             // CJS bundles we don't need
-            remove_cjs_matching(
-                dir,
-                &["profiling", "test-utils", ".edge.", ".bun.", "static"],
-            );
+            remove_cjs_matching(dir, &["profiling", "test-utils", ".bun.", "static"]);
         }
         "scheduler" => {
             for f in ["unstable_mock.js", "unstable_post_task.js"] {
@@ -279,7 +290,8 @@ fn trim_package(dir: &Path, name: &str) {
             // Remove ESM loader (Node-only)
             let _ = fs::remove_dir_all(dir.join("esm"));
         }
-        _ => {} // react is already lean
+        // @types packages are already lean — just strip docs
+        _ => {}
     }
 }
 
@@ -296,4 +308,41 @@ fn remove_cjs_matching(dir: &Path, patterns: &[&str]) {
             let _ = fs::remove_file(entry.path());
         }
     }
+}
+
+/// Rex source files to embed for `rex/*` type resolution in zero-config projects.
+const REX_SRC_FILES: &[&str] = &[
+    "actions.d.ts",
+    "document.tsx",
+    "head.tsx",
+    "image.tsx",
+    "index.ts",
+    "link.tsx",
+    "middleware.d.ts",
+    "router.ts",
+    "server.ts",
+];
+
+/// Copy `packages/rex/src/` into the embedded node_modules so zero-config
+/// projects can resolve `rex/*` via the standard path alias
+/// (`"rex/*": ["./node_modules/@limlabs/rex/src/*"]`).
+fn embed_rex_types(manifest_dir: &Path, node_modules: &Path) {
+    let rex_src = manifest_dir.join("../../packages/rex/src");
+    let dest = node_modules.join("@limlabs/rex/src");
+    fs::create_dir_all(&dest).expect("failed to create @limlabs/rex/src dir");
+
+    for &file in REX_SRC_FILES {
+        let src_path = rex_src.join(file);
+        let dest_path = dest.join(file);
+        fs::copy(&src_path, &dest_path)
+            .unwrap_or_else(|e| panic!("failed to copy {}: {e}", src_path.display()));
+        println!("cargo:rerun-if-changed=../../packages/rex/src/{file}");
+    }
+
+    // Minimal package.json so npm/TypeScript recognises the package
+    fs::write(
+        node_modules.join("@limlabs/rex/package.json"),
+        r#"{"name":"@limlabs/rex","version":"0.0.0","private":true}"#,
+    )
+    .expect("failed to write @limlabs/rex/package.json");
 }

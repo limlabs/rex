@@ -13,6 +13,8 @@ pub enum FileEventKind {
     CssModified,
     MiddlewareModified,
     McpModified,
+    /// A source file outside pages/app dirs was modified (e.g. components/, lib/)
+    SourceModified,
 }
 
 #[derive(Debug, Clone)]
@@ -25,6 +27,7 @@ pub struct FileEvent {
 ///
 /// Watches recursively but skips `node_modules/`, `.rex/`, `.git/`, and `target/`.
 /// - `.tsx/.ts/.jsx/.js/.mdx` files under `pages_dir` or `app_dir` → PageModified / PageRemoved
+/// - `.tsx/.ts/.jsx/.js/.mdx` files elsewhere in project → SourceModified
 /// - `.css` files anywhere → CssModified
 pub fn start_watcher(
     project_root: &Path,
@@ -79,6 +82,9 @@ pub fn start_watcher(
                                     } else {
                                         FileEventKind::PageRemoved
                                     }
+                                } else if is_page_file(&path) && path.exists() {
+                                    // Source file outside pages/app (e.g. components/, lib/)
+                                    FileEventKind::SourceModified
                                 } else {
                                     continue;
                                 }

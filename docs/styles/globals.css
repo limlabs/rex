@@ -41,6 +41,79 @@
   @apply bg-transparent text-slate-100 p-0 rounded-none text-sm;
 }
 
+/* Syntax highlighting tokens */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in {
+  color: #c792ea;
+}
+
+.hljs-string,
+.hljs-attr {
+  color: #a5d6ff;
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: #6b7280;
+  font-style: italic;
+}
+
+.hljs-number,
+.hljs-literal {
+  color: #f9a8d4;
+}
+
+.hljs-title.function_,
+.hljs-function .hljs-title {
+  color: #7dd3fc;
+}
+
+.hljs-title.class_,
+.hljs-type {
+  color: #fbbf24;
+}
+
+.hljs-variable,
+.hljs-template-variable {
+  color: #e2e8f0;
+}
+
+.hljs-meta,
+.hljs-meta .hljs-keyword {
+  color: #94a3b8;
+}
+
+.hljs-symbol,
+.hljs-bullet {
+  color: #34d399;
+}
+
+.hljs-params {
+  color: #cbd5e1;
+}
+
+.hljs-property {
+  color: #7dd3fc;
+}
+
+.hljs-operator,
+.hljs-punctuation {
+  color: #94a3b8;
+}
+
+.hljs-tag {
+  color: #f87171;
+}
+
+.hljs-name {
+  color: #f87171;
+}
+
+.hljs-attribute {
+  color: #fbbf24;
+}
+
 .prose ul {
   @apply list-disc pl-6 mb-4 space-y-1;
 }

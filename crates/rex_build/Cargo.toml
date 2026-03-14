@@ -1,6 +1,6 @@
 [package]
 name = "rex_build"
-version = "0.17.0" # x-release-please-version
+version = "0.18.0" # x-release-please-version
 edition = "2021"
 publish = false
 
@@ -13,6 +13,7 @@ rex_mdx = { path = "../rex_mdx" }
 rex_router = { path = "../rex_router" }
 rolldown = { workspace = true }
 rolldown_common = { workspace = true }
+rolldown_error = { workspace = true }
 rolldown_utils = { workspace = true }
 rustc-hash = { workspace = true }
 tokio = { workspace = true }

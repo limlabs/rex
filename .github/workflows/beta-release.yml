@@ -1,14 +1,11 @@
 name: Beta Release
 
 on:
-  pull_request:
-    types: [opened, synchronize]
+  merge_group:
     branches: [main]
-    paths-ignore:
-      - 'Cargo.lock'
 
 concurrency:
-  group: beta-release-${{ github.head_ref }}
+  group: beta-release-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -19,9 +16,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check-release-pr:
-    # Only run for release-please PRs
-    if: startsWith(github.head_ref, 'release-please--')
+  version:
+    name: Compute Version
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -43,7 +39,7 @@ jobs:
 
   build-linux:
     name: Build Linux (x86_64)
-    needs: check-release-pr
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,7 +72,7 @@ jobs:
 
   build-linux-arm64:
     name: Build Linux (ARM64)
-    needs: check-release-pr
+    needs: version
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
@@ -109,7 +105,7 @@ jobs:
 
   build-macos-arm64:
     name: Build macOS (ARM64)
-    needs: check-release-pr
+    needs: version
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -142,7 +138,7 @@ jobs:
 
   build-macos-x86_64:
     name: Build macOS (x86_64)
-    needs: check-release-pr
+    needs: version
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -178,7 +174,7 @@ jobs:
 
   docker:
     name: Docker (beta)
-    needs: check-release-pr
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -197,7 +193,7 @@ jobs:
           target: app-build
           push: true
           tags: |
-            ghcr.io/limlabs/rex:${{ needs.check-release-pr.outputs.beta_version }}-build
+            ghcr.io/limlabs/rex:${{ needs.version.outputs.beta_version }}-build
             ghcr.io/limlabs/rex:beta-build
 
       - name: Build & push (runtime — `rex start` only)
@@ -206,12 +202,12 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/limlabs/rex:${{ needs.check-release-pr.outputs.beta_version }}
+            ghcr.io/limlabs/rex:${{ needs.version.outputs.beta_version }}
             ghcr.io/limlabs/rex:beta
 
   npm-publish:
     name: npm Publish (beta)
-    needs: [check-release-pr, build-linux, build-linux-arm64, build-macos-arm64, build-macos-x86_64]
+    needs: [version, build-linux, build-linux-arm64, build-macos-arm64, build-macos-x86_64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -250,7 +246,7 @@ jobs:
 
       - name: Set beta versions
         run: |
-          BETA_VERSION="${{ needs.check-release-pr.outputs.beta_version }}"
+          BETA_VERSION="${{ needs.version.outputs.beta_version }}"
           for pkg in packages/rex-darwin-arm64 packages/rex-darwin-x64 packages/rex-linux-x64 packages/rex-linux-arm64; do
             cd "$pkg"
             npm version "$BETA_VERSION" --no-git-tag-version
@@ -261,7 +257,7 @@ jobs:
 
       - name: Rewrite optionalDependencies to beta version
         run: |
-          BETA_VERSION="${{ needs.check-release-pr.outputs.beta_version }}"
+          BETA_VERSION="${{ needs.version.outputs.beta_version }}"
           node -e "
             const fs = require('fs');
             const pkg = JSON.parse(fs.readFileSync('packages/rex/package.json', 'utf8'));
@@ -284,7 +280,7 @@ jobs:
 
       - name: Wait for platform packages on registry
         run: |
-          BETA_VERSION="${{ needs.check-release-pr.outputs.beta_version }}"
+          BETA_VERSION="${{ needs.version.outputs.beta_version }}"
           for pkg in @limlabs/rex-darwin-arm64 @limlabs/rex-darwin-x64 @limlabs/rex-linux-x64 @limlabs/rex-linux-arm64; do
             echo "Waiting for $pkg@$BETA_VERSION..."
             for i in $(seq 1 30); do
@@ -310,14 +306,14 @@ jobs:
 
   smoke-test:
     name: Smoke Test
-    needs: [check-release-pr, npm-publish]
+    needs: [version, npm-publish]
     uses: ./.github/workflows/smoke-test.yml
     with:
-      version: ${{ needs.check-release-pr.outputs.beta_version }}
+      version: ${{ needs.version.outputs.beta_version }}
 
   deploy-railway:
     name: Deploy to Railway (beta)
-    needs: [check-release-pr, docker]
+    needs: [version, docker]
     runs-on: ubuntu-latest
     environment: railway-staging
     steps:
@@ -329,7 +325,7 @@ jobs:
 
       - name: Pin Rex version in Dockerfile
         run: |
-          BETA_VERSION="${{ needs.check-release-pr.outputs.beta_version }}"
+          BETA_VERSION="${{ needs.version.outputs.beta_version }}"
           sed -i "s|ARG REX_VERSION=latest|ARG REX_VERSION=$BETA_VERSION|" fixtures/railway/Dockerfile
 
       - name: Install Railway CLI
@@ -373,14 +369,14 @@ jobs:
 
   create-beta-release:
     name: GitHub Pre-Release
-    needs: [check-release-pr, build-linux, build-linux-arm64, build-macos-arm64, build-macos-x86_64]
+    needs: [version, build-linux, build-linux-arm64, build-macos-arm64, build-macos-x86_64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Clean up old beta releases
         run: |
-          VERSION="${{ needs.check-release-pr.outputs.version }}"
+          VERSION="${{ needs.version.outputs.version }}"
           gh release list --json tagName,isPrerelease \
             -q ".[] | select(.isPrerelease and (.tagName | startswith(\"v${VERSION}-beta.\"))) | .tagName" \
           | while read -r tag; do
@@ -398,20 +394,20 @@ jobs:
       - name: Create pre-release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.check-release-pr.outputs.beta_tag }}
-          target_commitish: ${{ github.event.pull_request.head.sha }}
-          name: Rex ${{ needs.check-release-pr.outputs.beta_tag }}
+          tag_name: ${{ needs.version.outputs.beta_tag }}
+          target_commitish: ${{ github.event.merge_group.head_sha }}
+          name: Rex ${{ needs.version.outputs.beta_tag }}
           body: |
-            **Beta pre-release for upcoming v${{ needs.check-release-pr.outputs.version }}**
+            **Beta pre-release for upcoming v${{ needs.version.outputs.version }}**
 
             Install via npm:
             ```
-            npm install @limlabs/rex@beta
+            npm install @limlabs/rex@${{ needs.version.outputs.beta_version }}
             ```
 
             Docker:
             ```
-            docker pull ghcr.io/limlabs/rex:beta
+            docker pull ghcr.io/limlabs/rex:${{ needs.version.outputs.beta_version }}
             ```
           prerelease: true
           files: |

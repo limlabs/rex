@@ -1,6 +1,6 @@
 "use client";
 import React from 'react';
-import { navigateTo } from './router.js';
+import { navigateTo, withBasePath } from './router.js';
 
 interface LinkProps extends React.AnchorHTMLAttributes<HTMLAnchorElement> {
   href: string;
@@ -30,7 +30,7 @@ export default function Link({ href, children, target, ...rest }: LinkProps): Re
   return React.createElement(
     'a',
     {
-      href,
+      href: withBasePath(href),
       onClick: handleClick,
       target,
       ...rest,

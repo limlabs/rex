@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.18.0](https://github.com/limlabs/rex/compare/v0.17.3...v0.18.0) (2026-03-13)
+
+
+### Features
+
+* **docs:** add syntax highlighting to code blocks ([#196](https://github.com/limlabs/rex/issues/196)) ([da51644](https://github.com/limlabs/rex/commit/da51644db992bb2f5f24f9b0969d4628e879e699))
+* improve error experience in TUI and browser dev overlay ([#184](https://github.com/limlabs/rex/issues/184)) ([6a9ef43](https://github.com/limlabs/rex/commit/6a9ef433029a7bcbccd709f823e567ff9a3c0d4b))
+
+
+### Bug Fixes
+
+* **link:** add base path support to npm package Link ([#194](https://github.com/limlabs/rex/issues/194)) ([918418f](https://github.com/limlabs/rex/commit/918418fef73300346c6b9cb266d18e0830c72687))
+
+
+### Performance Improvements
+
+* **dev:** skip rescan and defer V8 reload for content-only HMR ([#185](https://github.com/limlabs/rex/issues/185)) ([95f5ca2](https://github.com/limlabs/rex/commit/95f5ca248e426420b6587e3642321e13a323585c))
+
+## [0.17.3](https://github.com/limlabs/rex/compare/v0.17.2...v0.17.3) (2026-03-12)
+
+
+### Bug Fixes
+
+* **docs:** dismiss mobile menu on nav and highlight active link ([#191](https://github.com/limlabs/rex/issues/191)) ([5ab97f1](https://github.com/limlabs/rex/commit/5ab97f15170b1ad94db8a1da99968466adb26f24))
+* **export:** fix static export routing for GitHub Pages ([#190](https://github.com/limlabs/rex/issues/190)) ([4c1943f](https://github.com/limlabs/rex/commit/4c1943fb8923549c25aeaf062012ee1d31f4b0b0))
+* **init:** use react-jsx transform so React import is not required ([#188](https://github.com/limlabs/rex/issues/188)) ([86e24d0](https://github.com/limlabs/rex/commit/86e24d035e5a686ccc063f75446de31178f786c0))
+
+## [0.17.2](https://github.com/limlabs/rex/compare/v0.17.1...v0.17.2) (2026-03-12)
+
+
+### Bug Fixes
+
+* **v8:** remove crates.io version req for unpublishable rex_build dev-dep ([#186](https://github.com/limlabs/rex/issues/186)) ([4d95305](https://github.com/limlabs/rex/commit/4d953051c2a043b1ad26225ef61b2c1a54089f38))
+
+## [0.17.1](https://github.com/limlabs/rex/compare/v0.17.0...v0.17.1) (2026-03-12)
+
+
+### Bug Fixes
+
+* **dev:** trigger hot reload for imported files outside pages/app ([#180](https://github.com/limlabs/rex/issues/180)) ([5e192bf](https://github.com/limlabs/rex/commit/5e192bf12c845e4c0969f4c66b7be75242bcbbb1))
+* embed @types/react for zero-config TypeScript support ([#181](https://github.com/limlabs/rex/issues/181)) ([f41d788](https://github.com/limlabs/rex/commit/f41d7884d06bced9143def82ecff85bf76e58453))
+
 ## [0.17.0](https://github.com/limlabs/rex/compare/v0.16.0...v0.17.0) (2026-03-12)
 
 

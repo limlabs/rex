@@ -260,10 +260,12 @@ if (!window.__REX_NAVIGATING__) {{
     let mut bundler = rolldown::Bundler::new(options)
         .map_err(|e| anyhow::anyhow!("Failed to create rolldown bundler: {e}"))?;
 
-    let output = bundler
-        .write()
-        .await
-        .map_err(|e| anyhow::anyhow!("Rolldown bundle failed: {e:?}"))?;
+    let output = bundler.write().await.map_err(|e| {
+        anyhow::anyhow!(
+            "Rolldown bundle failed:\n{}",
+            crate::diagnostics::format_build_diagnostics(&e)
+        )
+    })?;
 
     // Process rolldown output: register entry chunks and shared chunks in the manifest
     for item in &output.assets {

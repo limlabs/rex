@@ -126,10 +126,12 @@ pub(crate) async fn build_rsc_ssr_bundle(
     )
     .map_err(|e| anyhow::anyhow!("Failed to create RSC SSR bundler: {e}"))?;
 
-    bundler
-        .write()
-        .await
-        .map_err(|e| anyhow::anyhow!("RSC SSR bundle failed: {e:?}"))?;
+    bundler.write().await.map_err(|e| {
+        anyhow::anyhow!(
+            "RSC SSR bundle failed:\n{}",
+            crate::diagnostics::format_build_diagnostics(&e)
+        )
+    })?;
 
     let _ = fs::remove_dir_all(&entries_dir);
 

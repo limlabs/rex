@@ -66,9 +66,12 @@ async fn test_export_static_pages_creates_html_files() {
         "No pages should be skipped"
     );
 
-    // Verify HTML files exist
+    // Verify HTML files exist (non-root routes use directory/index.html pattern)
     assert!(output_dir.join("index.html").exists(), "index.html missing");
-    assert!(output_dir.join("about.html").exists(), "about.html missing");
+    assert!(
+        output_dir.join("about/index.html").exists(),
+        "about/index.html missing"
+    );
 
     // Verify content
     let index_html = std::fs::read_to_string(output_dir.join("index.html")).unwrap();
@@ -77,7 +80,7 @@ async fn test_export_static_pages_creates_html_files() {
         "index.html should contain SSR content"
     );
 
-    let about_html = std::fs::read_to_string(output_dir.join("about.html")).unwrap();
+    let about_html = std::fs::read_to_string(output_dir.join("about/index.html")).unwrap();
     assert!(
         about_html.contains("About Page"),
         "about.html should contain SSR content"

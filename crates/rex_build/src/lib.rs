@@ -2,6 +2,7 @@ pub mod builtin_modules;
 pub mod bundler;
 pub mod client_manifest;
 pub mod dce;
+pub(crate) mod diagnostics;
 pub mod embedded_runtime;
 pub mod manifest;
 pub mod rsc_bundler;

@@ -403,10 +403,12 @@ async fn run_iife_build(
         .map_err(|e| anyhow::anyhow!("Failed to create RSC bundler ({entry_name}): {e}"))?;
 
     if let Err(e) = bundler.write().await {
-        let all_missing_export = e.iter().all(|d| format!("{d:?}").contains("MissingExport"));
-        if !all_missing_export {
-            tracing::error!("RSC bundle ({entry_name}) diagnostics: {e:?}");
-            return Err(anyhow::anyhow!("RSC bundle ({entry_name}) failed: {e:?}"));
+        if !crate::diagnostics::is_all_missing_exports(&e) {
+            let formatted = crate::diagnostics::format_build_diagnostics(&e);
+            tracing::error!("RSC bundle ({entry_name}) diagnostics:\n{formatted}");
+            return Err(anyhow::anyhow!(
+                "RSC bundle ({entry_name}) failed:\n{formatted}"
+            ));
         }
         tracing::warn!(
             "RSC bundle ({entry_name}) had {} shimmed missing export(s)",

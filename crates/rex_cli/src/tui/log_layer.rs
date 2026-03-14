@@ -15,6 +15,7 @@ pub struct LogEntry {
 #[derive(Clone)]
 pub struct LogBuffer {
     inner: Arc<Mutex<VecDeque<LogEntry>>>,
+    total_count: Arc<Mutex<usize>>,
     capacity: usize,
 }
 
@@ -22,6 +23,7 @@ impl LogBuffer {
     pub fn new(capacity: usize) -> Self {
         Self {
             inner: Arc::new(Mutex::new(VecDeque::with_capacity(capacity))),
+            total_count: Arc::new(Mutex::new(0)),
             capacity,
         }
     }
@@ -32,6 +34,9 @@ impl LogBuffer {
                 buf.pop_front();
             }
             buf.push_back(entry);
+        }
+        if let Ok(mut count) = self.total_count.lock() {
+            *count += 1;
         }
     }
 
@@ -49,6 +54,31 @@ impl LogBuffer {
             .lock()
             .map(|buf| buf.back().cloned())
             .unwrap_or(None)
+    }
+
+    /// Return total number of entries ever pushed (monotonically increasing).
+    pub fn total_count(&self) -> usize {
+        self.total_count.lock().map(|c| *c).unwrap_or(0)
+    }
+
+    /// Return entries added since `since_count` (based on total_count values).
+    /// Returns the new entries and the updated total_count.
+    pub fn drain_since(&self, since_count: usize) -> (Vec<LogEntry>, usize) {
+        let total = self.total_count();
+        if total <= since_count {
+            return (Vec::new(), since_count);
+        }
+        let new_count = total - since_count;
+        let entries = self
+            .inner
+            .lock()
+            .map(|buf| {
+                let buf_len = buf.len();
+                let skip = buf_len.saturating_sub(new_count);
+                buf.iter().skip(skip).cloned().collect()
+            })
+            .unwrap_or_default();
+        (entries, total)
     }
 }
 
