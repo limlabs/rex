@@ -90,9 +90,15 @@ function _drainHtmlStream(
 function _renderToHtml(element: unknown, flightString: string): void {
     try {
         const streamPromise = __rex_renderToReadableStream_ssr(element, {
-            onError: function(err: unknown) {
+            onError: function(err: unknown, errorInfo?: { componentStack?: string }) {
                 if (typeof console !== 'undefined') {
                     console.error('[Rex SSR onError]', _ssrSafeErrorString(err));
+                    if (errorInfo && errorInfo.componentStack) {
+                        console.error('[Rex SSR component stack]', errorInfo.componentStack);
+                    }
+                    if (err instanceof Error && err.stack) {
+                        console.error('[Rex SSR stack]', err.stack);
+                    }
                 }
             }
         });
