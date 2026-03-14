@@ -1,8 +1,8 @@
 import React from 'react';
-import { ThemeProvider } from '../../../components/ThemeProvider';
-import { AuthProvider } from '../../../components/AuthProvider';
-import ThemeDisplay from '../../../components/ThemeDisplay';
-import AuthDisplay from '../../../components/AuthDisplay';
+import { ThemeProvider } from '../../components/ThemeProvider';
+import { AuthProvider } from '../../components/AuthProvider';
+import ThemeDisplay from '../../components/ThemeDisplay';
+import AuthDisplay from '../../components/AuthDisplay';
 
 export default function NestedContextPage() {
   return (

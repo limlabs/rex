@@ -1,8 +1,8 @@
 import React from 'react';
-import { ThemeProvider } from '../../components/ThemeProvider';
-import ThemeDisplay from '../../components/ThemeDisplay';
+import { ThemeProvider } from '../components/ThemeProvider';
+import ThemeDisplay from '../components/ThemeDisplay';
 
-export default function ContextTestPage() {
+export default function ContextPage() {
   return (
     <div>
       <h1>Context Test</h1>
