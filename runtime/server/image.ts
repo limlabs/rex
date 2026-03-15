@@ -2,8 +2,16 @@
 // Renders an optimized <img> tag pointing to /_rex/image during SSR.
 import { createElement, type ReactElement } from "react";
 
-interface ImageProps {
+// Next.js static imports return { src, width, height, blurDataURL }
+interface StaticImport {
   src: string;
+  width?: number;
+  height?: number;
+  blurDataURL?: string;
+}
+
+interface ImageProps {
+  src: string | StaticImport;
   width?: number;
   height?: number;
   alt?: string;
@@ -57,15 +65,18 @@ function buildSrcSet(src: string, width: number, quality: number): string {
 }
 
 export default function Image(props: ImageProps): ReactElement {
+  // Handle static imports: { src, width, height, blurDataURL }
+  const rawSrc = props.src;
+  const isStaticImport = typeof rawSrc === "object" && rawSrc !== null && "src" in rawSrc;
+  const src = isStaticImport ? (rawSrc as StaticImport).src : (rawSrc as string);
   const {
-    src,
-    width,
-    height,
+    width = isStaticImport ? (rawSrc as StaticImport).width : undefined,
+    height = isStaticImport ? (rawSrc as StaticImport).height : undefined,
     alt,
     quality = 75,
     priority = false,
     placeholder,
-    blurDataURL,
+    blurDataURL = isStaticImport ? (rawSrc as StaticImport).blurDataURL : undefined,
     fill = false,
     sizes,
   } = props;
