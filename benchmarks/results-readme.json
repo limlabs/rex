@@ -2,19 +2,19 @@
   {
     "suite": "meta",
     "metric": "network_speed",
-    "value": "134.6 Mbps"
+    "value": "75.1 Mbps"
   },
   {
     "suite": "dx",
     "framework": "rex",
     "metric": "binary_mb",
-    "value": 84.2
+    "value": 78.0
   },
   {
     "suite": "dx",
     "framework": "rex",
     "metric": "dependency_count",
-    "value": 19
+    "value": 0
   },
   {
     "suite": "dx",
@@ -26,13 +26,13 @@
     "suite": "dx",
     "framework": "rex",
     "metric": "install_size_mb",
-    "value": 118.0
+    "value": 111.8
   },
   {
     "suite": "dx",
     "framework": "rex",
     "metric": "install_time_ms",
-    "value": 955,
+    "value": 2750,
     "iterations": 1,
     "stddev": 0.0
   },
@@ -40,7 +40,7 @@
     "suite": "dx",
     "framework": "rex",
     "metric": "cold_start_ms",
-    "value": 205,
+    "value": 1496,
     "iterations": 1,
     "stddev": 0.0
   },
@@ -48,13 +48,13 @@
     "suite": "dx",
     "framework": "rex",
     "metric": "dev_memory_mb",
-    "value": 112.3
+    "value": 123.2
   },
   {
     "suite": "dx",
     "framework": "rex",
     "metric": "rebuild_ms",
-    "value": 251,
+    "value": 153,
     "iterations": 1,
     "stddev": 0.0
   },
@@ -62,7 +62,7 @@
     "suite": "dx",
     "framework": "rex",
     "metric": "lint_time_ms",
-    "value": 24,
+    "value": 12,
     "iterations": 1,
     "stddev": 0.0
   },
@@ -70,25 +70,25 @@
     "suite": "dx",
     "framework": "nextjs",
     "metric": "dependency_count",
-    "value": 302
+    "value": 342
   },
   {
     "suite": "dx",
     "framework": "nextjs",
     "metric": "node_modules_mb",
-    "value": 342.2
+    "value": 366.6
   },
   {
     "suite": "dx",
     "framework": "nextjs",
     "metric": "install_size_mb",
-    "value": 342.2
+    "value": 366.6
   },
   {
     "suite": "dx",
     "framework": "nextjs",
     "metric": "install_time_ms",
-    "value": 7232,
+    "value": 7829,
     "iterations": 1,
     "stddev": 0.0
   },
@@ -96,7 +96,7 @@
     "suite": "dx",
     "framework": "nextjs",
     "metric": "cold_start_ms",
-    "value": 2908,
+    "value": 3245,
     "iterations": 1,
     "stddev": 0.0
   },
@@ -104,13 +104,13 @@
     "suite": "dx",
     "framework": "nextjs",
     "metric": "dev_memory_mb",
-    "value": 94.1
+    "value": 93.9
   },
   {
     "suite": "dx",
     "framework": "nextjs",
     "metric": "rebuild_ms",
-    "value": 244,
+    "value": 41,
     "iterations": 1,
     "stddev": 0.0
   },
@@ -118,7 +118,7 @@
     "suite": "dx",
     "framework": "nextjs",
     "metric": "lint_time_ms",
-    "value": 1358,
+    "value": 224,
     "iterations": 1,
     "stddev": 0.0
   },
@@ -126,7 +126,7 @@
     "suite": "server",
     "framework": "rex",
     "metric": "build_time_ms",
-    "value": 83,
+    "value": 66,
     "iterations": 1,
     "stddev": 0.0
   },
@@ -140,7 +140,7 @@
     "suite": "server",
     "framework": "rex",
     "metric": "cold_start_ms",
-    "value": 120,
+    "value": 122,
     "iterations": 1,
     "stddev": 0.0
   },
@@ -148,14 +148,14 @@
     "suite": "server",
     "framework": "rex",
     "metric": "rps",
-    "value": 29221.91,
+    "value": 29278.38,
     "endpoint": "/"
   },
   {
     "suite": "server",
     "framework": "rex",
     "metric": "latency_mean_ms",
-    "value": 3.422,
+    "value": 3.415,
     "endpoint": "/"
   },
   {
@@ -164,138 +164,138 @@
     "metric": "latency_p50_ms",
     "value": 3.0,
     "endpoint": "/"
-  },
-  {
-    "suite": "server",
-    "framework": "rex",
-    "metric": "latency_p99_ms",
-    "value": 6.0,
-    "endpoint": "/"
-  },
-  {
-    "suite": "server",
-    "framework": "rex",
-    "metric": "rps",
-    "value": 29459.33,
-    "endpoint": "/about"
-  },
-  {
-    "suite": "server",
-    "framework": "rex",
-    "metric": "latency_mean_ms",
-    "value": 3.395,
-    "endpoint": "/about"
-  },
-  {
-    "suite": "server",
-    "framework": "rex",
-    "metric": "latency_p50_ms",
-    "value": 3.0,
-    "endpoint": "/about"
-  },
-  {
-    "suite": "server",
-    "framework": "rex",
-    "metric": "latency_p99_ms",
-    "value": 6.0,
-    "endpoint": "/about"
-  },
-  {
-    "suite": "server",
-    "framework": "rex",
-    "metric": "rps",
-    "value": 28880.03,
-    "endpoint": "/static"
-  },
-  {
-    "suite": "server",
-    "framework": "rex",
-    "metric": "latency_mean_ms",
-    "value": 3.463,
-    "endpoint": "/static"
-  },
-  {
-    "suite": "server",
-    "framework": "rex",
-    "metric": "latency_p50_ms",
-    "value": 3.0,
-    "endpoint": "/static"
-  },
-  {
-    "suite": "server",
-    "framework": "rex",
-    "metric": "latency_p99_ms",
-    "value": 4.0,
-    "endpoint": "/static"
-  },
-  {
-    "suite": "server",
-    "framework": "rex",
-    "metric": "rps",
-    "value": 28143.49,
-    "endpoint": "/blog/hello-world"
-  },
-  {
-    "suite": "server",
-    "framework": "rex",
-    "metric": "latency_mean_ms",
-    "value": 3.553,
-    "endpoint": "/blog/hello-world"
-  },
-  {
-    "suite": "server",
-    "framework": "rex",
-    "metric": "latency_p50_ms",
-    "value": 3.0,
-    "endpoint": "/blog/hello-world"
   },
   {
     "suite": "server",
     "framework": "rex",
     "metric": "latency_p99_ms",
     "value": 7.0,
+    "endpoint": "/"
+  },
+  {
+    "suite": "server",
+    "framework": "rex",
+    "metric": "rps",
+    "value": 30230.93,
+    "endpoint": "/about"
+  },
+  {
+    "suite": "server",
+    "framework": "rex",
+    "metric": "latency_mean_ms",
+    "value": 3.308,
+    "endpoint": "/about"
+  },
+  {
+    "suite": "server",
+    "framework": "rex",
+    "metric": "latency_p50_ms",
+    "value": 3.0,
+    "endpoint": "/about"
+  },
+  {
+    "suite": "server",
+    "framework": "rex",
+    "metric": "latency_p99_ms",
+    "value": 6.0,
+    "endpoint": "/about"
+  },
+  {
+    "suite": "server",
+    "framework": "rex",
+    "metric": "rps",
+    "value": 31701.55,
+    "endpoint": "/static"
+  },
+  {
+    "suite": "server",
+    "framework": "rex",
+    "metric": "latency_mean_ms",
+    "value": 3.154,
+    "endpoint": "/static"
+  },
+  {
+    "suite": "server",
+    "framework": "rex",
+    "metric": "latency_p50_ms",
+    "value": 3.0,
+    "endpoint": "/static"
+  },
+  {
+    "suite": "server",
+    "framework": "rex",
+    "metric": "latency_p99_ms",
+    "value": 4.0,
+    "endpoint": "/static"
+  },
+  {
+    "suite": "server",
+    "framework": "rex",
+    "metric": "rps",
+    "value": 28884.87,
+    "endpoint": "/blog/hello-world"
+  },
+  {
+    "suite": "server",
+    "framework": "rex",
+    "metric": "latency_mean_ms",
+    "value": 3.462,
+    "endpoint": "/blog/hello-world"
+  },
+  {
+    "suite": "server",
+    "framework": "rex",
+    "metric": "latency_p50_ms",
+    "value": 3.0,
+    "endpoint": "/blog/hello-world"
+  },
+  {
+    "suite": "server",
+    "framework": "rex",
+    "metric": "latency_p99_ms",
+    "value": 6.0,
     "endpoint": "/blog/hello-world"
   },
   {
     "suite": "server",
     "framework": "rex",
     "metric": "rps",
-    "value": 27722.33,
+    "value": 29008.8,
     "endpoint": "/api/hello"
   },
   {
     "suite": "server",
     "framework": "rex",
     "metric": "latency_mean_ms",
-    "value": 3.607,
+    "value": 3.447,
     "endpoint": "/api/hello"
   },
   {
     "suite": "server",
     "framework": "rex",
     "metric": "latency_p50_ms",
-    "value": 4.0,
+    "value": 3.0,
     "endpoint": "/api/hello"
   },
   {
     "suite": "server",
     "framework": "rex",
     "metric": "latency_p99_ms",
-    "value": 10.0,
+    "value": 9.0,
     "endpoint": "/api/hello"
   },
   {
     "suite": "server",
     "framework": "rex",
     "metric": "rps",
-    "value": 22846.96,
+    "value": 28120.77,
     "endpoint": "/gallery"
   },
   {
     "suite": "server",
     "framework": "rex",
     "metric": "latency_mean_ms",
-    "value": 4.377,
+    "value": 3.556,
     "endpoint": "/gallery"
   },
   {
@@ -316,20 +316,20 @@
     "suite": "server",
     "framework": "rex",
     "metric": "image_cold_resize_ms",
-    "value": 38.6
+    "value": 37.5
   },
   {
     "suite": "server",
     "framework": "rex",
     "metric": "rps",
-    "value": 26039.9,
+    "value": 21856.35,
     "endpoint": "/_rex/image?url=%2Fimages%2Fhero.jpg&w=640&q=75"
   },
   {
     "suite": "server",
     "framework": "rex",
     "metric": "latency_mean_ms",
-    "value": 3.84,
+    "value": 4.575,
     "endpoint": "/_rex/image?url=%2Fimages%2Fhero.jpg&w=640&q=75"
   },
   {
@@ -343,20 +343,20 @@
     "suite": "server",
     "framework": "rex",
     "metric": "latency_p99_ms",
-    "value": 7.0,
+    "value": 11.0,
     "endpoint": "/_rex/image?url=%2Fimages%2Fhero.jpg&w=640&q=75"
   },
   {
     "suite": "server",
     "framework": "rex",
     "metric": "memory_mb",
-    "value": 173.6
+    "value": 180.4
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "build_time_ms",
-    "value": 5770,
+    "value": 2267,
     "iterations": 1,
     "stddev": 0.0
   },
@@ -364,13 +364,13 @@
     "suite": "server",
     "framework": "nextjs",
     "metric": "build_output_mb",
-    "value": 32.6
+    "value": 14.8
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "cold_start_ms",
-    "value": 388,
+    "value": 353,
     "iterations": 1,
     "stddev": 0.0
   },
@@ -378,188 +378,188 @@
     "suite": "server",
     "framework": "nextjs",
     "metric": "rps",
-    "value": 4053.96,
+    "value": 4560.15,
     "endpoint": "/"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_mean_ms",
-    "value": 24.667,
+    "value": 21.929,
     "endpoint": "/"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_p50_ms",
-    "value": 24.0,
+    "value": 21.0,
     "endpoint": "/"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_p99_ms",
-    "value": 39.0,
+    "value": 68.0,
     "endpoint": "/"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "rps",
-    "value": 4158.66,
+    "value": 5089.09,
     "endpoint": "/about"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_mean_ms",
-    "value": 24.046,
+    "value": 19.65,
     "endpoint": "/about"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_p50_ms",
-    "value": 23.0,
+    "value": 19.0,
     "endpoint": "/about"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_p99_ms",
-    "value": 94.0,
+    "value": 27.0,
     "endpoint": "/about"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "rps",
-    "value": 9681.62,
+    "value": 10851.02,
     "endpoint": "/static"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_mean_ms",
-    "value": 10.329,
+    "value": 9.216,
     "endpoint": "/static"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_p50_ms",
-    "value": 10.0,
+    "value": 9.0,
     "endpoint": "/static"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_p99_ms",
-    "value": 31.0,
+    "value": 22.0,
     "endpoint": "/static"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "rps",
-    "value": 4361.33,
+    "value": 4979.55,
     "endpoint": "/blog/hello-world"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_mean_ms",
-    "value": 22.929,
+    "value": 20.082,
     "endpoint": "/blog/hello-world"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_p50_ms",
-    "value": 23.0,
+    "value": 19.0,
     "endpoint": "/blog/hello-world"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_p99_ms",
-    "value": 31.0,
+    "value": 86.0,
     "endpoint": "/blog/hello-world"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "rps",
-    "value": 8911.62,
+    "value": 11224.79,
     "endpoint": "/api/hello"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_mean_ms",
-    "value": 11.221,
+    "value": 8.909,
     "endpoint": "/api/hello"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_p50_ms",
-    "value": 10.0,
+    "value": 9.0,
     "endpoint": "/api/hello"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_p99_ms",
-    "value": 92.0,
+    "value": 22.0,
     "endpoint": "/api/hello"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "rps",
-    "value": 9725.72,
+    "value": 10563.09,
     "endpoint": "/gallery"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_mean_ms",
-    "value": 10.282,
+    "value": 9.467,
     "endpoint": "/gallery"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_p50_ms",
-    "value": 10.0,
+    "value": 9.0,
     "endpoint": "/gallery"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_p99_ms",
-    "value": 33.0,
+    "value": 35.0,
     "endpoint": "/gallery"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "image_cold_resize_ms",
-    "value": 18.8
+    "value": 630.1
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "rps",
-    "value": 14297.42,
+    "value": 15207.16,
     "endpoint": "/_next/image?url=%2Fimages%2Fhero.jpg&w=640&q=75"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_mean_ms",
-    "value": 6.994,
+    "value": 6.576,
     "endpoint": "/_next/image?url=%2Fimages%2Fhero.jpg&w=640&q=75"
   },
   {
@@ -573,13 +573,13 @@
     "suite": "server",
     "framework": "nextjs",
     "metric": "latency_p99_ms",
-    "value": 36.0,
+    "value": 10.0,
     "endpoint": "/_next/image?url=%2Fimages%2Fhero.jpg&w=640&q=75"
   },
   {
     "suite": "server",
     "framework": "nextjs",
     "metric": "memory_mb",
-    "value": 94.5
+    "value": 93.7
   }
 ]

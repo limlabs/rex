@@ -19,13 +19,13 @@ Benchmarked against Next.js 16 on the same pages with Apache Bench (10k requests
 
 | Metric | Rex | Next.js 16 |
 |--------|-----|-----------|
-| **SSR throughput** | 29,222 req/s | 4,054 req/s |
-| **SSR latency** | 3.4 ms | 24.7 ms |
-| **Production build** | 83 ms | 5,770 ms |
-| **Dev cold start** | 205 ms | 2,908 ms |
-| **Install size** | 118 MB | 342 MB |
-| **Install time** | 955 ms | 7,232 ms |
-| **Lint** | 24 ms (oxlint) | 1,358 ms (eslint) |
+| **SSR throughput** | 29,278 req/s | 4,560 req/s |
+| **SSR latency** | 3.4 ms | 21.9 ms |
+| **Production build** | 66 ms | 2,267 ms |
+| **Dev cold start** | 1,496 ms | 3,245 ms |
+| **Install size** | 112 MB | 367 MB |
+| **Install time** | 2,750 ms | 7,829 ms |
+| **Lint** | 12 ms (oxlint) | 224 ms (eslint) |
 
 Reproduce: `cd benchmarks && uv run python bench.py --suite dx,server --framework rex,nextjs --iterations 1`. Raw data and methodology in [benchmarks/](benchmarks/METHODOLOGY.md).
 
