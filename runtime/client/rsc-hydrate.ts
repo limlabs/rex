@@ -98,6 +98,7 @@ function preloadClientModules(): Promise<void | unknown[]> {
   for (const refId in entries) {
     if (!Object.prototype.hasOwnProperty.call(entries, refId)) continue;
     const entry = entries[refId];
+    if (!entry || !entry.chunk_url) continue;
     // Use an IIFE to capture refId in closure
     (function(id: string, url: string) {
       promises.push(

@@ -64,6 +64,28 @@ impl ClientReferenceManifest {
         serde_json::Value::Object(config)
     }
 
+    /// Serialize the client-facing module map as JSON.
+    ///
+    /// This is embedded in the HTML as `window.__REX_RSC_MODULE_MAP__` and used
+    /// by the hydration runtime to preload client component chunks. Entries with
+    /// empty `chunk_url` (placeholders from the server build phase that were never
+    /// resolved to a real chunk) are excluded — importing an empty specifier
+    /// crashes the browser with `TypeError: Failed to resolve module specifier ''`.
+    pub fn to_client_module_map_json(&self) -> String {
+        let filtered: HashMap<&String, &ClientRefEntry> = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| !entry.chunk_url.is_empty())
+            .collect();
+
+        #[derive(Serialize)]
+        struct Wrapper<'a> {
+            entries: HashMap<&'a String, &'a ClientRefEntry>,
+        }
+
+        serde_json::to_string(&Wrapper { entries: filtered }).unwrap_or_else(|_| "{}".to_string())
+    }
+
     /// Produce the SSR-side webpack module map for `createFromReadableStream`.
     ///
     /// React's client looks up `config[moduleId][exportName]` → `{ id, name, chunks }`.
@@ -155,5 +177,25 @@ mod tests {
         let wildcard = ref1.get("*").unwrap();
         assert_eq!(wildcard["id"], "ref1");
         assert_eq!(wildcard["name"], "");
+    }
+
+    #[test]
+    fn client_module_map_excludes_empty_chunk_urls() {
+        let mut manifest = ClientReferenceManifest::new();
+        // Real entry with a chunk URL
+        manifest.add("ref1", "/Counter.js".to_string(), "default".to_string());
+        // Placeholder entry with empty chunk URL (from server build phase)
+        manifest.add("ref2", String::new(), "Widget".to_string());
+
+        let json = manifest.to_client_module_map_json();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let entries = parsed["entries"].as_object().unwrap();
+
+        // ref1 should be present (has chunk URL)
+        assert!(entries.contains_key("ref1"), "ref1 should be included");
+        assert_eq!(entries["ref1"]["chunk_url"], "/Counter.js");
+
+        // ref2 should be excluded (empty chunk URL)
+        assert!(!entries.contains_key("ref2"), "ref2 should be excluded");
     }
 }
