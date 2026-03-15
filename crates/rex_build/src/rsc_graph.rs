@@ -557,10 +557,13 @@ pub fn analyze_module_graph(entries: &[PathBuf], root: &Path) -> Result<ModuleGr
         } else if info.is_client {
             // Client boundary modules: don't fully recurse, but check imports
             // for "use server" modules so we can generate action stubs.
+            // Also do a shallow scan for additional "use client" boundaries
+            // in node_modules (e.g. re-exported components from third-party
+            // packages like Radix, PayloadCMS, etc.).
             for import in &info.imports {
                 if !visited.contains(import) {
                     if let Ok(dep_info) = analyze_module(import, root) {
-                        if dep_info.is_server {
+                        if dep_info.is_server || dep_info.is_client {
                             visited.insert(import.clone());
                             graph.modules.insert(import.clone(), dep_info);
                         }

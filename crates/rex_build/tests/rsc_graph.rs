@@ -461,3 +461,66 @@ fn unknown_extension_analyzed() {
     let mjs_mod = graph.modules.values().next().unwrap();
     assert!(mjs_mod.exports.contains(&"value".to_string()));
 }
+
+#[test]
+fn shallow_scan_discovers_transitive_client_boundaries() {
+    // When a "use client" module imports another "use client" module,
+    // the shallow scan should discover it as a client boundary too.
+    let dir = setup_temp_dir();
+    let root = dir.path();
+
+    // Server page imports a "use client" provider
+    fs::write(
+        root.join("page.tsx"),
+        r#"
+import { ThemeProvider } from './ThemeProvider';
+export default function Page() { return null; }
+"#,
+    )
+    .unwrap();
+
+    // "use client" provider imports another "use client" consumer
+    fs::write(
+        root.join("ThemeProvider.tsx"),
+        r#"
+"use client";
+import ThemeDisplay from './ThemeDisplay';
+export default function ThemeProvider({ children }) { return children; }
+export { ThemeDisplay };
+"#,
+    )
+    .unwrap();
+
+    // Another "use client" module imported by the provider
+    fs::write(
+        root.join("ThemeDisplay.tsx"),
+        r#"
+"use client";
+export default function ThemeDisplay() { return null; }
+"#,
+    )
+    .unwrap();
+
+    let entries = vec![root.join("page.tsx")];
+    let graph = analyze_module_graph(&entries, root).unwrap();
+
+    // ThemeDisplay should be discovered via shallow scan of ThemeProvider's imports
+    assert_eq!(
+        graph.modules.len(),
+        3,
+        "Expected 3 modules (page + ThemeProvider + ThemeDisplay), got {}. Modules: {:?}",
+        graph.modules.len(),
+        graph
+            .modules
+            .keys()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+    );
+
+    let display = graph
+        .modules
+        .values()
+        .find(|m| m.path.ends_with("ThemeDisplay.tsx"))
+        .expect("ThemeDisplay should be in the graph via shallow scan");
+    assert!(display.is_client, "ThemeDisplay should be marked as client");
+}

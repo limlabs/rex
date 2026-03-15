@@ -928,6 +928,10 @@ mod rsc {
         );
     }
 
+    // -------------------------------------------------------
+    // Server action tests
+    // -------------------------------------------------------
+
     #[tokio::test]
     #[ignore]
     async fn rsc_server_action_increment_works() {

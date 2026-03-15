@@ -12,7 +12,7 @@ FIXTURES_DIR="$ROOT/fixtures"
 BENCHMARKS_DIR="$ROOT/benchmarks"
 # Skip directories that require build-time codegen (e.g. TanStack Router)
 # zero-config: types are extracted by `rex build`, not available before Rex runs
-SKIP=("tanstack-basic" "tanstack-tailwind" "zero-config")
+SKIP=("tanstack-basic" "tanstack-tailwind" "zero-config" "context")
 
 # Ensure packages/rex has its dependencies installed (fixtures resolve
 # rex source files via path aliases and need @types/react available).

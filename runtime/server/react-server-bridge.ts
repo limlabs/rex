@@ -30,8 +30,15 @@ if (!bridge.createContext) {
             Consumer: null,
             _defaultValue: defaultValue,
             _globalName: null,
+            displayName: undefined,
         }
-        context.Provider = context
+        // Provider renders children passthrough — some libraries check
+        // context.Provider !== context, so we use a distinct function.
+        context.Provider = function ContextProvider(props: any) {
+            return props.children
+        }
+        context.Provider.$$typeof = Symbol.for('react.provider')
+        context.Provider._context = context
         context.Consumer = {
             $$typeof: Symbol.for('react.consumer'),
             _context: context,

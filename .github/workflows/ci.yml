@@ -98,16 +98,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build rex images (app-build + runtime in parallel)
-        uses: docker/bake-action@v6
-        with:
-          load: true
-          set: |
-            *.cache-from=type=gha,scope=docker
-            *.cache-to=type=gha,scope=docker,mode=max
+      - name: Build rex images
+        run: docker buildx bake --load
 
       - name: Build railway fixture
         run: docker build --build-arg REX_VERSION=ci -t rex-railway-fixture fixtures/railway
