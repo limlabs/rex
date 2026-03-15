@@ -91,7 +91,8 @@ async fn build_single(
     add_react_core_aliases(&mut aliases, ctx, &runtime_dir);
     apply_stub_overrides(&mut aliases, stub_aliases);
 
-    let mut plugins = build_plugins(output_dir, &runtime_dir);
+    let client_asset_dir = client_asset_dir_from(output_dir);
+    let mut plugins = build_plugins(output_dir, &runtime_dir, &client_asset_dir);
     if !inline_action_targets.is_empty() {
         plugins.push(std::sync::Arc::new(
             crate::server_action_extract::InlineServerActionPlugin::new(
@@ -156,7 +157,8 @@ async fn build_grouped(
 
     let core_out_dir = output_dir.join("_rsc_core");
     fs::create_dir_all(&core_out_dir)?;
-    let mut core_plugins = build_plugins(&core_out_dir, &runtime_dir);
+    let client_asset_dir = client_asset_dir_from(output_dir);
+    let mut core_plugins = build_plugins(&core_out_dir, &runtime_dir, &client_asset_dir);
     if !inline_action_targets.is_empty() {
         core_plugins.push(std::sync::Arc::new(
             crate::server_action_extract::InlineServerActionPlugin::new(
@@ -196,7 +198,7 @@ async fn build_grouped(
 
         let group_out_dir = output_dir.join(format!("_rsc_group_{label}"));
         fs::create_dir_all(&group_out_dir)?;
-        let mut group_plugins = build_plugins(&group_out_dir, &runtime_dir);
+        let mut group_plugins = build_plugins(&group_out_dir, &runtime_dir, &client_asset_dir);
         if !inline_action_targets.is_empty() {
             group_plugins.push(std::sync::Arc::new(
                 crate::server_action_extract::InlineServerActionPlugin::new(
@@ -252,6 +254,19 @@ async fn build_grouped(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Derive the client asset output directory from the server RSC output dir.
+///
+/// Server output: `{build_root}/server/rsc/`
+/// Client assets: `{build_root}/client/assets/`
+fn client_asset_dir_from(server_rsc_dir: &Path) -> PathBuf {
+    server_rsc_dir
+        .parent() // server/
+        .and_then(|p| p.parent()) // build root
+        .unwrap_or(server_rsc_dir)
+        .join("client")
+        .join("assets")
+}
 
 /// Build base resolve aliases shared by all RSC server bundles.
 /// Excludes React alias (varies per bundle type) and stub overrides.
@@ -310,12 +325,16 @@ fn add_react_group_aliases(aliases: &mut AliasList, runtime_dir: &Path) {
         .join("react-jsx-group-shim.ts")
         .to_string_lossy()
         .to_string();
+    let jsx_dev_shim = runtime_dir
+        .join("react-jsx-dev-group-shim.ts")
+        .to_string_lossy()
+        .to_string();
     aliases.push(("react".to_string(), vec![Some(shim)]));
+    aliases.push(("react/jsx-runtime".to_string(), vec![Some(jsx_shim)]));
     aliases.push((
-        "react/jsx-runtime".to_string(),
-        vec![Some(jsx_shim.clone())],
+        "react/jsx-dev-runtime".to_string(),
+        vec![Some(jsx_dev_shim)],
     ));
-    aliases.push(("react/jsx-dev-runtime".to_string(), vec![Some(jsx_shim)]));
 }
 
 /// Apply `"use client"` stub alias overrides (must be last to take priority).
@@ -337,6 +356,7 @@ fn apply_stub_overrides(aliases: &mut AliasList, stub_aliases: &[(PathBuf, PathB
 fn build_plugins(
     output_dir: &Path,
     runtime_dir: &Path,
+    client_asset_dir: &Path,
 ) -> Vec<std::sync::Arc<dyn rolldown::plugin::Pluginable>> {
     let empty_stub = runtime_dir.join("empty.ts").to_string_lossy().to_string();
 
@@ -373,11 +393,16 @@ fn build_plugins(
             "node_modules/undici/".to_string(),
         ]));
 
+    let static_asset_plugin: std::sync::Arc<dyn rolldown::plugin::Pluginable> = std::sync::Arc::new(
+        crate::static_asset::StaticAssetPlugin::new(client_asset_dir.to_path_buf()),
+    );
+
     vec![
         use_client_plugin,
         polyfill_plugin,
         css_module_plugin,
         heavy_stub_plugin,
+        static_asset_plugin,
     ]
 }
 

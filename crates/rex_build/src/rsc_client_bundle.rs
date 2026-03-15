@@ -153,7 +153,13 @@ pub(crate) async fn build_rsc_client_bundles(
         ..Default::default()
     };
 
-    let mut bundler = rolldown::Bundler::new(options)
+    // Static asset plugin: resolves image imports to URLs and copies files
+    let client_asset_dir = output_dir.parent().unwrap_or(output_dir).join("assets");
+    let plugins: Vec<std::sync::Arc<dyn rolldown::plugin::Pluginable>> = vec![std::sync::Arc::new(
+        crate::static_asset::StaticAssetPlugin::new(client_asset_dir),
+    )];
+
+    let mut bundler = rolldown::Bundler::with_plugins(options, plugins)
         .map_err(|e| anyhow::anyhow!("Failed to create RSC client bundler: {e}"))?;
 
     let output = bundler.write().await.map_err(|e| {

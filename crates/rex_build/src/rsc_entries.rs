@@ -184,6 +184,12 @@ pub fn generate_core_entry(
     // via the react-group-shim alias (avoiding duplicate React instances).
     entry.push_str("import * as __react_ns from 'react';\n");
     entry.push_str("globalThis.__rex_react_ns = __react_ns;\n");
+    // Export jsx-runtime so group bundles use the real jsx/jsxs functions
+    // (NOT createElement, which has different child handling semantics).
+    entry.push_str("import * as __react_jsx_ns from 'react/jsx-runtime';\n");
+    entry.push_str("import * as __react_jsxDEV_ns from 'react/jsx-dev-runtime';\n");
+    entry.push_str("globalThis.__rex_react_jsx_ns = __react_jsx_ns;\n");
+    entry.push_str("globalThis.__rex_react_jsxDEV_ns = __react_jsxDEV_ns;\n");
     entry.push_str("import { renderToReadableStream } from 'react-server-dom-webpack/server';\n");
     entry.push_str("var __rex_createElement = __react_ns.createElement;\n");
     entry.push_str("var __rex_renderToReadableStream = renderToReadableStream;\n\n");
