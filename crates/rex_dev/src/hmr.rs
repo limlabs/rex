@@ -44,6 +44,7 @@ pub struct TscDiagnostic {
 #[derive(Clone)]
 pub struct HmrBroadcast {
     tx: broadcast::Sender<HmrMessage>,
+    error_buffer: Option<rex_core::ErrorBuffer>,
 }
 
 impl Default for HmrBroadcast {
@@ -55,10 +56,25 @@ impl Default for HmrBroadcast {
 impl HmrBroadcast {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(64);
-        Self { tx }
+        Self {
+            tx,
+            error_buffer: None,
+        }
+    }
+
+    pub fn with_error_buffer(error_buffer: rex_core::ErrorBuffer) -> Self {
+        let (tx, _) = broadcast::channel(64);
+        Self {
+            tx,
+            error_buffer: Some(error_buffer),
+        }
     }
 
     pub fn send_update(&self, path: &str, manifest: serde_json::Value) {
+        if let Some(buf) = &self.error_buffer {
+            buf.clear();
+        }
+
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system clock before UNIX epoch")
@@ -72,10 +88,16 @@ impl HmrBroadcast {
     }
 
     pub fn send_full_reload(&self) {
+        if let Some(buf) = &self.error_buffer {
+            buf.clear();
+        }
         let _ = self.tx.send(HmrMessage::FullReload);
     }
 
     pub fn send_error(&self, message: &str, file: Option<&str>) {
+        if let Some(buf) = &self.error_buffer {
+            buf.push_build_error(message, file);
+        }
         let _ = self.tx.send(HmrMessage::Error {
             message: message.to_string(),
             file: file.map(|s| s.to_string()),
@@ -84,6 +106,9 @@ impl HmrBroadcast {
     }
 
     pub fn send_server_error(&self, message: &str, file: Option<&str>) {
+        if let Some(buf) = &self.error_buffer {
+            buf.push_server_error(message, file);
+        }
         let _ = self.tx.send(HmrMessage::Error {
             message: message.to_string(),
             file: file.map(|s| s.to_string()),
@@ -92,6 +117,11 @@ impl HmrBroadcast {
     }
 
     pub fn send_tsc_errors(&self, errors: Vec<TscDiagnostic>) {
+        if let Some(buf) = &self.error_buffer {
+            for err in &errors {
+                buf.push_tsc_error(&err.message, &err.file);
+            }
+        }
         let _ = self.tx.send(HmrMessage::TscError { errors });
     }
 

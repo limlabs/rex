@@ -22,6 +22,11 @@ pub(crate) async fn cmd_dev(
         .await
         .with_context(|| format!("failed to bind {addr} — is another server running?"))?;
 
+    // Register this instance for MCP discovery
+    if let Err(e) = rex_core::instance::register_instance(port, &host.to_string(), &root) {
+        tracing::warn!("Failed to register dev instance: {e}");
+    }
+
     if !tui_enabled {
         print_mascot_header(env!("CARGO_PKG_VERSION"), "");
     }
@@ -44,8 +49,9 @@ pub(crate) async fn cmd_dev(
         eprintln!("  {} {}", dim("◇"), dim("Tailwind CSS (watching)"));
     }
 
-    // Create HMR broadcast
-    let hmr = rex_dev::HmrBroadcast::new();
+    // Create error buffer and HMR broadcast
+    let error_buffer = rex_core::ErrorBuffer::new(64);
+    let hmr = rex_dev::HmrBroadcast::with_error_buffer(error_buffer.clone());
 
     // Start tsc watch process (if TypeScript is detected)
     let _tsc = rex_dev::typecheck::spawn_tsc_watcher(&config.project_root, hmr.clone());
@@ -73,10 +79,25 @@ pub(crate) async fn cmd_dev(
         }
     });
 
-    let extra_routes = axum::Router::new().route("/_rex/hmr", hmr_route).route(
-        "/_rex/hmr-client.js",
-        axum::routing::get(hmr_client_handler),
-    );
+    let extra_routes = axum::Router::new()
+        .route("/_rex/hmr", hmr_route)
+        .route(
+            "/_rex/hmr-client.js",
+            axum::routing::get(hmr_client_handler),
+        )
+        .route(
+            "/_rex/dev/status",
+            axum::routing::get(rex_server::dev_introspection::status_handler),
+        )
+        .route(
+            "/_rex/dev/routes",
+            axum::routing::get(rex_server::dev_introspection::routes_handler),
+        )
+        .route(
+            "/_rex/dev/errors",
+            axum::routing::get(rex_server::dev_introspection::errors_handler),
+        )
+        .layer(axum::Extension(error_buffer));
 
     let router = rex.router_with_extra(extra_routes);
 
@@ -132,9 +153,10 @@ pub(crate) async fn cmd_dev(
             tui::run_tui(buf, startup_info).await?;
         }
 
-        // The TUI has exited — force-quit the process. Background tasks
-        // (file watcher, rebuild handler, HTTP server) have no shutdown
-        // signal and would block the tokio runtime's graceful shutdown.
+        // The TUI has exited — clean up instance registration and force-quit.
+        // Background tasks (file watcher, rebuild handler, HTTP server) have no
+        // shutdown signal and would block the tokio runtime's graceful shutdown.
+        rex_core::instance::unregister_instance();
         std::process::exit(0);
     } else {
         eprintln!(

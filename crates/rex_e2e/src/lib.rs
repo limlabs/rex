@@ -745,6 +745,69 @@ mod tests {
     }
 
     // -------------------------------------------------------
+    // Dev introspection endpoint tests (/_rex/dev/*)
+    // -------------------------------------------------------
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_dev_status_endpoint() {
+        let url = format!("{}/_rex/dev/status", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert!(body.get("build_id").is_some(), "Should have build_id");
+        assert!(
+            body.get("project_root").is_some(),
+            "Should have project_root"
+        );
+        assert!(body.get("route_count").is_some(), "Should have route_count");
+        assert!(
+            body["route_count"].as_u64().unwrap() > 0,
+            "Should have at least one route"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_dev_routes_endpoint() {
+        let url = format!("{}/_rex/dev/routes", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        let body: serde_json::Value = resp.json().await.unwrap();
+        let pages = body["pages"].as_array().expect("pages should be an array");
+        assert!(!pages.is_empty(), "Should have at least one page route");
+
+        let first = &pages[0];
+        assert!(first.get("pattern").is_some(), "Route should have pattern");
+        assert!(
+            first.get("file_path").is_some(),
+            "Route should have file_path"
+        );
+        assert!(
+            first.get("page_type").is_some(),
+            "Route should have page_type"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn e2e_dev_errors_endpoint() {
+        let url = format!("{}/_rex/dev/errors", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert!(body.is_array(), "Errors endpoint should return an array");
+        // After a clean build, errors should be empty
+        assert!(
+            body.as_array().unwrap().is_empty(),
+            "Should have no errors after successful build"
+        );
+    }
+
+    // -------------------------------------------------------
     // Config (rex.config.toml) tests
     // -------------------------------------------------------
 
