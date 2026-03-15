@@ -177,7 +177,7 @@ mod context {
 
         let build_id = extract_build_id(&body).expect("Could not extract build_id from page HTML");
 
-        let rsc_url = format!("{}/_rex/rsc/{}/", base_url(), build_id);
+        let rsc_url = format!("{}/_rex/rsc/{}/nested", base_url(), build_id);
         let resp = reqwest::get(&rsc_url).await.unwrap();
         assert_eq!(resp.status(), 200);
 
@@ -228,9 +228,10 @@ mod context {
             "Missing DOCTYPE"
         );
         assert!(body.contains("<html"), "Missing <html> tag");
+        assert!(body.contains("<body"), "Missing <body> tag");
         assert!(
-            body.contains("<div id=\"__rex\">"),
-            "Missing __rex root div"
+            body.contains("Context Test"),
+            "Missing rendered page content"
         );
         assert!(
             body.contains("__REX_RSC_DATA__"),
