@@ -1,14 +1,16 @@
 pub mod log_layer;
 mod mascot;
+mod text;
 
 use crate::tui::log_layer::{LogBuffer, LogEntry};
 use crate::tui::mascot::{render_mascot, MascotState};
+use crate::tui::text::{highlight_search, wrap_text, wrapped_line_count};
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 use futures::StreamExt;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 use std::time::Duration;
 use tracing::Level;
@@ -141,13 +143,20 @@ impl TuiApp {
 
     fn render_home(&self, f: &mut Frame<'_>) {
         let area = f.area();
+        // 2-char indent prefix on each error line
+        let err_width = area.width.saturating_sub(2) as usize;
 
         let error_lines = self
             .unresolved_error
             .as_ref()
             .map(|e| {
-                let count = e.message.lines().take(12).count();
-                count as u16 + 2
+                let visual: usize = e
+                    .message
+                    .lines()
+                    .take(12)
+                    .map(|l| wrapped_line_count(l, err_width))
+                    .sum();
+                visual as u16 + 2 // +1 header, +1 spacing
             })
             .unwrap_or(0);
 
@@ -162,7 +171,7 @@ impl TuiApp {
 
         self.render_mascot_and_info(f, chunks[1]);
         if let Some(ref err) = self.unresolved_error {
-            Self::render_error_section(f, chunks[2], err, area.width);
+            Self::render_error_section(f, chunks[2], err);
         }
         self.render_home_footer(f, chunks[4]);
     }
@@ -174,7 +183,7 @@ impl TuiApp {
         self.render_info(f, cols[1]);
     }
 
-    fn render_error_section(f: &mut Frame<'_>, area: Rect, err: &UnresolvedError, _w: u16) {
+    fn render_error_section(f: &mut Frame<'_>, area: Rect, err: &UnresolvedError) {
         let mut lines: Vec<Line<'_>> = Vec::new();
 
         // Header
@@ -206,7 +215,7 @@ impl TuiApp {
             ]));
         }
 
-        let para = Paragraph::new(lines);
+        let para = Paragraph::new(lines).wrap(Wrap { trim: false });
         f.render_widget(para, area);
     }
 
@@ -320,7 +329,7 @@ impl TuiApp {
         };
         lines.push(last_log_line);
 
-        let para = Paragraph::new(lines);
+        let para = Paragraph::new(lines).wrap(Wrap { trim: false });
         f.render_widget(para, area);
     }
 
@@ -398,61 +407,46 @@ impl TuiApp {
     fn render_log_list(&self, f: &mut Frame<'_>, area: Rect) {
         let entries = self.filtered_entries();
         let visible_height = area.height as usize;
+        // " ✕ " prefix is 4 display columns
+        let prefix_width = 4;
+        let msg_width = (area.width as usize).saturating_sub(prefix_width);
 
-        let scroll = if self.auto_scroll {
-            entries.len().saturating_sub(visible_height)
-        } else {
-            self.log_scroll
-                .min(entries.len().saturating_sub(visible_height))
-        };
+        // Build visual lines with wrapping
+        let mut all_lines: Vec<Line<'_>> = Vec::new();
+        for entry in &entries {
+            let color = level_color(&entry.level);
+            let wrapped = wrap_text(&entry.message, msg_width);
 
-        let items: Vec<ListItem<'_>> = entries
-            .iter()
-            .skip(scroll)
-            .take(visible_height)
-            .map(|entry| {
-                let color = level_color(&entry.level);
-                let mut spans = vec![Span::styled(
-                    format!(" {} ", level_symbol(&entry.level)),
-                    Style::default().fg(color),
-                )];
-
-                if !self.search_query.is_empty() {
-                    let msg = &entry.message;
-                    let query_lower = self.search_query.to_lowercase();
-                    let msg_lower = msg.to_lowercase();
-                    let mut last_end = 0;
-                    let mut pos = 0;
-
-                    while let Some(idx) = msg_lower[pos..].find(&query_lower) {
-                        let start = pos + idx;
-                        let end = start + self.search_query.len();
-                        if start > last_end {
-                            spans.push(Span::raw(msg[last_end..start].to_string()));
-                        }
-                        spans.push(Span::styled(
-                            msg[start..end].to_string(),
-                            Style::default()
-                                .fg(Color::Black)
-                                .bg(Color::Yellow)
-                                .add_modifier(Modifier::BOLD),
-                        ));
-                        last_end = end;
-                        pos = end;
-                    }
-                    if last_end < msg.len() {
-                        spans.push(Span::raw(msg[last_end..].to_string()));
-                    }
+            for (i, segment) in wrapped.iter().enumerate() {
+                let mut spans = Vec::new();
+                if i == 0 {
+                    spans.push(Span::styled(
+                        format!(" {} ", level_symbol(&entry.level)),
+                        Style::default().fg(color),
+                    ));
                 } else {
-                    spans.push(Span::raw(entry.message.clone()));
+                    spans.push(Span::raw("    "));
                 }
 
-                ListItem::new(Line::from(spans))
-            })
-            .collect();
+                if !self.search_query.is_empty() {
+                    highlight_search(&mut spans, segment, &self.search_query);
+                } else {
+                    spans.push(Span::raw(segment.to_string()));
+                }
 
-        let list = List::new(items).block(Block::default().borders(Borders::NONE));
-        f.render_widget(list, area);
+                all_lines.push(Line::from(spans));
+            }
+        }
+
+        let total = all_lines.len();
+        let scroll = if self.auto_scroll {
+            total.saturating_sub(visible_height)
+        } else {
+            self.log_scroll.min(total.saturating_sub(visible_height))
+        };
+
+        let para = Paragraph::new(all_lines).scroll((scroll as u16, 0));
+        f.render_widget(para, area);
     }
 
     fn render_search_bar(&self, f: &mut Frame<'_>, area: Rect) {
