@@ -159,8 +159,10 @@ function _assembleChunks(): string {
     const parts: string[] = [];
     for (let i = 0; i < _chunks.length; i++) {
         const c = _chunks[i];
-        parts.push(typeof c === 'string' ? c : decoder.decode(c));
+        // stream: true so multi-byte chars spanning chunk boundaries decode correctly
+        parts.push(typeof c === 'string' ? c : decoder.decode(c, { stream: true }));
     }
+    parts.push(decoder.decode()); // flush remaining bytes
     _chunks = [];
     return parts.join('');
 }

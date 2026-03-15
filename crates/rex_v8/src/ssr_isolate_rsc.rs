@@ -184,7 +184,16 @@ impl SsrIsolate {
                 return Err(anyhow::anyhow!("RSC async resolution timed out after 10s"));
             }
 
+            // Process any pending I/O (fetch, TCP sockets)
             crate::fetch::run_fetch_loop(&mut self.isolate, &self.context);
+
+            // Pump microtasks and timers to full convergence.
+            // run_fetch_loop exits when there is no I/O work, but React's
+            // internal rendering may still need microtask rounds (promise
+            // chains, ReadableStream chunk delivery, setTimeout(0) scheduling)
+            // to fully resolve async server components and close the flight
+            // data stream.
+            self.drain_microtasks_and_timers();
 
             let status = {
                 v8::scope_with_context!(scope, &mut self.isolate, &self.context);
@@ -203,7 +212,7 @@ impl SsrIsolate {
                 }
                 "pending" => {
                     // Yield briefly to avoid CPU-spinning when async slots are
-                    // waiting on microtasks but no fetch requests are queued.
+                    // waiting on external I/O (fetch, timers with real delays).
                     std::thread::sleep(std::time::Duration::from_millis(1));
                     continue;
                 }
@@ -213,6 +222,40 @@ impl SsrIsolate {
             }
         }
         Ok(())
+    }
+
+    /// Pump V8 microtasks and JS timers until no more progress is made.
+    ///
+    /// This ensures React's internal rendering state (ReadableStream chunk
+    /// delivery, promise chains from async server components, SSR pass
+    /// promises) fully converges after I/O operations complete. Without
+    /// this, the flight data stream may not have closed yet when we check
+    /// `__rex_resolve_rsc_pending()`, leading to incomplete flight data
+    /// being embedded in the HTML response.
+    fn drain_microtasks_and_timers(&mut self) {
+        // Cap iterations to prevent infinite loops from buggy JS timer chains.
+        for _ in 0..1000 {
+            self.isolate.perform_microtask_checkpoint();
+
+            let timer_fired = crate::fetch::drain_js_timers(&mut self.isolate, &self.context);
+            if timer_fired {
+                // Timer callbacks may have queued microtasks — drain them,
+                // then check for more expired timers.
+                self.isolate.perform_microtask_checkpoint();
+                continue;
+            }
+
+            // If microtask processing produced new fetch requests, stop
+            // here — the caller's next run_fetch_loop iteration will
+            // handle them.
+            let has_new_fetch = crate::fetch::FETCH_QUEUE.with(|q| !q.borrow().is_empty());
+            if has_new_fetch {
+                break;
+            }
+
+            // No timers fired and no new fetch requests — converged.
+            break;
+        }
     }
 
     /// List registered MCP tools. Returns JSON array of {name, description, parameters}.
