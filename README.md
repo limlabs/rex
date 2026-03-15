@@ -19,16 +19,16 @@ Benchmarked against Next.js 16 on the same pages with Apache Bench (10k requests
 
 | Metric | Rex | Next.js 16 |
 |--------|-----|-----------|
-| **SSR throughput** | 20,411 req/s | 4,758 req/s |
-| **SSR latency** | 4.9 ms | 21.0 ms |
-| **Production build** | 205 ms | 1,789 ms |
-| **Dev cold start** | 649 ms | 5,423 ms |
+| **SSR throughput** | 30,618 req/s | 4,547 req/s |
+| **SSR latency** | 3.3 ms | 22.0 ms |
+| **Production build** | 71 ms | 1,706 ms |
+| **Dev cold start** | 121 ms | 977 ms |
 | **Install size** | 114 MB | 369 MB |
-| **Install time** | 4,204 ms | 20,426 ms |
+| **Install time** | 1,076 ms | 11,313 ms |
 | **Client JS** | 196 KB | 547 KB |
-| **Lint** | 119 ms (oxlint) | 412 ms (eslint) |
+| **Lint** | 9 ms (oxlint) | 232 ms (eslint) |
 
-Reproduce: `cd benchmarks && uv run python bench.py --suite dx,server,client --framework rex,nextjs --iterations 1`. Raw data and methodology in [benchmarks/](benchmarks/METHODOLOGY.md).
+Reproduce: `cd benchmarks && uv run python bench.py --suite dx,server,client --framework rex,nextjs --iterations 3`. Raw data and methodology in [benchmarks/](benchmarks/METHODOLOGY.md).
 
 ## Quick Start
 
