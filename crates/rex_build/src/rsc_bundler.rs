@@ -77,6 +77,16 @@ pub async fn build_rsc_bundles(
         entries.push(route.page_path.clone());
         entries.extend(route.layout_chain.iter().cloned());
     }
+    // MDX pages are compiled to .jsx before the module graph walk, so the walker
+    // never sees `import { useMDXComponents }`. Add it as an explicit entry so
+    // its "use client" imports get proper client reference stubs.
+    if let Some(mdx_components) = rex_mdx::find_mdx_components(&config.project_root) {
+        let mdx_path = PathBuf::from(&mdx_components);
+        if mdx_path.exists() {
+            entries.push(mdx_path);
+        }
+    }
+
     entries.sort();
     entries.dedup();
 
