@@ -402,6 +402,13 @@ fn resolve_import(from: &Path, specifier: &str, root: &Path) -> Option<PathBuf> 
         }
     }
 
+    // Handle absolute paths (e.g. compiled MDX files import mdx-components.tsx
+    // via absolutized paths like "/Users/.../docs/mdx-components.tsx").
+    if specifier.starts_with('/') {
+        let candidate = PathBuf::from(specifier);
+        return try_resolve_path(&candidate);
+    }
+
     // Resolve bare specifiers through node_modules to detect "use client"
     // boundaries in third-party packages (e.g. @payloadcms/ui).
     if !specifier.starts_with('.') {
