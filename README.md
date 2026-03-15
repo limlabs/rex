@@ -15,9 +15,9 @@ A next-generation React framework built on the Next.js API. Write standard React
 
 ### Performance
 
-Benchmarked against Next.js 15 on the same pages with Apache Bench (10k requests, 100 concurrent, 200 warmup). Clean builds with no cache. Apple M3 Max, 36 GB.
+Benchmarked against Next.js 16 on the same pages with Apache Bench (10k requests, 100 concurrent, 200 warmup). Clean builds with no cache. Apple M3 Max, 36 GB.
 
-| Metric | Rex | Next.js 15 |
+| Metric | Rex | Next.js 16 |
 |--------|-----|-----------|
 | **SSR throughput** | 29,222 req/s | 4,054 req/s |
 | **SSR latency** | 3.4 ms | 24.7 ms |
