@@ -136,12 +136,12 @@ pub(super) async fn render_app_route(
         .map(|a| a.client_chunks.clone())
         .unwrap_or_default();
 
-    // Serialize client reference manifest
+    // Serialize client reference manifest (excludes placeholder entries with empty chunk_url)
     let client_manifest_json = hot
         .manifest
         .client_reference_manifest
         .as_ref()
-        .and_then(|m| serde_json::to_string(m).ok())
+        .map(|m| m.to_client_module_map_json())
         .unwrap_or_else(|| "{}".to_string());
 
     let is_dev = state.is_dev;

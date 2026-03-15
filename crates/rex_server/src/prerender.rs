@@ -150,10 +150,11 @@ pub async fn prerender_static_app_routes(
     let static_app_routes = collect_static_app_routes(manifest);
 
     // Client manifest JSON needed for RSC document assembly
+    // Uses to_client_module_map_json() to exclude placeholder entries with empty chunk_url
     let client_manifest_json = manifest
         .client_reference_manifest
         .as_ref()
-        .and_then(|m| serde_json::to_string(m).ok())
+        .map(|m| m.to_client_module_map_json())
         .unwrap_or_else(|| "{}".to_string());
 
     for (pattern, assets) in &static_app_routes {
