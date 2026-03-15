@@ -15,7 +15,7 @@ use crate::server_action_manifest::server_action_id;
 /// ```js
 /// export const Foo = { $$typeof: Symbol.for("react.client.reference"), $$id: "<refId>", $$name: "Foo" };
 /// ```
-pub(crate) fn generate_client_stub(rel_path: &str, exports: &[String], build_id: &str) -> String {
+pub fn generate_client_stub(rel_path: &str, exports: &[String], build_id: &str) -> String {
     let mut source = String::new();
     source.push_str("// Auto-generated client reference stub\n");
 
