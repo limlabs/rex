@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/limlabs/rex/compare/v0.19.0...v0.19.1) (2026-03-15)
+
+
+### Bug Fixes
+
+* **build:** embed all server/client runtime files for installed binary ([#211](https://github.com/limlabs/rex/issues/211)) ([6cff18a](https://github.com/limlabs/rex/commit/6cff18aa027ecc9c5913ca7dcebba5e906d82dc5))
+
 ## [0.19.0](https://github.com/limlabs/rex/compare/v0.18.0...v0.19.0) (2026-03-15)
 
 
