@@ -310,3 +310,138 @@ pub async fn cmd_mcp() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    fn make_request(method: &str, id: Option<serde_json::Value>) -> JsonRpcRequest {
+        JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: method.to_string(),
+            params: serde_json::json!({}),
+            id,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_initialize() {
+        let req = make_request("initialize", Some(serde_json::json!(1)));
+        let resp = handle_request(req).await.unwrap();
+        let result = resp.result.unwrap();
+        assert_eq!(result["protocolVersion"], "2025-03-26");
+        assert_eq!(result["serverInfo"]["name"], "rex-dev");
+    }
+
+    #[tokio::test]
+    async fn test_ping() {
+        let req = make_request("ping", Some(serde_json::json!(2)));
+        let resp = handle_request(req).await.unwrap();
+        assert!(resp.result.is_some());
+        assert!(resp.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_tools_list() {
+        let req = make_request("tools/list", Some(serde_json::json!(3)));
+        let resp = handle_request(req).await.unwrap();
+        let tools = resp.result.unwrap()["tools"].as_array().unwrap().clone();
+        assert_eq!(tools.len(), 4);
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"rex_list_instances"));
+        assert!(names.contains(&"rex_get_errors"));
+    }
+
+    #[tokio::test]
+    async fn test_unknown_method() {
+        let req = make_request("nonexistent", Some(serde_json::json!(4)));
+        let resp = handle_request(req).await.unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, -32601);
+    }
+
+    #[tokio::test]
+    async fn test_notification_returns_none() {
+        let req = make_request("ping", None);
+        assert!(handle_request(req).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_tools_call_list_instances() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "tools/call".to_string(),
+            params: serde_json::json!({"name": "rex_list_instances", "arguments": {}}),
+            id: Some(serde_json::json!(5)),
+        };
+        let resp = handle_request(req).await.unwrap();
+        assert!(resp.result.is_some());
+        assert!(resp.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_tools_call_unknown_tool() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "tools/call".to_string(),
+            params: serde_json::json!({"name": "nonexistent_tool", "arguments": {}}),
+            id: Some(serde_json::json!(6)),
+        };
+        let resp = handle_request(req).await.unwrap();
+        let result = resp.result.unwrap();
+        assert_eq!(result["isError"], true);
+    }
+
+    #[tokio::test]
+    async fn test_tools_call_invalid_params() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "tools/call".to_string(),
+            params: serde_json::json!("not an object"),
+            id: Some(serde_json::json!(7)),
+        };
+        let resp = handle_request(req).await.unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, -32602);
+    }
+
+    #[test]
+    fn test_ok_response_serialization() {
+        let resp = ok_response(serde_json::json!(1), serde_json::json!({"ok": true}));
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"jsonrpc\":\"2.0\""));
+        assert!(json.contains("\"result\""));
+        assert!(!json.contains("\"error\""));
+    }
+
+    #[test]
+    fn test_err_response_serialization() {
+        let resp = err_response(serde_json::json!(2), -32601, "Not found".into());
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"error\""));
+        assert!(json.contains("-32601"));
+        assert!(!json.contains("\"result\""));
+    }
+
+    #[test]
+    fn test_tool_text_serialization() {
+        let val = tool_text("hello".to_string());
+        assert_eq!(val["content"][0]["type"], "text");
+        assert_eq!(val["content"][0]["text"], "hello");
+        assert!(val.get("isError").is_none());
+    }
+
+    #[test]
+    fn test_tool_error_serialization() {
+        let val = tool_error("oops".to_string());
+        assert_eq!(val["isError"], true);
+        assert_eq!(val["content"][0]["text"], "oops");
+    }
+
+    #[test]
+    fn test_tools_list_count() {
+        let tools = tools_list();
+        assert_eq!(tools.len(), 4);
+    }
+}

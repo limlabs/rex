@@ -109,3 +109,51 @@ pub async fn routes_handler(State(state): State<Arc<AppState>>) -> impl IntoResp
 pub async fn errors_handler(Extension(buffer): Extension<ErrorBuffer>) -> impl IntoResponse {
     Json(buffer.snapshot())
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use rex_core::DynamicSegment;
+
+    #[test]
+    fn test_page_type_str() {
+        assert_eq!(page_type_str(&PageType::Regular), "Regular");
+        assert_eq!(page_type_str(&PageType::Api), "Api");
+        assert_eq!(page_type_str(&PageType::AppApi), "AppApi");
+        assert_eq!(page_type_str(&PageType::App), "App");
+        assert_eq!(page_type_str(&PageType::Document), "Document");
+        assert_eq!(page_type_str(&PageType::Error), "Error");
+        assert_eq!(page_type_str(&PageType::NotFound), "NotFound");
+    }
+
+    #[test]
+    fn test_segment_name() {
+        assert_eq!(segment_name(&DynamicSegment::Single("slug".into())), "slug");
+        assert_eq!(
+            segment_name(&DynamicSegment::CatchAll("path".into())),
+            "...path"
+        );
+        assert_eq!(
+            segment_name(&DynamicSegment::OptionalCatchAll("rest".into())),
+            "[[...rest]]"
+        );
+    }
+
+    #[test]
+    fn test_route_to_info() {
+        let route = rex_core::Route {
+            pattern: "/blog/:slug".to_string(),
+            file_path: std::path::PathBuf::from("blog/[slug].tsx"),
+            abs_path: std::path::PathBuf::from("/pages/blog/[slug].tsx"),
+            dynamic_segments: vec![DynamicSegment::Single("slug".into())],
+            page_type: PageType::Regular,
+            specificity: 10,
+        };
+        let info = route_to_info(&route);
+        assert_eq!(info.pattern, "/blog/:slug");
+        assert_eq!(info.file_path, "blog/[slug].tsx");
+        assert_eq!(info.page_type, "Regular");
+        assert_eq!(info.dynamic_segments, vec!["slug"]);
+    }
+}
