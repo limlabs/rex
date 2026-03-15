@@ -80,6 +80,31 @@ pub(super) fn highlight_search(spans: &mut Vec<Span<'_>>, text: &str, query: &st
     }
 }
 
+/// Split text by newlines, then wrap each resulting line to `max_width`.
+/// Returns all visual lines.
+pub(super) fn wrap_message(text: &str, max_width: usize) -> Vec<String> {
+    let mut result = Vec::new();
+    for line in text.lines() {
+        result.extend(wrap_text(line, max_width));
+    }
+    if result.is_empty() {
+        result.push(String::new());
+    }
+    result
+}
+
+/// Truncate `s` to at most `max_width` bytes, respecting UTF-8 char boundaries.
+pub(super) fn truncate_str(s: &str, max_width: usize) -> &str {
+    if s.len() <= max_width {
+        return s;
+    }
+    let mut end = max_width;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,5 +173,29 @@ mod tests {
         let mut spans = Vec::new();
         highlight_search(&mut spans, "Hello World", "hello");
         assert!(!spans.is_empty());
+    }
+
+    #[test]
+    fn wrap_message_splits_newlines() {
+        let result = wrap_message("line1\nline2\nline3", 80);
+        assert_eq!(result, vec!["line1", "line2", "line3"]);
+    }
+
+    #[test]
+    fn wrap_message_newline_and_wrap() {
+        let result = wrap_message("short\nabcdefghijklmnopqrstuvwxyz", 10);
+        assert_eq!(result[0], "short");
+        assert!(result.len() >= 3);
+    }
+
+    #[test]
+    fn truncate_str_within_limit() {
+        assert_eq!(truncate_str("hello", 10), "hello");
+        assert_eq!(truncate_str("hello", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_str_over_limit() {
+        assert_eq!(truncate_str("hello world", 5), "hello");
     }
 }

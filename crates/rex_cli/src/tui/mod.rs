@@ -1,10 +1,11 @@
 pub mod log_layer;
+mod logs;
 mod mascot;
 mod text;
 
-use crate::tui::log_layer::{LogBuffer, LogEntry};
+use crate::tui::log_layer::LogBuffer;
 use crate::tui::mascot::{render_mascot, MascotState};
-use crate::tui::text::{highlight_search, wrap_text, wrapped_line_count};
+use crate::tui::text::{wrap_text, wrapped_line_count};
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 use futures::StreamExt;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -12,6 +13,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
+use std::collections::HashSet;
 use std::time::Duration;
 use tracing::Level;
 
@@ -71,20 +73,28 @@ struct UnresolvedError {
 }
 
 struct TuiApp {
-    screen: Screen,
-    log_buffer: LogBuffer,
-    startup_info: StartupInfo,
-    log_filter: LogFilter,
-    log_scroll: usize,
-    search_query: String,
-    searching: bool,
-    auto_scroll: bool,
+    pub(crate) screen: Screen,
+    pub(crate) log_buffer: LogBuffer,
+    pub(crate) startup_info: StartupInfo,
+    pub(crate) log_filter: LogFilter,
+    pub(crate) log_scroll: usize,
+    pub(crate) search_query: String,
+    pub(crate) searching: bool,
+    pub(crate) auto_scroll: bool,
     /// Countdown ticks for the tail-flick animation on HMR rebuild.
     tail_flick_ticks: u8,
     /// Log counter at last tick, used to detect new entries.
     last_seen_count: usize,
     /// Currently unresolved error. Set on ERROR log, cleared on successful rebuild.
     unresolved_error: Option<UnresolvedError>,
+    /// Full-screen error view toggle (Ctrl+O).
+    error_expanded: bool,
+    /// Scroll offset within the expanded error view.
+    error_scroll: usize,
+    /// Selected entry index in the log list (for Space-to-expand).
+    pub(crate) log_cursor: usize,
+    /// Set of log entry indices (in current filtered list) that are expanded.
+    pub(crate) expanded_entries: HashSet<usize>,
 }
 
 impl TuiApp {
@@ -102,6 +112,10 @@ impl TuiApp {
             tail_flick_ticks: 0,
             last_seen_count,
             unresolved_error: None,
+            error_expanded: false,
+            error_scroll: 0,
+            log_cursor: 0,
+            expanded_entries: HashSet::new(),
         }
     }
 
@@ -114,6 +128,7 @@ impl TuiApp {
             if entry.message.starts_with("Rebuild complete") {
                 self.tail_flick_ticks = 4;
                 self.unresolved_error = None;
+                self.error_expanded = false;
             } else if entry.level == Level::ERROR {
                 self.unresolved_error = Some(UnresolvedError {
                     message: entry.message,
@@ -134,18 +149,27 @@ impl TuiApp {
         }
     }
 
-    fn render(&self, f: &mut Frame<'_>) {
+    fn render(&mut self, f: &mut Frame<'_>) {
         match self.screen {
             Screen::Home => self.render_home(f),
             Screen::Logs => self.render_logs(f),
         }
     }
 
-    fn render_home(&self, f: &mut Frame<'_>) {
+    fn render_home(&mut self, f: &mut Frame<'_>) {
         let area = f.area();
+
+        // Full-screen expanded error view
+        if self.error_expanded {
+            if let Some(ref err) = self.unresolved_error {
+                Self::render_expanded_error(f, area, &err.message, &mut self.error_scroll);
+                return;
+            }
+            self.error_expanded = false;
+        }
+
         // 2-char indent prefix on each error line
         let err_width = area.width.saturating_sub(2) as usize;
-
         let error_lines = self
             .unresolved_error
             .as_ref()
@@ -156,7 +180,7 @@ impl TuiApp {
                     .take(12)
                     .map(|l| wrapped_line_count(l, err_width))
                     .sum();
-                visual as u16 + 2 // +1 header, +1 spacing
+                visual as u16 + 2
             })
             .unwrap_or(0);
 
@@ -176,17 +200,67 @@ impl TuiApp {
         self.render_home_footer(f, chunks[4]);
     }
 
+    fn render_expanded_error(f: &mut Frame<'_>, area: Rect, message: &str, scroll: &mut usize) {
+        let chunks = Layout::vertical([
+            Constraint::Length(1), // header
+            Constraint::Min(1),    // content
+            Constraint::Length(1), // footer
+        ])
+        .split(area);
+
+        // Header
+        let header = Line::from(vec![
+            Span::raw(" "),
+            Span::styled(
+                "✕ Error (expanded)",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+        ]);
+        f.render_widget(Paragraph::new(header), chunks[0]);
+
+        // Content with scroll
+        let width = chunks[1].width.saturating_sub(2) as usize;
+        let lines: Vec<Line<'_>> = message
+            .lines()
+            .flat_map(|l| {
+                wrap_text(l, width).into_iter().map(|s| {
+                    Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(s, Style::default().fg(Color::Red)),
+                    ])
+                })
+            })
+            .collect();
+
+        let total = lines.len();
+        let visible = chunks[1].height as usize;
+        *scroll = (*scroll).min(total.saturating_sub(visible));
+        let para = Paragraph::new(lines).scroll((*scroll as u16, 0));
+        f.render_widget(para, chunks[1]);
+
+        // Footer
+        let footer = Line::from(vec![
+            Span::raw("  "),
+            Span::styled("j/k", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(" scroll", Style::default().fg(Color::DarkGray)),
+            Span::styled("  ·  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Ctrl+O", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(" close", Style::default().fg(Color::DarkGray)),
+            Span::styled("  ·  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("q", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(" Quit", Style::default().fg(Color::DarkGray)),
+        ]);
+        f.render_widget(Paragraph::new(footer), chunks[2]);
+    }
+
     fn render_mascot_and_info(&self, f: &mut Frame<'_>, area: Rect) {
         let cols = Layout::horizontal([Constraint::Length(25), Constraint::Min(0)]).split(area);
-
         render_mascot(f, cols[0], self.mascot_state());
         self.render_info(f, cols[1]);
     }
 
     fn render_error_section(f: &mut Frame<'_>, area: Rect, err: &UnresolvedError) {
         let mut lines: Vec<Line<'_>> = Vec::new();
-
-        // Header
         lines.push(Line::from(vec![
             Span::raw("  "),
             Span::styled(
@@ -194,8 +268,6 @@ impl TuiApp {
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ),
         ]));
-
-        // Error message lines
         let max_lines = 12;
         let all_lines: Vec<&str> = err.message.lines().collect();
         let show = all_lines.len().min(max_lines);
@@ -209,12 +281,11 @@ impl TuiApp {
             lines.push(Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
-                    "  ... press l for full logs",
+                    "  ... Ctrl+O to expand",
                     Style::default().fg(Color::DarkGray),
                 ),
             ]));
         }
-
         let para = Paragraph::new(lines).wrap(Wrap { trim: false });
         f.render_widget(para, area);
     }
@@ -224,26 +295,20 @@ impl TuiApp {
 
         let mut route_parts = Vec::new();
         if info.page_count > 0 {
-            route_parts.push(format!(
-                "{} {}",
-                info.page_count,
-                if info.page_count == 1 {
-                    "page"
-                } else {
-                    "pages"
-                }
-            ));
+            let label = if info.page_count == 1 {
+                "page"
+            } else {
+                "pages"
+            };
+            route_parts.push(format!("{} {label}", info.page_count));
         }
         if info.api_count > 0 {
-            route_parts.push(format!(
-                "{} API {}",
-                info.api_count,
-                if info.api_count == 1 {
-                    "route"
-                } else {
-                    "routes"
-                }
-            ));
+            let label = if info.api_count == 1 {
+                "route"
+            } else {
+                "routes"
+            };
+            route_parts.push(format!("{} API {label}", info.api_count));
         }
         let route_summary = route_parts.join(" · ");
 
@@ -256,12 +321,11 @@ impl TuiApp {
         }
         let feature_line = features
             .iter()
-            .map(|feat| format!("◇ {feat}"))
+            .map(|f| format!("◇ {f}"))
             .collect::<Vec<_>>()
             .join(" · ");
 
         let has_error = self.unresolved_error.is_some();
-
         let mut lines = vec![
             Line::from(vec![
                 Span::styled(
@@ -301,15 +365,14 @@ impl TuiApp {
         }
         lines.push(Line::from(route_spans));
 
-        // Blank line then last log — but omit if it duplicates the unresolved error
-        // (the error is already shown in the error section below).
+        // Blank line then last log
         lines.push(Line::from(""));
         let last_entry = self.log_buffer.last();
-        let is_duplicate_error = match (&last_entry, &self.unresolved_error) {
-            (Some(entry), Some(err)) => entry.message == err.message,
-            _ => false,
-        };
-        let last_log_line = if is_duplicate_error {
+        let is_dup = matches!(
+            (&last_entry, &self.unresolved_error),
+            (Some(e), Some(err)) if e.message == err.message
+        );
+        lines.push(if is_dup {
             Line::from("")
         } else {
             match last_entry {
@@ -321,183 +384,35 @@ impl TuiApp {
                     Span::raw(" "),
                     Span::styled(entry.message, Style::default().fg(Color::DarkGray)),
                 ]),
-                None => Line::from(vec![Span::styled(
+                None => Line::from(Span::styled(
                     "Waiting for activity...",
                     Style::default().fg(Color::DarkGray),
-                )]),
+                )),
             }
-        };
-        lines.push(last_log_line);
+        });
 
-        let para = Paragraph::new(lines).wrap(Wrap { trim: false });
-        f.render_widget(para, area);
+        f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
     }
 
     fn render_home_footer(&self, f: &mut Frame<'_>, area: Rect) {
-        let footer = Line::from(vec![
+        let mut spans = vec![
             Span::raw("  "),
             Span::styled("l", Style::default().add_modifier(Modifier::BOLD)),
             Span::styled(" Logs", Style::default().fg(Color::DarkGray)),
+        ];
+        if self.unresolved_error.is_some() {
+            spans.extend([
+                Span::styled("  ·  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Ctrl+O", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(" expand error", Style::default().fg(Color::DarkGray)),
+            ]);
+        }
+        spans.extend([
             Span::styled("  ·  ", Style::default().fg(Color::DarkGray)),
             Span::styled("q", Style::default().add_modifier(Modifier::BOLD)),
             Span::styled(" Quit", Style::default().fg(Color::DarkGray)),
         ]);
-        let para = Paragraph::new(footer);
-        f.render_widget(para, area);
-    }
-
-    fn render_logs(&self, f: &mut Frame<'_>) {
-        let area = f.area();
-
-        let chunks = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(1),
-        ])
-        .split(area);
-
-        self.render_log_filter_bar(f, chunks[0]);
-        self.render_log_list(f, chunks[1]);
-
-        if self.searching {
-            self.render_search_bar(f, chunks[2]);
-        } else {
-            self.render_log_footer(f, chunks[2]);
-        }
-    }
-
-    fn render_log_filter_bar(&self, f: &mut Frame<'_>, area: Rect) {
-        let filters = [
-            (LogFilter::All, "a"),
-            (LogFilter::Error, "e"),
-            (LogFilter::Warn, "w"),
-            (LogFilter::Info, "i"),
-            (LogFilter::Debug, "d"),
-        ];
-
-        let mut spans = vec![Span::raw(" ")];
-        for (i, (filter, key)) in filters.iter().enumerate() {
-            if i > 0 {
-                spans.push(Span::styled(" ", Style::default().fg(Color::DarkGray)));
-            }
-            let is_active = self.log_filter == *filter;
-            let style = if is_active {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(EMERALD)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            };
-            spans.push(Span::styled(format!(" [{key}]{} ", filter.label()), style));
-        }
-
-        if !self.search_query.is_empty() {
-            spans.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
-            spans.push(Span::styled(
-                format!("search: \"{}\"", self.search_query),
-                Style::default().fg(Color::Yellow),
-            ));
-        }
-
-        let para = Paragraph::new(Line::from(spans));
-        f.render_widget(para, area);
-    }
-
-    fn render_log_list(&self, f: &mut Frame<'_>, area: Rect) {
-        let entries = self.filtered_entries();
-        let visible_height = area.height as usize;
-        // " ✕ " prefix is 4 display columns
-        let prefix_width = 4;
-        let msg_width = (area.width as usize).saturating_sub(prefix_width);
-
-        // Build visual lines with wrapping
-        let mut all_lines: Vec<Line<'_>> = Vec::new();
-        for entry in &entries {
-            let color = level_color(&entry.level);
-            let wrapped = wrap_text(&entry.message, msg_width);
-
-            for (i, segment) in wrapped.iter().enumerate() {
-                let mut spans = Vec::new();
-                if i == 0 {
-                    spans.push(Span::styled(
-                        format!(" {} ", level_symbol(&entry.level)),
-                        Style::default().fg(color),
-                    ));
-                } else {
-                    spans.push(Span::raw("    "));
-                }
-
-                if !self.search_query.is_empty() {
-                    highlight_search(&mut spans, segment, &self.search_query);
-                } else {
-                    spans.push(Span::raw(segment.to_string()));
-                }
-
-                all_lines.push(Line::from(spans));
-            }
-        }
-
-        let total = all_lines.len();
-        let scroll = if self.auto_scroll {
-            total.saturating_sub(visible_height)
-        } else {
-            self.log_scroll.min(total.saturating_sub(visible_height))
-        };
-
-        let para = Paragraph::new(all_lines).scroll((scroll as u16, 0));
-        f.render_widget(para, area);
-    }
-
-    fn render_search_bar(&self, f: &mut Frame<'_>, area: Rect) {
-        let line = Line::from(vec![
-            Span::styled(
-                " /",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(&self.search_query),
-            Span::styled("█", Style::default().fg(Color::DarkGray)),
-        ]);
-        let para = Paragraph::new(line);
-        f.render_widget(para, area);
-    }
-
-    fn render_log_footer(&self, f: &mut Frame<'_>, area: Rect) {
-        let entries = self.filtered_entries();
-        let count = entries.len();
-        let footer = Line::from(vec![
-            Span::raw(" "),
-            Span::styled("j/k", Style::default().add_modifier(Modifier::BOLD)),
-            Span::styled(" scroll", Style::default().fg(Color::DarkGray)),
-            Span::styled("  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("g/G", Style::default().add_modifier(Modifier::BOLD)),
-            Span::styled(" top/bottom", Style::default().fg(Color::DarkGray)),
-            Span::styled("  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("/", Style::default().add_modifier(Modifier::BOLD)),
-            Span::styled(" search", Style::default().fg(Color::DarkGray)),
-            Span::styled("  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
-            Span::styled(" back", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                format!("  {count} entries"),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]);
-        let para = Paragraph::new(footer);
-        f.render_widget(para, area);
-    }
-
-    fn filtered_entries(&self) -> Vec<LogEntry> {
-        let snapshot = self.log_buffer.snapshot();
-        let query_lower = self.search_query.to_lowercase();
-
-        snapshot
-            .into_iter()
-            .filter(|e| self.log_filter.matches(&e.level))
-            .filter(|e| query_lower.is_empty() || e.message.to_lowercase().contains(&query_lower))
-            .collect()
+        f.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
     fn handle_event(&mut self, event: Event) -> bool {
@@ -523,6 +438,30 @@ impl TuiApp {
     }
 
     fn handle_home_key(&mut self, key: KeyEvent) -> bool {
+        // Expanded error mode: scroll or close
+        if self.error_expanded {
+            return match key.code {
+                KeyCode::Char('q') => true,
+                KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.error_expanded = false;
+                    false
+                }
+                KeyCode::Esc => {
+                    self.error_expanded = false;
+                    false
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.error_scroll = self.error_scroll.saturating_add(1);
+                    false
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.error_scroll = self.error_scroll.saturating_sub(1);
+                    false
+                }
+                _ => false,
+            };
+        }
+
         match key.code {
             KeyCode::Char('q') => true,
             KeyCode::Char('l') => {
@@ -530,95 +469,11 @@ impl TuiApp {
                 self.auto_scroll = true;
                 false
             }
-            _ => false,
-        }
-    }
-
-    fn handle_logs_key(&mut self, key: KeyEvent) -> bool {
-        match key.code {
-            KeyCode::Char('q') => true,
-            KeyCode::Esc => {
-                self.screen = Screen::Home;
-                false
-            }
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.auto_scroll = false;
-                self.log_scroll = self.log_scroll.saturating_add(1);
-                false
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                self.auto_scroll = false;
-                self.log_scroll = self.log_scroll.saturating_sub(1);
-                false
-            }
-            KeyCode::Char('G') => {
-                self.auto_scroll = true;
-                false
-            }
-            KeyCode::Char('g') => {
-                self.auto_scroll = false;
-                self.log_scroll = 0;
-                false
-            }
-            KeyCode::Char('/') => {
-                self.searching = true;
-                self.search_query.clear();
-                false
-            }
-            KeyCode::Char('n') => {
-                if !self.search_query.is_empty() {
-                    self.auto_scroll = false;
-                    self.log_scroll = self.log_scroll.saturating_add(1);
+            KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if self.unresolved_error.is_some() {
+                    self.error_expanded = true;
+                    self.error_scroll = 0;
                 }
-                false
-            }
-            KeyCode::Char('N') => {
-                if !self.search_query.is_empty() {
-                    self.auto_scroll = false;
-                    self.log_scroll = self.log_scroll.saturating_sub(1);
-                }
-                false
-            }
-            KeyCode::Char('e') => {
-                self.log_filter = LogFilter::Error;
-                false
-            }
-            KeyCode::Char('w') => {
-                self.log_filter = LogFilter::Warn;
-                false
-            }
-            KeyCode::Char('i') => {
-                self.log_filter = LogFilter::Info;
-                false
-            }
-            KeyCode::Char('a') => {
-                self.log_filter = LogFilter::All;
-                false
-            }
-            KeyCode::Char('d') => {
-                self.log_filter = LogFilter::Debug;
-                false
-            }
-            _ => false,
-        }
-    }
-
-    fn handle_search_key(&mut self, key: KeyEvent) -> bool {
-        match key.code {
-            KeyCode::Esc => {
-                self.searching = false;
-                false
-            }
-            KeyCode::Enter => {
-                self.searching = false;
-                false
-            }
-            KeyCode::Backspace => {
-                self.search_query.pop();
-                false
-            }
-            KeyCode::Char(c) => {
-                self.search_query.push(c);
                 false
             }
             _ => false,
@@ -631,8 +486,7 @@ fn level_color(level: &Level) -> Color {
         Level::ERROR => Color::Red,
         Level::WARN => Color::Yellow,
         Level::INFO => Color::Green,
-        Level::DEBUG => Color::DarkGray,
-        Level::TRACE => Color::DarkGray,
+        Level::DEBUG | Level::TRACE => Color::DarkGray,
     }
 }
 
@@ -641,8 +495,7 @@ fn level_symbol(level: &Level) -> &'static str {
         Level::ERROR => "✕",
         Level::WARN => "▲",
         Level::INFO => "●",
-        Level::DEBUG => "·",
-        Level::TRACE => "·",
+        Level::DEBUG | Level::TRACE => "·",
     }
 }
 
