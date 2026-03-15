@@ -359,12 +359,25 @@ fn try_resolve_path(candidate: &Path) -> Option<PathBuf> {
 fn resolve_import(from: &Path, specifier: &str, root: &Path) -> Option<PathBuf> {
     // Handle rex/* built-in aliases — resolve through node_modules/@limlabs/rex
     // to match rolldown's resolution (which follows the symlink from the fixture).
+    // Falls back to the runtime/client/ directory when the npm package isn't installed
+    // (e.g. the docs site which doesn't depend on @limlabs/rex).
     if let Some(name) = specifier.strip_prefix("rex/") {
         let pkg_src = root.join("node_modules/@limlabs/rex/src");
         for ext in &["tsx", "ts", "jsx", "js"] {
             let candidate = pkg_src.join(format!("{name}.{ext}"));
             if candidate.exists() && candidate.is_file() {
                 return candidate.canonicalize().ok();
+            }
+        }
+        // Fallback: resolve from the Rex runtime client directory.
+        // This ensures "use client" directives on rex/link etc. are detected
+        // even when @limlabs/rex isn't in node_modules.
+        if let Ok(client_dir) = crate::build_utils::runtime_client_dir() {
+            for ext in &["tsx", "ts", "jsx", "js"] {
+                let candidate = client_dir.join(format!("{name}.{ext}"));
+                if candidate.exists() && candidate.is_file() {
+                    return candidate.canonicalize().ok();
+                }
             }
         }
         return None;

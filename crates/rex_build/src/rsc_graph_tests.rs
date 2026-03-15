@@ -600,6 +600,38 @@ export default function Page() { return null; }
 }
 
 #[test]
+fn rex_link_resolved_via_runtime_fallback() {
+    let dir = setup_temp_dir();
+    let root = dir.path();
+
+    // Server page imports rex/link — no @limlabs/rex in node_modules,
+    // so the graph must fall back to the runtime/client/ directory.
+    fs::write(
+        root.join("page.tsx"),
+        r#"
+import Link from 'rex/link';
+export default function Page() { return <Link href="/">Home</Link>; }
+"#,
+    )
+    .unwrap();
+
+    let entries = vec![root.join("page.tsx")];
+    let graph = analyze_module_graph(&entries, root).unwrap();
+
+    // The Link module should be detected as a client component
+    let client_modules = graph.client_boundary_modules();
+    assert!(
+        !client_modules.is_empty(),
+        "rex/link should be detected as a client boundary module via runtime fallback"
+    );
+    let link_mod = client_modules
+        .iter()
+        .find(|m| m.path.to_string_lossy().contains("link"))
+        .expect("should find link module in client boundaries");
+    assert!(link_mod.is_client);
+}
+
+#[test]
 fn mdx_import_does_not_crash() {
     let dir = setup_temp_dir();
     let root = dir.path();
