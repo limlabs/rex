@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Rex Benchmark Suite — Rex vs Next.js 15 (Pages & App Router) vs TanStack Start vs Vinext
+Rex Benchmark Suite — Rex vs Next.js 16 (Pages & App Router) vs TanStack Start vs Vinext
 
 Compares frameworks on identical page fixtures across three suites:
   dx      Developer experience: install time, deps, startup, rebuild

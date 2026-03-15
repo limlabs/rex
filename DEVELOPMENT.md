@@ -238,7 +238,7 @@ cargo llvm-cov --workspace --exclude rex_python --html   # HTML report in target
 
 ### Benchmarks
 
-Compare Rex vs Next.js 15 vs TanStack Start on the same pages (SSR, SSG, dynamic routes, API).
+Compare Rex vs Next.js 16 vs TanStack Start on the same pages (SSR, SSG, dynamic routes, API).
 
 Three suites: **DX** (install time, deps, startup, rebuild), **Server** (production RPS, latency), **Client** (bundle size, Lighthouse Web Vitals).
 

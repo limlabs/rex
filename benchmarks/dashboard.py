@@ -69,7 +69,7 @@ def _(mo):
     mo.md("""
     # Rex Benchmark Dashboard
 
-    Comparing **Rex** (Rust-native Pages Router) against **Next.js 15** and
+    Comparing **Rex** (Rust-native Pages Router) against **Next.js 16** and
     **TanStack Start v1** on identical page fixtures.
     """)
     return

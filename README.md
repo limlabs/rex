@@ -15,19 +15,20 @@ A next-generation React framework built on the Next.js API. Write standard React
 
 ### Performance
 
-Benchmarked against Next.js 15 on the same pages with Apache Bench (10k requests, 100 concurrent, 200 warmup). Clean builds with no cache. Apple M3 Max, 36 GB.
+Benchmarked against Next.js 16 on the same pages with Apache Bench (10k requests, 100 concurrent, 200 warmup). Clean builds with no cache. Apple M3 Max, 36 GB.
 
-| Metric | Rex | Next.js 15 |
+| Metric | Rex | Next.js 16 |
 |--------|-----|-----------|
-| **SSR throughput** | 29,222 req/s | 4,054 req/s |
-| **SSR latency** | 3.4 ms | 24.7 ms |
-| **Production build** | 83 ms | 5,770 ms |
-| **Dev cold start** | 205 ms | 2,908 ms |
-| **Install size** | 118 MB | 342 MB |
-| **Install time** | 955 ms | 7,232 ms |
-| **Lint** | 24 ms (oxlint) | 1,358 ms (eslint) |
+| **SSR throughput** | 30,618 req/s | 4,547 req/s |
+| **SSR latency** | 3.3 ms | 22.0 ms |
+| **Production build** | 71 ms | 1,706 ms |
+| **Dev cold start** | 121 ms | 977 ms |
+| **Install size** | 114 MB | 369 MB |
+| **Install time** | 1,076 ms | 11,313 ms |
+| **Client JS** | 196 KB | 547 KB |
+| **Lint** | 9 ms (oxlint) | 232 ms (eslint) |
 
-Reproduce: `cd benchmarks && uv run python bench.py --suite dx,server --framework rex,nextjs --iterations 1`. Raw data and methodology in [benchmarks/](benchmarks/METHODOLOGY.md).
+Reproduce: `cd benchmarks && uv run python bench.py --suite dx,server,client --framework rex,nextjs --iterations 3`. Raw data and methodology in [benchmarks/](benchmarks/METHODOLOGY.md).
 
 ## Quick Start
 
