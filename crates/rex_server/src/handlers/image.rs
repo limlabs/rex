@@ -66,7 +66,7 @@ pub async fn image_handler(
             .expect("response build");
     }
 
-    // Resolve source file from public/ directory (only local files)
+    // Resolve source file — supports public/ directory and /_rex/static/ build assets
     let url_path = query.url.trim_start_matches('/');
 
     // Reject paths with traversal components before touching the filesystem
@@ -74,12 +74,19 @@ pub async fn image_handler(
         return (StatusCode::BAD_REQUEST, "invalid path").into_response();
     }
 
-    let file_path = state.project_root.join("public").join(url_path);
+    // Determine base directory: /_rex/static/ URLs map to the build client dir,
+    // everything else maps to public/
+    let (base_dir, rel_path) = if let Some(rest) = url_path.strip_prefix("_rex/static/") {
+        (state.project_root.join(".rex/build/client"), rest)
+    } else {
+        (state.project_root.join("public"), url_path)
+    };
+
+    let file_path = base_dir.join(rel_path);
 
     // Prevent path traversal — both canonicalizations must succeed
-    // and the resolved path must be inside public/
-    let public_dir = state.project_root.join("public");
-    let public_canonical = match public_dir.canonicalize() {
+    // and the resolved path must be inside the base directory
+    let base_canonical = match base_dir.canonicalize() {
         Ok(p) => p,
         Err(_) => return (StatusCode::NOT_FOUND, "image not found").into_response(),
     };
@@ -87,7 +94,7 @@ pub async fn image_handler(
         Ok(p) => p,
         Err(_) => return (StatusCode::NOT_FOUND, "image not found").into_response(),
     };
-    if !canonical.starts_with(&public_canonical) {
+    if !canonical.starts_with(&base_canonical) {
         return (StatusCode::BAD_REQUEST, "invalid path").into_response();
     }
 

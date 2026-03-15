@@ -67,19 +67,27 @@ function buildSrcSet(src: string, width: number, quality: number): string {
 export default function Image(props: ImageProps): ReactElement {
   // Handle static imports: { src, width, height, blurDataURL }
   const rawSrc = props.src;
-  const isStaticImport = typeof rawSrc === "object" && rawSrc !== null && "src" in rawSrc;
-  const src = isStaticImport ? (rawSrc as StaticImport).src : (rawSrc as string);
-  const {
-    width = isStaticImport ? (rawSrc as StaticImport).width : undefined,
-    height = isStaticImport ? (rawSrc as StaticImport).height : undefined,
-    alt,
-    quality = 75,
-    priority = false,
-    placeholder,
-    blurDataURL = isStaticImport ? (rawSrc as StaticImport).blurDataURL : undefined,
-    fill = false,
-    sizes,
-  } = props;
+  let src: string;
+  let staticWidth: number | undefined;
+  let staticHeight: number | undefined;
+  let staticBlur: string | undefined;
+  if (typeof rawSrc === "object" && rawSrc !== null && typeof (rawSrc as any).src === "string") {
+    src = (rawSrc as any).src;
+    staticWidth = (rawSrc as any).width;
+    staticHeight = (rawSrc as any).height;
+    staticBlur = (rawSrc as any).blurDataURL;
+  } else {
+    src = rawSrc as string;
+  }
+  const alt = props.alt;
+  const width = props.width ?? staticWidth;
+  const height = props.height ?? staticHeight;
+  const quality = props.quality ?? 75;
+  const priority = props.priority ?? false;
+  const placeholder = props.placeholder;
+  const blurDataURL = props.blurDataURL ?? staticBlur;
+  const fill = props.fill ?? false;
+  const sizes = props.sizes;
 
   // Base style: block display, prevent overflow, maintain aspect ratio (like next/image)
   let style: Record<string, string | number> = {
@@ -112,10 +120,15 @@ export default function Image(props: ImageProps): ReactElement {
     imgProps.fetchPriority = "high";
   }
 
-  // Set src and srcSet
-  imgProps.src = buildSrc(src, width || 1920, quality);
-  if (width) {
-    imgProps.srcSet = buildSrcSet(src, width, quality);
+  // Set src and srcSet — SVGs are vector, skip the raster image optimizer
+  const isSvg = src.endsWith(".svg");
+  if (isSvg) {
+    imgProps.src = src;
+  } else {
+    imgProps.src = buildSrc(src, width || 1920, quality);
+    if (width) {
+      imgProps.srcSet = buildSrcSet(src, width, quality);
+    }
   }
 
   if (sizes) {
