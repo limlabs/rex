@@ -6,35 +6,19 @@ Rex is a Rust-native React framework. The server, router, build pipeline, and SS
 
 ```mermaid
 graph TD
-    A["HTTP Request"] --> B
-
-    B["rex_server · Axum\nMiddleware · Static files · WebSocket · API routes"]
-    B --> C
-
-    C["rex_router · Trie\nScans pages/ or app/ · Builds route trie · Matches URL"]
-    C --> D
-    C --> E
-
-    D["rex_v8 · SSR\nV8 isolate pool · Page rendering\ngetServerSideProps · React Server Components"]
-    E["rex_build · Rolldown\nServer bundle IIFE · Client bundles ESM\nCode splitting · OXC transforms"]
-
-    D --> F["Document Assembly\nHTML · head · SSR output · Client scripts · CSS"]
-    F --> G["HTTP Response\nFull HTML page · Browser hydrates with ESM bundle"]
-
-    H["rex_core\nShared types: config, routes, pages"]
-    I["rex_dev\nFile watcher · HMR WebSocket"]
-    J["rex_cli\nCommands: dev · build · start"]
+    A["HTTP Request"] --> B["rex_server\nAxum"]
+    B --> C["rex_router\nRoute Matching"]
+    C --> D["rex_v8\nSSR"]
+    E["rex_build\nRolldown"] -- server bundle --> D
+    E -- client bundles --> F
+    D --> F["HTML Response"]
 
     style A fill:#0f172a,stroke:#475569,color:#e2e8f0
     style B fill:#334155,stroke:#475569,color:#e2e8f0
     style C fill:#334155,stroke:#475569,color:#e2e8f0
     style D fill:#334155,stroke:#475569,color:#e2e8f0
     style E fill:#334155,stroke:#475569,color:#e2e8f0
-    style F fill:#334155,stroke:#475569,color:#e2e8f0
-    style G fill:#0f172a,stroke:#475569,color:#e2e8f0
-    style H fill:#1e293b,stroke:#475569,color:#94a3b8
-    style I fill:#1e293b,stroke:#475569,color:#94a3b8
-    style J fill:#1e293b,stroke:#475569,color:#94a3b8
+    style F fill:#0f172a,stroke:#475569,color:#e2e8f0
 ```
 
 ## How a request flows
