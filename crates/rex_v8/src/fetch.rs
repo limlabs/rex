@@ -469,7 +469,7 @@ const FETCH_LOOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3
 
 /// Call `globalThis.__rex_drain_timers()` — fires expired setTimeout callbacks.
 /// Returns true if any timer was fired.
-fn drain_js_timers(isolate: &mut v8::OwnedIsolate, context: &v8::Global<v8::Context>) -> bool {
+pub fn drain_js_timers(isolate: &mut v8::OwnedIsolate, context: &v8::Global<v8::Context>) -> bool {
     v8::scope_with_context!(scope, isolate, context);
     let global = context.open(scope).global(scope);
 
