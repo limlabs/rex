@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.19.0](https://github.com/limlabs/rex/compare/v0.18.0...v0.19.0) (2026-03-15)
+
+
+### Features
+
+* implement getStaticPaths for dynamic route pre-rendering ([#178](https://github.com/limlabs/rex/issues/178)) ([1117629](https://github.com/limlabs/rex/commit/11176298a4a384d42827d45dd2c1f8da0114b750))
+* **rsc:** add Context API support for RSC ([#201](https://github.com/limlabs/rex/issues/201)) ([b000974](https://github.com/limlabs/rex/commit/b000974ac2632d54a3d965d4072f36d334429526))
+
+
+### Bug Fixes
+
+* **build:** include mdx-components in RSC module graph entries ([#203](https://github.com/limlabs/rex/issues/203)) ([6740f7d](https://github.com/limlabs/rex/commit/6740f7d6a77cf29d455aeba4725193f4deea0d89))
+* **build:** V8 polyfills, CJS interop for minified bundles, and RSC diagnostics ([#198](https://github.com/limlabs/rex/issues/198)) ([30580e1](https://github.com/limlabs/rex/commit/30580e1185d5a5357d8e641a6ced286c27b4f43b))
+* **rsc:** ensure complete flight data for async server components ([#207](https://github.com/limlabs/rex/issues/207)) ([8ceac35](https://github.com/limlabs/rex/commit/8ceac35a4ca2e7f485b868ecd75a830f137fd444))
+* **rsc:** filter empty chunk URLs from client module map ([#209](https://github.com/limlabs/rex/issues/209)) ([1bd2db7](https://github.com/limlabs/rex/commit/1bd2db7721f43686bec18499b5b18fb35262e29b))
+* **rsc:** JSX group shim, static asset imports, and client module preload ([#210](https://github.com/limlabs/rex/issues/210)) ([6f39a92](https://github.com/limlabs/rex/commit/6f39a921e7549bdd633b914226bd5e8761ab544b))
+* **rsc:** resolve rex/link as client boundary when @limlabs/rex is not installed ([#206](https://github.com/limlabs/rex/issues/206)) ([de51110](https://github.com/limlabs/rex/commit/de5111097f15e944662780e12c992bb222bb5958))
+
 ## [0.18.0](https://github.com/limlabs/rex/compare/v0.17.3...v0.18.0) (2026-03-13)
 
 
