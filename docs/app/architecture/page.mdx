@@ -21,9 +21,14 @@ graph TD
     D --> F["Document Assembly\nHTML · head · SSR output · Client scripts · CSS"]
     F --> G["HTTP Response\nFull HTML page · Browser hydrates with ESM bundle"]
 
-    H["rex_core\nShared types: config, routes, pages"]
-    I["rex_dev\nFile watcher · HMR WebSocket"]
-    J["rex_cli\nCommands: dev · build · start"]
+    J["rex_cli\nCommands: dev · build · start"] --> B
+    J --> E
+    I["rex_dev\nFile watcher · HMR WebSocket"] --> E
+    I --> B
+    H["rex_core\nShared types: config, routes, pages"] -.-> B
+    H -.-> C
+    H -.-> D
+    H -.-> E
 
     style A fill:#0f172a,stroke:#475569,color:#e2e8f0
     style B fill:#334155,stroke:#475569,color:#e2e8f0
