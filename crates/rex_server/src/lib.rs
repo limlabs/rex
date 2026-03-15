@@ -1,5 +1,6 @@
 pub mod core;
 mod core_handlers;
+pub mod dev_introspection;
 pub mod document;
 pub mod export;
 pub mod handlers;

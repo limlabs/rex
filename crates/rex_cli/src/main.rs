@@ -9,6 +9,7 @@ mod cmd_init;
 mod cmd_lint;
 #[cfg(feature = "live")]
 mod cmd_live;
+mod cmd_mcp;
 mod cmd_start;
 mod display;
 #[cfg(feature = "build")]
@@ -160,6 +161,9 @@ enum Commands {
         workers: usize,
     },
 
+    /// Start the MCP server for dev instance introspection (stdio transport)
+    Mcp {},
+
     /// Create a new Rex project
     Init {
         /// Project name (creates a new directory)
@@ -288,6 +292,10 @@ async fn main() -> Result<()> {
         } => {
             init_plain_tracing();
             cmd_live::cmd_live(mount, port, host, workers).await
+        }
+        Commands::Mcp {} => {
+            // No tracing init — stdout is the MCP transport
+            cmd_mcp::cmd_mcp().await
         }
         Commands::Init { name } => {
             init_plain_tracing();

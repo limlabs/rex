@@ -71,6 +71,28 @@ impl RouteTrie {
         node.route = Some(route);
     }
 
+    /// Collect all routes stored in the trie.
+    pub fn routes(&self) -> Vec<&Route> {
+        let mut result = Vec::new();
+        Self::collect_routes(&self.root, &mut result);
+        result
+    }
+
+    fn collect_routes<'a>(node: &'a TrieNode, out: &mut Vec<&'a Route>) {
+        if let Some(route) = &node.route {
+            out.push(route);
+        }
+        if let Some((_, route)) = &node.catch_all {
+            out.push(route);
+        }
+        for child in node.children.values() {
+            Self::collect_routes(child, out);
+        }
+        if let Some((_, child)) = &node.param_child {
+            Self::collect_routes(child.as_ref(), out);
+        }
+    }
+
     /// Match a URL path against the trie. Returns the best match with extracted params.
     pub fn match_path(&self, path: &str) -> Option<RouteMatch> {
         let segments = parse_url_segments(path);
@@ -237,5 +259,24 @@ mod tests {
         let trie = RouteTrie::from_routes(&[make_route("/")]);
         let m = trie.match_path("/").unwrap();
         assert_eq!(m.route.pattern, "/");
+    }
+
+    #[test]
+    fn test_routes_returns_all() {
+        let routes = vec![
+            make_route("/"),
+            make_route("/about"),
+            make_route("/blog/:slug"),
+            make_route("/docs/*path"),
+        ];
+        let trie = RouteTrie::from_routes(&routes);
+        let collected = trie.routes();
+        assert_eq!(collected.len(), 4);
+        let patterns: std::collections::HashSet<&str> =
+            collected.iter().map(|r| r.pattern.as_str()).collect();
+        assert!(patterns.contains("/"));
+        assert!(patterns.contains("/about"));
+        assert!(patterns.contains("/blog/:slug"));
+        assert!(patterns.contains("/docs/*path"));
     }
 }
