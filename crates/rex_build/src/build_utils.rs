@@ -313,4 +313,63 @@ mod tests {
         assert!(dir.exists());
         assert!(dir.join("link.ts").exists());
     }
+
+    #[test]
+    fn test_embedded_runtime_has_all_polyfill_alias_targets() {
+        // Extract embedded runtime to temp dir (simulates installed binary)
+        let base = crate::embedded_runtime::extract().unwrap();
+        let server_dir = base.join("server");
+
+        // Generate aliases using the extracted dir
+        let aliases = node_polyfill_aliases(&server_dir);
+
+        let mut missing = Vec::new();
+        for (specifier, targets) in &aliases {
+            for target in targets.iter().flatten() {
+                let path = PathBuf::from(target);
+                if !path.exists() {
+                    missing.push(format!("  {specifier} -> {target}"));
+                }
+            }
+        }
+
+        assert!(
+            missing.is_empty(),
+            "Embedded runtime is missing files referenced by node_polyfill_aliases().\n\
+             Add these to embedded_runtime.rs SERVER_FILES:\n{}",
+            missing.join("\n")
+        );
+    }
+
+    #[test]
+    fn test_embedded_runtime_covers_all_server_files() {
+        // Get the source runtime/server/ directory
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let source_dir = manifest_dir.join("../../runtime/server");
+        if !source_dir.exists() {
+            return; // Skip if not in source tree
+        }
+
+        // Extract embedded runtime
+        let base = crate::embedded_runtime::extract().unwrap();
+        let embedded_dir = base.join("server");
+
+        let mut missing = Vec::new();
+        for entry in fs::read_dir(&source_dir).unwrap() {
+            let entry = entry.unwrap();
+            if !entry.file_type().unwrap().is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !embedded_dir.join(&name).exists() {
+                missing.push(name);
+            }
+        }
+
+        assert!(
+            missing.is_empty(),
+            "Files in runtime/server/ not embedded in embedded_runtime.rs:\n  {}",
+            missing.join("\n  ")
+        );
+    }
 }
