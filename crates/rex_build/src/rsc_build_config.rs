@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use tracing::debug;
 
 /// Shared context threaded through all RSC bundle builds.
-pub(crate) struct RscBuildContext<'a> {
+pub struct RscBuildContext<'a> {
     pub config: &'a RexConfig,
     /// Canonicalized project root (computed once).
     pub project_root: PathBuf,

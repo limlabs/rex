@@ -148,8 +148,11 @@ impl Rex {
         };
 
         let static_dir = config.client_build_dir();
+        let deferred_build_id = build_result.build_id.clone();
+        let deferred_config = config.clone();
+        let deferred_scan = scan.clone();
 
-        Self::init_from_parts(
+        let rex = Self::init_from_parts(
             config,
             scan,
             pool,
@@ -161,7 +164,20 @@ impl Rex {
             opts.port,
             opts.host,
         )
-        .await
+        .await?;
+
+        // Build client bundles in the background (saves ~1s from startup).
+        // Pages rendered before this completes will lack client hydration scripts.
+        if opts.dev && deferred_scan.app_scan.is_some() {
+            crate::startup::spawn_deferred_client_build(
+                rex.state.clone(),
+                deferred_config,
+                deferred_scan,
+                deferred_build_id,
+            );
+        }
+
+        Ok(rex)
     }
 
     /// Create a Rex instance from a pre-built manifest (for `rex start`).

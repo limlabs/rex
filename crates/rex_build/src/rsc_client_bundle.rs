@@ -18,7 +18,11 @@ use tracing::debug;
 ///
 /// Each client boundary module becomes a separate entry. Rolldown handles
 /// code splitting so shared dependencies (React) become shared chunks.
-pub(crate) async fn build_rsc_client_bundles(
+/// Build client bundles for `"use client"` modules.
+///
+/// Each client boundary module becomes a separate entry. Rolldown handles
+/// code splitting so shared dependencies (React) become shared chunks.
+pub async fn build_rsc_client_bundles(
     ctx: &RscBuildContext<'_>,
     graph: &crate::rsc_graph::ModuleGraph,
     output_dir: &Path,
