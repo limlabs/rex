@@ -129,60 +129,35 @@ impl Rex {
 
         let project_root_str = config.project_root.to_string_lossy().to_string();
 
-        // In dev mode, skip build_bundles() entirely — ESM handles server-side
-        // rendering, and CSS/Tailwind/client bundles are built in background.
-        // This gets startup from ~1.2s to ~125ms.
-        if opts.dev {
-            let build_id = rex_build::build_utils::generate_build_id();
-
-            // ESM startup: pre-bundle deps as ESM, transform source, load into V8
-            let (pool, esm_state) = crate::startup::esm_startup(
+        // In dev mode, run build_bundles() and esm_startup() in parallel.
+        // build_bundles produces CSS/Tailwind/manifest (needed for styled pages).
+        // esm_startup produces the V8 isolate pool (needed for SSR).
+        // They're independent, so running concurrently saves ~40% of startup time.
+        debug!("Building bundles...");
+        let build_id = rex_build::build_utils::generate_build_id();
+        let (build_result, (pool, esm_state)) = if opts.dev {
+            let build_fut = rex_build::build_bundles(&config, &scan, &project_config);
+            let esm_fut = crate::startup::esm_startup(
                 &config,
                 &scan,
                 &build_id,
                 pool_size,
                 &project_root_str,
+            );
+            tokio::try_join!(build_fut, esm_fut)?
+        } else {
+            let build_result = rex_build::build_bundles(&config, &scan, &project_config).await?;
+            let (pool, esm_state) = crate::startup::esm_startup(
+                &config,
+                &scan,
+                &build_result.build_id,
+                pool_size,
+                &project_root_str,
             )
             .await?;
-
-            let static_dir = config.client_build_dir();
-            let deferred_config = config.clone();
-            let deferred_scan = scan.clone();
-
-            let rex = Self::init_from_parts(
-                config,
-                scan,
-                pool,
-                AssetManifest::new(build_id.clone()),
-                build_id,
-                static_dir,
-                project_config,
-                Some(esm_state),
-                opts.port,
-                opts.host,
-            )
-            .await?;
-
-            // Build CSS, Tailwind, client bundles in background
-            crate::startup::spawn_deferred_build(rex.state.clone(), deferred_config, deferred_scan);
-
-            return Ok(rex);
-        }
-
-        // Production path: build everything eagerly
-        debug!("Building bundles...");
-        let build_result = rex_build::build_bundles(&config, &scan, &project_config).await?;
+            (build_result, (pool, esm_state))
+        };
         debug!(build_id = %build_result.build_id, "Build complete");
-
-        // ESM startup for server-side rendering
-        let (pool, esm_state) = crate::startup::esm_startup(
-            &config,
-            &scan,
-            &build_result.build_id,
-            pool_size,
-            &project_root_str,
-        )
-        .await?;
 
         let static_dir = config.client_build_dir();
 
