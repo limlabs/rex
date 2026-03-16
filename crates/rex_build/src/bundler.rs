@@ -210,8 +210,11 @@ pub async fn build_bundles(
             manifest.font_preloads.extend(app_font_result.font_preloads);
         }
 
-        let rsc_result =
-            crate::rsc_bundler::build_rsc_bundles(config, app_scan, &build_id, &define).await?;
+        let rsc_result = crate::rsc_bundler::build_rsc_bundles(
+            config, app_scan, &build_id, &define,
+            config.dev, // skip server/SSR IIFE in dev (ESM replaces them)
+        )
+        .await?;
 
         // Populate app_routes in manifest with automatic static optimization
         for route in &app_scan.routes {
@@ -251,9 +254,12 @@ pub async fn build_bundles(
         }
 
         manifest.client_reference_manifest = Some(rsc_result.client_manifest);
-        manifest.rsc_server_bundle =
-            Some(rsc_result.server_bundle_path.to_string_lossy().to_string());
-        manifest.rsc_ssr_bundle = Some(rsc_result.ssr_bundle_path.to_string_lossy().to_string());
+        manifest.rsc_server_bundle = rsc_result
+            .server_bundle_path
+            .map(|p| p.to_string_lossy().to_string());
+        manifest.rsc_ssr_bundle = rsc_result
+            .ssr_bundle_path
+            .map(|p| p.to_string_lossy().to_string());
 
         // Expose server action IDs so clients can discover them
         for (action_id, entry) in &rsc_result.server_action_manifest.actions {

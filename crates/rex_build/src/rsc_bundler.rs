@@ -1,24 +1,7 @@
-//! RSC bundle builder — orchestrator.
+//! RSC bundle builder — orchestrates flight, SSR, and client bundle builds.
 //!
-//! Produces three bundles from an app/ directory scan:
-//! 1. **Flight bundle** (IIFE, `react-server` condition): Contains all server components.
-//!    At `"use client"` boundaries, imports are replaced with client reference stubs.
-//!    Uses `renderToReadableStream` from `react-server-dom-webpack/server`.
-//! 2. **SSR bundle** (IIFE, standard conditions): Contains `createFromReadableStream`
-//!    and `renderToString` for converting flight data to HTML. Also includes client
-//!    components for SSR rendering.
-//! 3. **Client bundle** (ESM): Contains only `"use client"` components and their
-//!    dependencies, with code splitting.
-//!
-//! Also produces a `ClientReferenceManifest` mapping reference IDs to chunk URLs.
-//!
-//! Implementation is split across focused modules:
-//! - [`rsc_build_config`]: Shared context, aliases, treeshake options
-//! - [`rsc_entries`]: Pure entry code generation (no I/O)
-//! - [`rsc_stubs`]: Client reference and server action stub generators
-//! - [`rsc_server_bundle`]: Server flight bundle builder
-//! - [`rsc_ssr_bundle`]: SSR bundle builder
-//! - [`rsc_client_bundle`]: Client bundle builder + manifest wiring
+//! In dev mode (`skip_server_iife`), only the client bundle is built;
+//! server/SSR rendering uses V8 native ESM modules instead of IIFE bundles.
 
 use crate::client_manifest::{client_reference_id, ClientReferenceManifest};
 use crate::rsc_build_config::{sanitize_filename, RscBuildContext};
@@ -38,9 +21,11 @@ use std::path::PathBuf;
 #[derive(Debug)]
 pub struct RscBuildResult {
     /// Path to the server RSC flight bundle (IIFE, `react-server` condition).
-    pub server_bundle_path: PathBuf,
+    /// `None` when `skip_server_iife` is set (ESM dev mode).
+    pub server_bundle_path: Option<PathBuf>,
     /// Path to the SSR bundle (IIFE, standard conditions).
-    pub ssr_bundle_path: PathBuf,
+    /// `None` when `skip_server_iife` is set (ESM dev mode).
+    pub ssr_bundle_path: Option<PathBuf>,
     /// Client reference manifest mapping ref IDs to chunk URLs.
     pub client_manifest: ClientReferenceManifest,
     /// Client chunk files produced (relative paths from client output dir).
@@ -52,13 +37,13 @@ pub struct RscBuildResult {
 }
 
 /// Build RSC bundles for an app/ directory.
-///
-/// This is called from `build_bundles` when an `AppScanResult` is present.
+/// When `skip_server_iife` is true, server/SSR IIFE builds are skipped (ESM replaces them).
 pub async fn build_rsc_bundles(
     config: &RexConfig,
     app_scan: &AppScanResult,
     build_id: &str,
     define: &[(String, String)],
+    skip_server_iife: bool,
 ) -> Result<RscBuildResult> {
     let server_dir = config.server_build_dir().join("rsc");
     let client_dir = config.client_build_dir().join("rsc");
@@ -218,28 +203,33 @@ pub async fn build_rsc_bundles(
     )
     .await?;
 
-    // Build server RSC flight bundle (after client build so manifest is populated)
-    let server_bundle_path = build_rsc_server_bundle(
-        &ctx,
-        app_scan,
-        &graph,
-        &server_dir,
-        &stub_aliases,
-        &client_manifest,
-        &server_action_manifest,
-        &inline_action_targets,
-    )
-    .await?;
+    // Build server + SSR IIFE bundles (skipped in ESM dev mode)
+    let (server_bundle_path, ssr_bundle_path) = if skip_server_iife {
+        (None, None)
+    } else {
+        let server = build_rsc_server_bundle(
+            &ctx,
+            app_scan,
+            &graph,
+            &server_dir,
+            &stub_aliases,
+            &client_manifest,
+            &server_action_manifest,
+            &inline_action_targets,
+        )
+        .await?;
 
-    // Build SSR bundle (after client build so manifest is populated)
-    let ssr_bundle_path = build_rsc_ssr_bundle(
-        &ctx,
-        &graph,
-        &server_dir,
-        &client_manifest,
-        &server_action_manifest,
-    )
-    .await?;
+        let ssr = build_rsc_ssr_bundle(
+            &ctx,
+            &graph,
+            &server_dir,
+            &client_manifest,
+            &server_action_manifest,
+        )
+        .await?;
+
+        (Some(server), Some(ssr))
+    };
 
     // Clean up stubs
     let _ = fs::remove_dir_all(&stubs_dir);
@@ -374,33 +364,38 @@ mod tests {
             "\"development\"".to_string(),
         )];
 
-        let result = build_rsc_bundles(&config, &app_scan, "test-build-id", &define)
+        let result = build_rsc_bundles(&config, &app_scan, "test-build-id", &define, false)
             .await
             .expect("build_rsc_bundles should succeed");
 
         // Server bundle file exists
+        let server_path = result
+            .server_bundle_path
+            .as_ref()
+            .expect("server bundle path");
         assert!(
-            result.server_bundle_path.exists(),
+            server_path.exists(),
             "Server bundle should exist at {:?}",
-            result.server_bundle_path
+            server_path
         );
 
         // Server bundle is non-empty
-        let server_content = fs::read_to_string(&result.server_bundle_path).unwrap();
+        let server_content = fs::read_to_string(server_path).unwrap();
         assert!(
             !server_content.is_empty(),
             "Server bundle should not be empty"
         );
 
         // SSR bundle file exists
+        let ssr_path = result.ssr_bundle_path.as_ref().expect("ssr bundle path");
         assert!(
-            result.ssr_bundle_path.exists(),
+            ssr_path.exists(),
             "SSR bundle should exist at {:?}",
-            result.ssr_bundle_path
+            ssr_path
         );
 
         // SSR bundle is non-empty
-        let ssr_content = fs::read_to_string(&result.ssr_bundle_path).unwrap();
+        let ssr_content = fs::read_to_string(ssr_path).unwrap();
         assert!(!ssr_content.is_empty(), "SSR bundle should not be empty");
 
         // Client manifest was created (may be empty if no "use client" modules in entries)
@@ -479,7 +474,7 @@ mod tests {
             "\"development\"".to_string(),
         )];
 
-        let result = build_rsc_bundles(&config, &app_scan, "test-sa-build", &define)
+        let result = build_rsc_bundles(&config, &app_scan, "test-sa-build", &define, false)
             .await
             .expect("build_rsc_bundles should succeed");
 
@@ -506,7 +501,8 @@ mod tests {
         assert!(has_decrement, "Manifest should contain decrement action");
 
         // Server bundle should contain server action dispatch code
-        let server_content = fs::read_to_string(&result.server_bundle_path).unwrap();
+        let server_content =
+            fs::read_to_string(result.server_bundle_path.as_ref().unwrap()).unwrap();
         assert!(
             server_content.contains("__rex_server_actions"),
             "Server bundle should contain action dispatch table"
@@ -593,7 +589,7 @@ mod tests {
             "\"development\"".to_string(),
         )];
 
-        let result = build_rsc_bundles(&config, &app_scan, "test-sa-client", &define)
+        let result = build_rsc_bundles(&config, &app_scan, "test-sa-client", &define, false)
             .await
             .expect("build_rsc_bundles should succeed");
 
@@ -681,7 +677,7 @@ mod tests {
             "\"development\"".to_string(),
         )];
 
-        let result = build_rsc_bundles(&config, &app_scan, "test-no-client", &define)
+        let result = build_rsc_bundles(&config, &app_scan, "test-no-client", &define, false)
             .await
             .expect("build_rsc_bundles should succeed");
 
