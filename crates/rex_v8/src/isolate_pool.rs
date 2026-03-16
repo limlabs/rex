@@ -211,6 +211,84 @@ impl IsolatePool {
         debug!("RSC bundles loaded into all V8 isolates");
         Ok(())
     }
+
+    /// Load ESM modules into all isolates in the pool.
+    pub async fn load_esm_modules_all(
+        &self,
+        dep_config: std::sync::Arc<crate::ssr_isolate_esm::DepModuleConfig>,
+        source_modules: std::sync::Arc<Vec<crate::ssr_isolate_esm::EsmSourceModule>>,
+        entry_specifier: std::sync::Arc<String>,
+        entry_source: std::sync::Arc<String>,
+    ) -> Result<()> {
+        let mut handles = Vec::new();
+
+        for i in 0..self.size {
+            let dep = dep_config.clone();
+            let sources = source_modules.clone();
+            let spec = entry_specifier.clone();
+            let src = entry_source.clone();
+            let (tx, rx) = tokio::sync::oneshot::channel();
+
+            let work: WorkItem = Box::new(move |isolate| {
+                let result = isolate.load_esm_modules(&dep, &sources, &spec, &src);
+                let _ = tx.send(result);
+            });
+
+            self.senders[i]
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("V8 isolate pool is shut down"))?
+                .send(work)
+                .map_err(|_| anyhow::anyhow!("V8 isolate thread has shut down"))?;
+
+            handles.push(rx);
+        }
+
+        for handle in handles {
+            handle.await??;
+        }
+
+        debug!("ESM modules loaded into all V8 isolates");
+        Ok(())
+    }
+
+    /// Invalidate an ESM module in all isolates (for HMR).
+    pub async fn invalidate_esm_module_all(
+        &self,
+        dep_config: std::sync::Arc<crate::ssr_isolate_esm::DepModuleConfig>,
+        source_modules: std::sync::Arc<Vec<crate::ssr_isolate_esm::EsmSourceModule>>,
+        entry_specifier: std::sync::Arc<String>,
+        entry_source: std::sync::Arc<String>,
+    ) -> Result<()> {
+        let mut handles = Vec::new();
+
+        for i in 0..self.size {
+            let dep = dep_config.clone();
+            let sources = source_modules.clone();
+            let spec = entry_specifier.clone();
+            let src = entry_source.clone();
+            let (tx, rx) = tokio::sync::oneshot::channel();
+
+            let work: WorkItem = Box::new(move |isolate| {
+                let result = isolate.invalidate_esm_module(&dep, &sources, &spec, &src);
+                let _ = tx.send(result);
+            });
+
+            self.senders[i]
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("V8 isolate pool is shut down"))?
+                .send(work)
+                .map_err(|_| anyhow::anyhow!("V8 isolate thread has shut down"))?;
+
+            handles.push(rx);
+        }
+
+        for handle in handles {
+            handle.await??;
+        }
+
+        debug!("ESM module invalidated in all V8 isolates");
+        Ok(())
+    }
 }
 
 impl Drop for IsolatePool {
