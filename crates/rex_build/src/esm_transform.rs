@@ -90,7 +90,13 @@ pub fn collect_source_modules(
     }
 
     while let Some(path) = queue.pop_front() {
+        // Asset files (CSS, images, etc.) get registered as empty modules
+        // so V8 can resolve `import '../styles/globals.css'` without errors.
         if is_asset_file(&path) {
+            source_modules.push(EsmSourceModule {
+                specifier: path.to_string_lossy().to_string(),
+                source: "export default {};".to_string(),
+            });
             continue;
         }
 
@@ -101,7 +107,7 @@ pub fn collect_source_modules(
 
         // Extract imports and resolve them
         let (local_imports, bare_imports) =
-            extract_and_resolve_imports(&source, &path, project_root);
+            extract_and_resolve_imports(&source, &path, project_root, known_dep_specifiers);
 
         // Build import resolution map (original specifier → absolute path)
         let mut import_map: HashMap<String, String> = HashMap::new();
@@ -278,6 +284,7 @@ fn extract_and_resolve_imports(
     source: &str,
     file_path: &Path,
     project_root: &Path,
+    known_specifiers: &HashSet<String>,
 ) -> (Vec<LocalImport>, Vec<BareImport>) {
     let allocator = oxc_allocator::Allocator::default();
     let source_type = source_type_from_filename(&file_path.to_string_lossy());
@@ -323,6 +330,11 @@ fn extract_and_resolve_imports(
             }
             _ => continue,
         };
+
+        // Skip specifiers handled by synthetic modules (rex/*, react, etc.)
+        if known_specifiers.contains(specifier) || specifier.starts_with("rex/") {
+            continue;
+        }
 
         // Try to resolve as a local import
         if let Some(resolved) = crate::rsc_graph::resolve_import(file_path, specifier, project_root)

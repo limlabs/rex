@@ -96,8 +96,9 @@ impl Rex {
     /// This is the primary constructor for dev mode and fresh builds.
     /// Requires the `build` feature (pulls in the rolldown bundler).
     ///
-    /// In dev mode, uses native ESM module loading for fast HMR (~100ms vs ~3500ms).
-    /// The IIFE approach is used for production and as fallback.
+    /// Pages router: uses native V8 ESM module loading for fast HMR.
+    /// App router: uses rolldown-built RSC bundles (IIFEs) because RSC requires
+    /// dual React instances (react-server + standard conditions).
     #[cfg(feature = "build")]
     pub async fn new(opts: RexOptions) -> Result<Self> {
         let root = std::fs::canonicalize(&opts.root)?;
@@ -117,7 +118,7 @@ impl Rex {
             "Routes scanned"
         );
 
-        // Build bundles (client bundles + manifest; server IIFE used as fallback)
+        // Build bundles (client + RSC bundles via rolldown)
         debug!("Building bundles...");
         let build_result = rex_build::build_bundles(&config, &scan, &project_config).await?;
         debug!(build_id = %build_result.build_id, "Build complete");
@@ -133,26 +134,23 @@ impl Rex {
 
         let project_root_str = config.project_root.to_string_lossy().to_string();
 
-        // Try ESM loading path; fall back to IIFE if it fails
-        let (pool, esm_state) = match crate::startup::try_esm_startup(
-            &config,
-            &scan,
-            &build_result,
-            pool_size,
-            &project_root_str,
-        )
-        .await
-        {
-            Ok((pool, esm)) => {
-                debug!("ESM module loading succeeded");
-                (pool, Some(esm))
-            }
-            Err(e) => {
-                debug!("ESM loading failed ({e:#}), falling back to IIFE");
-                let pool =
-                    crate::startup::iife_startup(&build_result, pool_size, &project_root_str)?;
-                (pool, None)
-            }
+        // Pages router with no app dir: ESM loading (fast HMR path)
+        // App router: IIFE loading (RSC needs dual React instances)
+        let has_pages_only = !scan.routes.is_empty() && scan.app_scan.is_none();
+
+        let (pool, esm_state) = if has_pages_only {
+            let (pool, esm) = crate::startup::esm_startup(
+                &config,
+                &scan,
+                &build_result,
+                pool_size,
+                &project_root_str,
+            )
+            .await?;
+            (pool, Some(esm))
+        } else {
+            let pool = crate::startup::iife_startup(&build_result, pool_size, &project_root_str)?;
+            (pool, None)
         };
 
         let static_dir = config.client_build_dir();

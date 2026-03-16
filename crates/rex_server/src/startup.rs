@@ -1,8 +1,9 @@
 //! V8 isolate pool startup strategies.
 //!
-//! Two paths for initializing the V8 isolate pool:
-//! - **IIFE**: Monolithic rolldown bundle evaluated as a script (fallback)
-//! - **ESM**: Native V8 ESM modules with dep IIFEs + OXC-transformed source (fast HMR)
+//! - **ESM** (pages router): Native V8 ESM modules with dep IIFEs + OXC-transformed source.
+//!   Enables fast HMR (~100ms vs ~3500ms for full rolldown rebuild).
+//! - **IIFE** (app router): Monolithic rolldown bundles. RSC requires dual React instances
+//!   (react-server + standard conditions) which ESM can't provide with one module namespace.
 
 use crate::state::EsmState;
 use anyhow::Result;
@@ -12,8 +13,8 @@ use rex_v8::IsolatePool;
 use std::sync::Arc;
 use tracing::debug;
 
-/// Stub render functions for ESM bootstrap. These are overwritten by
-/// `load_esm_modules()` once the real entry module is evaluated.
+/// Stub render functions for ESM bootstrap. Overwritten by `load_esm_modules()`
+/// once the real entry module is evaluated.
 const STUB_FUNCTIONS: &str = r#"
 globalThis.__rex_pages = {};
 globalThis.__rex_render_page = function() { return JSON.stringify({ body: '', head: '' }); };
@@ -21,7 +22,9 @@ globalThis.__rex_get_server_side_props = function() { return JSON.stringify({ pr
 globalThis.__rex_get_static_props = function() { return JSON.stringify({ props: {} }); };
 "#;
 
-/// IIFE startup: read server bundle from disk and load into isolate pool.
+/// IIFE startup: read rolldown-built server bundle from disk and load into isolate pool.
+///
+/// Used for app router (RSC needs dual React instances) and `rex start` (production).
 pub fn iife_startup(
     build_result: &rex_build::bundler::BuildResult,
     pool_size: usize,
@@ -48,11 +51,14 @@ pub fn iife_startup(
     )
 }
 
-/// ESM startup: pre-bundle deps, transform source files, load via ESM modules.
-pub async fn try_esm_startup(
+/// ESM startup: pre-bundle deps, OXC-transform source files, load via V8 native ESM.
+///
+/// Used for pages router projects. Each source file is individually transformed
+/// and loaded as a V8 ESM module, enabling per-file HMR invalidation.
+pub async fn esm_startup(
     config: &RexConfig,
     scan: &ScanResult,
-    build_result: &rex_build::bundler::BuildResult,
+    _build_result: &rex_build::bundler::BuildResult,
     pool_size: usize,
     project_root_str: &str,
 ) -> Result<(IsolatePool, EsmState)> {
@@ -60,44 +66,17 @@ pub async fn try_esm_startup(
     use rex_build::server_bundle::SSR_RUNTIME;
 
     let module_dirs = rex_build::resolve_modules_dirs(config)?;
-    let has_app = scan.app_scan.is_some();
-    let has_pages = !scan.routes.is_empty() || scan.app.is_some();
 
-    // Build dep IIFE(s)
-    let dep_bundles =
-        rex_build::server_dep_bundle::build_server_dep_bundles(config, has_app, &module_dirs)
-            .await?;
+    // Build pages dep IIFE (standard React + renderToString)
+    let iife_js = rex_build::server_dep_bundle::build_pages_dep_iife(config, &module_dirs).await?;
+    let synthetic_modules = esm_transform::pages_synthetic_modules();
+    let known_specifiers = esm_transform::pages_known_specifiers();
 
-    // Determine which dep IIFE and synthetic modules to use
-    let (iife_js, synthetic_modules, known_specifiers) = if has_app {
-        (
-            dep_bundles
-                .flight_iife
-                .unwrap_or(dep_bundles.pages_iife.clone()),
-            esm_transform::flight_synthetic_modules(),
-            esm_transform::flight_known_specifiers(),
-        )
-    } else {
-        (
-            dep_bundles.pages_iife,
-            esm_transform::pages_synthetic_modules(),
-            esm_transform::pages_known_specifiers(),
-        )
-    };
+    // Collect entry paths from pages routes
+    let entry_paths: Vec<std::path::PathBuf> =
+        scan.routes.iter().map(|r| r.abs_path.clone()).collect();
 
-    // Collect entry paths for import graph walking
-    let mut entry_paths: Vec<std::path::PathBuf> = Vec::new();
-    if has_pages {
-        for route in &scan.routes {
-            entry_paths.push(route.abs_path.clone());
-        }
-    }
-    if let Some(app_scan) = &scan.app_scan {
-        for route in &app_scan.routes {
-            entry_paths.push(route.page_path.clone());
-            entry_paths.extend(route.layout_chain.iter().cloned());
-        }
-    }
+    debug!(entries = entry_paths.len(), "Walking import graph for ESM");
 
     // Walk import graph and transform source files
     let collected = esm_transform::collect_source_modules(
@@ -106,35 +85,40 @@ pub async fn try_esm_startup(
         &known_specifiers,
     )?;
 
-    // Generate entry source
-    let entry_specifier = "rex://entry".to_string();
-    let entry_source = if let Some(app_scan) = &scan.app_scan {
-        let webpack_config = build_result
-            .manifest
-            .client_reference_manifest
-            .as_ref()
-            .map(|m| serde_json::to_string(m).unwrap_or_default())
-            .unwrap_or_else(|| "{}".to_string());
+    debug!(
+        source_modules = collected.source_modules.len(),
+        extra_deps = collected.extra_dep_imports.len(),
+        "Source modules collected"
+    );
 
-        rex_v8::esm_rsc_entry::generate_rsc_esm_entry(
-            app_scan,
-            &config.project_root,
-            &webpack_config,
-            "", // server_actions_js
-            "", // flight_runtime_js (provided by dep IIFE)
-            "", // metadata_runtime_js
-        )
-    } else {
-        let page_sources: Vec<(String, std::path::PathBuf)> = scan
-            .routes
-            .iter()
-            .map(|r| (r.module_name(), r.abs_path.clone()))
-            .collect();
-        rex_v8::esm_rsc_entry::generate_pages_esm_entry(&page_sources, SSR_RUNTIME)
-    };
+    // Generate pages ESM entry
+    let entry_specifier = "rex://entry".to_string();
+    let page_sources: Vec<(String, std::path::PathBuf)> = scan
+        .routes
+        .iter()
+        .map(|r| (r.module_name(), r.abs_path.clone()))
+        .collect();
+    let entry_source = rex_v8::esm_rsc_entry::generate_pages_esm_entry(&page_sources, SSR_RUNTIME);
+
+    // Add rex/* synthetic modules (server-side stubs for framework components)
+    let mut all_synthetic = synthetic_modules;
+    let rex_stub = "({ default: function() { return null; } })";
+    for specifier in &["rex/head", "rex/link", "rex/image", "rex/document"] {
+        all_synthetic.push(rex_v8::SyntheticModuleDef {
+            specifier: specifier.to_string(),
+            export_names: vec![
+                "default".into(),
+                "Html".into(),
+                "Head".into(),
+                "Main".into(),
+                "NextScript".into(),
+            ],
+            globals_expr: rex_stub.to_string(),
+        });
+    }
 
     // Build dep config
-    let dep_config = Arc::new(esm_transform::build_dep_config(iife_js, synthetic_modules));
+    let dep_config = Arc::new(esm_transform::build_dep_config(iife_js, all_synthetic));
 
     // Create pool with V8 polyfills + stub functions as bootstrap
     let bootstrap = format!("{}\n{}\n", rex_build::V8_POLYFILLS, STUB_FUNCTIONS);
@@ -158,6 +142,8 @@ pub async fn try_esm_startup(
         entry_src_arc,
     )
     .await?;
+
+    debug!("ESM modules loaded into V8");
 
     let esm_state = EsmState {
         dep_config,

@@ -345,6 +345,8 @@ fn resolve_callback<'s>(
         return direct;
     }
 
+    tracing::debug!(specifier = %spec_str, "ESM resolve: not found in direct lookup");
+
     // 2. Relative import resolution using referrer's path
     if spec_str.starts_with('.') {
         let referrer_hash = referrer.get_identity_hash().get();
@@ -392,6 +394,7 @@ fn resolve_callback<'s>(
         }
     }
 
+    tracing::warn!(specifier = %spec_str, "ESM resolve: module not found");
     None
 }
 
