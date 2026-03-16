@@ -155,3 +155,167 @@ pub fn generate_pages_esm_entry(
 
     entry
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use rex_core::app_route::{AppApiRoute, AppRoute, AppScanResult, AppSegment};
+    use std::path::PathBuf;
+
+    fn mock_app_scan() -> AppScanResult {
+        AppScanResult {
+            root: AppSegment {
+                segment: "app".into(),
+                page: Some(PathBuf::from("/app/page.tsx")),
+                layout: Some(PathBuf::from("/app/layout.tsx")),
+                route: None,
+                loading: None,
+                error_boundary: None,
+                not_found: None,
+                children: vec![],
+            },
+            routes: vec![
+                AppRoute {
+                    pattern: "/".into(),
+                    page_path: PathBuf::from("/app/page.tsx"),
+                    layout_chain: vec![PathBuf::from("/app/layout.tsx")],
+                    loading_chain: vec![None],
+                    error_chain: vec![None],
+                    dynamic_segments: vec![],
+                    specificity: 10,
+                    route_group: None,
+                },
+                AppRoute {
+                    pattern: "/about".into(),
+                    page_path: PathBuf::from("/app/about/page.tsx"),
+                    layout_chain: vec![PathBuf::from("/app/layout.tsx")],
+                    loading_chain: vec![None],
+                    error_chain: vec![None],
+                    dynamic_segments: vec![],
+                    specificity: 10,
+                    route_group: None,
+                },
+            ],
+            api_routes: vec![],
+            root_layout: Some(PathBuf::from("/app/layout.tsx")),
+        }
+    }
+
+    #[test]
+    fn rsc_esm_entry_imports_pages_and_layouts() {
+        let scan = mock_app_scan();
+        let entry = generate_rsc_esm_entry(
+            &scan,
+            Path::new("/project"),
+            "{}",
+            "",
+            "// flight",
+            "// metadata",
+        );
+
+        assert!(entry.contains("import * as __page_mod_0 from '/app/page.tsx'"));
+        assert!(entry.contains("import * as __page_mod_1 from '/app/about/page.tsx'"));
+        assert!(entry.contains("import * as __layout_mod_0_0 from '/app/layout.tsx'"));
+        assert!(entry.contains("__rex_app_pages[\"/\"]"));
+        assert!(entry.contains("__rex_app_pages[\"/about\"]"));
+        assert!(entry.contains("__rex_app_layout_chains[\"/\"]"));
+        assert!(entry.contains("__rex_app_metadata_sources[\"/\"]"));
+    }
+
+    #[test]
+    fn rsc_esm_entry_includes_react_imports() {
+        let scan = mock_app_scan();
+        let entry = generate_rsc_esm_entry(
+            &scan,
+            Path::new("/project"),
+            "{}",
+            "",
+            "// flight",
+            "// metadata",
+        );
+
+        assert!(entry.contains("import { createElement } from 'react'"));
+        assert!(entry.contains("import { renderToReadableStream }"));
+    }
+
+    #[test]
+    fn rsc_esm_entry_includes_webpack_config() {
+        let scan = mock_app_scan();
+        let config = r#"{"test":"value"}"#;
+        let entry = generate_rsc_esm_entry(
+            &scan,
+            Path::new("/project"),
+            config,
+            "",
+            "// flight",
+            "// metadata",
+        );
+
+        assert!(entry.contains(r#"__rex_webpack_bundler_config = {"test":"value"}"#));
+    }
+
+    #[test]
+    fn rsc_esm_entry_includes_server_actions() {
+        let scan = mock_app_scan();
+        let actions = "globalThis.__rex_server_actions = {};\n";
+        let entry = generate_rsc_esm_entry(
+            &scan,
+            Path::new("/project"),
+            "{}",
+            actions,
+            "// flight",
+            "// metadata",
+        );
+
+        assert!(entry.contains("--- Server Actions ---"));
+        assert!(entry.contains("__rex_server_actions"));
+    }
+
+    #[test]
+    fn rsc_esm_entry_includes_api_routes() {
+        let mut scan = mock_app_scan();
+        scan.api_routes = vec![AppApiRoute {
+            pattern: "/api/hello".into(),
+            handler_path: PathBuf::from("/app/api/hello/route.ts"),
+            dynamic_segments: vec![],
+            specificity: 0,
+        }];
+
+        let entry = generate_rsc_esm_entry(
+            &scan,
+            Path::new("/project"),
+            "{}",
+            "",
+            "// flight",
+            "// metadata",
+        );
+
+        assert!(entry.contains("__rex_app_route_handlers"));
+        assert!(entry.contains("import * as __app_route0 from '/app/api/hello/route.ts'"));
+    }
+
+    #[test]
+    fn pages_esm_entry_imports_pages() {
+        let pages = vec![
+            ("index".to_string(), PathBuf::from("/pages/index.tsx")),
+            ("about".to_string(), PathBuf::from("/pages/about.tsx")),
+        ];
+
+        let entry = generate_pages_esm_entry(&pages, "// ssr runtime");
+
+        assert!(entry.contains("import * as __page0 from '/pages/index.tsx'"));
+        assert!(entry.contains("import * as __page1 from '/pages/about.tsx'"));
+        assert!(entry.contains("__rex_pages['index'] = __page0"));
+        assert!(entry.contains("__rex_pages['about'] = __page1"));
+    }
+
+    #[test]
+    fn pages_esm_entry_empty_pages() {
+        let pages: Vec<(String, PathBuf)> = vec![];
+        let entry = generate_pages_esm_entry(&pages, "// ssr");
+
+        assert!(entry.contains("globalThis.__rex_pages = {};"));
+        assert!(!entry.contains("import * as __page"));
+    }
+}
