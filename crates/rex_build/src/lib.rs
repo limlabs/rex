@@ -9,6 +9,7 @@ pub mod rsc_bundler;
 pub mod rsc_graph;
 pub mod server_action_extract;
 pub mod server_action_manifest;
+pub mod server_dep_bundle;
 
 // Internal modules extracted from bundler.rs
 pub mod build_utils;
