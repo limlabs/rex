@@ -21,14 +21,26 @@ pub async fn try_esm_fast_path(state: &Arc<AppState>, changed_path: &Path) -> Re
 
     let changed_specifier = changed_path.to_string_lossy().to_string();
 
-    // Read and transform the changed file
+    // Read and transform the changed file, rewriting relative imports to absolute paths
     let source = match std::fs::read_to_string(changed_path) {
         Ok(s) => s,
         Err(_) => return Ok(false),
     };
 
-    let transformed = match rex_build::esm_transform::transform_to_esm(&source, &changed_specifier)
-    {
+    let known_specifiers = rex_build::esm_transform::dep_specifiers(
+        state
+            .hot
+            .read()
+            .ok()
+            .is_some_and(|h| !h.manifest.app_routes.is_empty()),
+    );
+
+    let transformed = match rex_build::esm_transform::transform_and_rewrite_imports(
+        &source,
+        changed_path,
+        &state.project_root,
+        &known_specifiers,
+    ) {
         Ok(t) => t,
         Err(e) => {
             debug!("ESM transform failed for {}: {e:#}", changed_path.display());

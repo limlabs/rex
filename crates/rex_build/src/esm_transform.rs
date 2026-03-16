@@ -49,6 +49,36 @@ pub struct CollectedModules {
     pub client_boundaries: Vec<ClientBoundary>,
 }
 
+/// Transform a source file for HMR: strip TS/JSX and rewrite relative imports
+/// to absolute paths so V8's ESM module registry can resolve them.
+pub fn transform_and_rewrite_imports(
+    source: &str,
+    file_path: &Path,
+    project_root: &Path,
+    known_dep_specifiers: &HashSet<String>,
+) -> Result<String> {
+    let filename = file_path.to_string_lossy().to_string();
+
+    // Extract and resolve imports
+    let (local_imports, _bare_imports) =
+        extract_and_resolve_imports(source, file_path, project_root, known_dep_specifiers);
+
+    // Build import map (original specifier → absolute path)
+    let mut import_map: HashMap<String, String> = HashMap::new();
+    for (specifier, resolved_path) in &local_imports {
+        import_map.insert(
+            specifier.clone(),
+            resolved_path.to_string_lossy().to_string(),
+        );
+    }
+
+    // Transform (strip TS + JSX)
+    let transformed = transform_to_esm(source, &filename)?;
+
+    // Rewrite import specifiers to absolute paths
+    Ok(rewrite_imports_to_absolute(&transformed, &import_map))
+}
+
 /// Transform a TypeScript/TSX source file to valid ESM JavaScript.
 ///
 /// - Strips TypeScript types (interfaces, type annotations, enums, etc.)
