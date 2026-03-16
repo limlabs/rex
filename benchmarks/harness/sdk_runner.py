@@ -139,6 +139,69 @@ _REMIX_CLAUDE_MD = """\
 - Root layout (`app/root.tsx`) is already set up
 """
 
+_REX_MCP_CLAUDE_MD = """\
+# Rex Project
+
+This is a Rex project — a Rust-native React framework with file-based routing.
+
+## Quick Reference
+
+- Pages go in `pages/` (e.g. `pages/about.tsx`, `pages/blog/[slug].tsx`)
+- API routes go in `pages/api/` (e.g. `pages/api/hello.ts`)
+- All pages must `import React from "react"` and export a default component
+- Server-side data fetching uses `getServerSideProps(context)`:
+  - `context.params` — dynamic route params
+  - Must return `{ props: { ... } }`
+
+## MCP Tools Available
+
+You have two Rex-specific tools — USE THEM:
+
+- **rex_check**: Build the project and get structured pass/fail with errors.
+  Call this after creating or editing any page file.
+- **rex_status**: See what pages exist and what routes they map to.
+  Call this before starting work to orient yourself.
+
+## Workflow
+
+1. Call `rex_status` to see current project state
+2. Create/edit page files
+3. Call `rex_check` to verify the build passes
+4. If check fails, fix the errors and check again
+
+## Example Page
+
+```tsx
+import React from "react";
+
+export default function AboutPage() {
+  return <div><h1>About</h1></div>;
+}
+```
+
+## Example with Data Fetching
+
+```tsx
+import React from "react";
+
+export default function UserPage({ name }: { name: string }) {
+  return <h1>Hello {name}</h1>;
+}
+
+export async function getServerSideProps(context: any) {
+  return { props: { name: context.params.slug } };
+}
+```
+
+## Example API Route
+
+```ts
+export default function handler(req: any, res: any) {
+  res.status(200).json({ message: "hello" });
+}
+```
+"""
+
 # ---------------------------------------------------------------------------
 # Hooks (written as .claude/settings.json in the project)
 # ---------------------------------------------------------------------------
@@ -173,6 +236,7 @@ class SDKCondition:
     hooks: dict | None  # Written to .claude/settings.json
     build_cmd: list[str]
     serve_cmd: list[str]
+    mcp_server: object | None = None  # McpSdkServerConfig from create_sdk_mcp_server
 
     def as_eval_condition(self) -> Condition:
         """Convert to Condition for evaluator compatibility."""
@@ -186,7 +250,18 @@ class SDKCondition:
 
 
 def make_conditions() -> dict[str, SDKCondition]:
+    from .mcp_tools import create_rex_mcp_server
+
     conditions = {
+        "rex_mcp": SDKCondition(
+            name="rex_mcp",
+            starter="rex",
+            claude_md=_REX_MCP_CLAUDE_MD,
+            hooks=None,
+            build_cmd=[REX_BIN, "build"],
+            serve_cmd=[REX_BIN, "start"],
+            mcp_server=create_rex_mcp_server(),
+        ),
         "rex_guided": SDKCondition(
             name="rex_guided",
             starter="rex",
@@ -342,6 +417,7 @@ async def run_sdk_agent(
     prompt: str,
     workdir: Path,
     model: str,
+    mcp_server: object | None = None,
 ) -> SDKMetrics:
     """Run a Claude Code session via the Agent SDK."""
     metrics = SDKMetrics()
@@ -353,11 +429,18 @@ async def run_sdk_agent(
         if key in os.environ:
             env_overrides[key] = os.environ.pop(key)
 
+    allowed = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
+    mcp_servers = {}
+    if mcp_server is not None:
+        mcp_servers["rex"] = mcp_server
+        allowed.extend(["mcp__rex__rex_check", "mcp__rex__rex_status"])
+
     options = ClaudeAgentOptions(
         cwd=str(workdir),
         model=model,
         permission_mode="bypassPermissions",
-        allowed_tools=["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+        allowed_tools=allowed,
+        **({"mcp_servers": mcp_servers} if mcp_servers else {}),
     )
 
     try:
@@ -400,6 +483,7 @@ async def run_one(
             prompt=task["task"]["prompt"],
             workdir=workdir,
             model=model,
+            mcp_server=condition.mcp_server,
         )
 
         eval_condition = condition.as_eval_condition()
