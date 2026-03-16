@@ -1,0 +1,1613 @@
+[
+  {
+    "task_id": "t2-01",
+    "task_name": "Multi-page with nav",
+    "tier": 2,
+    "condition": "rex_harness",
+    "model": "claude-haiku-4-5-20251001",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.0,
+    "median_tokens": 10665,
+    "median_tool_calls": 4,
+    "median_wall_ms": 5971.826875000261,
+    "median_errors": 0,
+    "checks": {
+      "build": 0.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "create_component",
+          "input_keys": [
+            "name",
+            "body_tsx"
+          ],
+          "result_len": 46,
+          "is_error": false,
+          "tokens_after": 1797
+        },
+        {
+          "tool": "create_page",
+          "input_keys": [
+            "route",
+            "body_tsx"
+          ],
+          "result_len": 42,
+          "is_error": false,
+          "tokens_after": 3764
+        },
+        {
+          "tool": "create_page",
+          "input_keys": [
+            "route",
+            "body_tsx"
+          ],
+          "result_len": 47,
+          "is_error": false,
+          "tokens_after": 5895
+        },
+        {
+          "tool": "create_page",
+          "input_keys": [
+            "route",
+            "body_tsx"
+          ],
+          "result_len": 51,
+          "is_error": false,
+          "tokens_after": 8191
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t2-01",
+    "task_name": "Multi-page with nav",
+    "tier": 2,
+    "condition": "rex_raw",
+    "model": "claude-haiku-4-5-20251001",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 7135,
+    "median_tool_calls": 3,
+    "median_wall_ms": 7420.00799998641,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET / -> 200": 1.0,
+      "http GET /about -> 200": 1.0,
+      "http GET /contact -> 200": 1.0,
+      "ssr /": 1.0,
+      "ssr /about": 1.0,
+      "ssr /contact": 1.0,
+      "dom / h1": 1.0,
+      "dom / nav": 1.0,
+      "dom / nav a": 1.0,
+      "dom /about h1": 1.0,
+      "dom /about nav": 1.0,
+      "dom /contact h1": 1.0,
+      "dom /contact nav": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 33,
+          "is_error": false,
+          "tokens_after": 1419
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 33,
+          "is_error": false,
+          "tokens_after": 3068
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 35,
+          "is_error": false,
+          "tokens_after": 4947
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t2-01",
+    "task_name": "Multi-page with nav",
+    "tier": 2,
+    "condition": "nextjs_raw",
+    "model": "claude-haiku-4-5-20251001",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 11264,
+    "median_tool_calls": 10,
+    "median_wall_ms": 9364.567416982027,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET / -> 200": 1.0,
+      "http GET /about -> 200": 1.0,
+      "http GET /contact -> 200": 1.0,
+      "ssr /": 1.0,
+      "ssr /about": 1.0,
+      "ssr /contact": 1.0,
+      "dom / h1": 1.0,
+      "dom / nav": 1.0,
+      "dom / nav a": 1.0,
+      "dom /about h1": 1.0,
+      "dom /about nav": 1.0,
+      "dom /contact h1": 1.0,
+      "dom /contact nav": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 74,
+          "is_error": false,
+          "tokens_after": 1281
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 398,
+          "is_error": false,
+          "tokens_after": 2703
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 467,
+          "is_error": false,
+          "tokens_after": 2703
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 32,
+          "is_error": false,
+          "tokens_after": 5217
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 43,
+          "is_error": false,
+          "tokens_after": 5217
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 33,
+          "is_error": false,
+          "tokens_after": 5217
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 33,
+          "is_error": false,
+          "tokens_after": 5217
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 35,
+          "is_error": false,
+          "tokens_after": 5217
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 64,
+          "is_error": false,
+          "tokens_after": 8031
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 25,
+          "is_error": false,
+          "tokens_after": 8031
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t2-01",
+    "task_name": "Multi-page with nav",
+    "tier": 2,
+    "condition": "tanstack_raw",
+    "model": "claude-haiku-4-5-20251001",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 39570,
+    "median_tool_calls": 21,
+    "median_wall_ms": 21956.313041009707,
+    "median_errors": 2,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET / -> 200": 1.0,
+      "http GET /about -> 200": 1.0,
+      "http GET /contact -> 200": 1.0,
+      "ssr /": 1.0,
+      "ssr /about": 1.0,
+      "ssr /contact": 1.0,
+      "dom / h1": 1.0,
+      "dom / nav": 1.0,
+      "dom / nav a": 1.0,
+      "dom /about h1": 1.0,
+      "dom /about nav": 1.0,
+      "dom /contact h1": 1.0,
+      "dom /contact nav": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 36,
+          "is_error": false,
+          "tokens_after": 1340
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 114,
+          "is_error": true,
+          "tokens_after": 1340
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 374,
+          "is_error": false,
+          "tokens_after": 2923
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 219,
+          "is_error": false,
+          "tokens_after": 2923
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 47,
+          "is_error": false,
+          "tokens_after": 5516
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 39,
+          "is_error": false,
+          "tokens_after": 5516
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 38,
+          "is_error": false,
+          "tokens_after": 5516
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 38,
+          "is_error": false,
+          "tokens_after": 5516
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 40,
+          "is_error": false,
+          "tokens_after": 5516
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 40,
+          "is_error": true,
+          "tokens_after": 8430
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 191,
+          "is_error": false,
+          "tokens_after": 11437
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 580,
+          "is_error": false,
+          "tokens_after": 14634
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 166,
+          "is_error": false,
+          "tokens_after": 14634
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 1687,
+          "is_error": false,
+          "tokens_after": 18333
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 20,
+          "is_error": false,
+          "tokens_after": 22748
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 2879,
+          "is_error": false,
+          "tokens_after": 27258
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 240,
+          "is_error": false,
+          "tokens_after": 32912
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 239,
+          "is_error": false,
+          "tokens_after": 32912
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 244,
+          "is_error": false,
+          "tokens_after": 32912
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 253,
+          "is_error": false,
+          "tokens_after": 32912
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 323,
+          "is_error": false,
+          "tokens_after": 32912
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t2-01",
+    "task_name": "Multi-page with nav",
+    "tier": 2,
+    "condition": "remix_raw",
+    "model": "claude-haiku-4-5-20251001",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.0,
+    "median_tokens": 13576,
+    "median_tool_calls": 6,
+    "median_wall_ms": 10065.452832990559,
+    "median_errors": 0,
+    "checks": {
+      "build": 0.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 115,
+          "is_error": false,
+          "tokens_after": 1317
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 435,
+          "is_error": false,
+          "tokens_after": 2760
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 47,
+          "is_error": false,
+          "tokens_after": 4527
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 39,
+          "is_error": false,
+          "tokens_after": 6480
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 38,
+          "is_error": false,
+          "tokens_after": 8614
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 40,
+          "is_error": false,
+          "tokens_after": 10929
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t2-02",
+    "task_name": "API route + data page",
+    "tier": 2,
+    "condition": "rex_harness",
+    "model": "claude-haiku-4-5-20251001",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.0,
+    "median_tokens": 4534,
+    "median_tool_calls": 2,
+    "median_wall_ms": 4603.486082982272,
+    "median_errors": 0,
+    "checks": {
+      "build": 0.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "create_api_route",
+          "input_keys": [
+            "route",
+            "handler_ts"
+          ],
+          "result_len": 65,
+          "is_error": false,
+          "tokens_after": 2121
+        },
+        {
+          "tool": "create_page",
+          "input_keys": [
+            "route",
+            "imports",
+            "gssp",
+            "body_tsx"
+          ],
+          "result_len": 53,
+          "is_error": false,
+          "tokens_after": 2121
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t2-02",
+    "task_name": "API route + data page",
+    "tier": 2,
+    "condition": "rex_raw",
+    "model": "claude-haiku-4-5-20251001",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 10140,
+    "median_tool_calls": 5,
+    "median_wall_ms": 8858.714375004638,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /api/products -> 200": 1.0,
+      "http GET /products -> 200": 1.0,
+      "ssr /products": 1.0,
+      "dom /products h1": 1.0,
+      "dom /products ul": 1.0,
+      "dom /products li": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 59,
+          "is_error": false,
+          "tokens_after": 1369
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 327,
+          "is_error": false,
+          "tokens_after": 2874
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 378,
+          "is_error": false,
+          "tokens_after": 2874
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 39,
+          "is_error": false,
+          "tokens_after": 4938
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 36,
+          "is_error": false,
+          "tokens_after": 7380
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t2-02",
+    "task_name": "API route + data page",
+    "tier": 2,
+    "condition": "nextjs_raw",
+    "model": "claude-haiku-4-5-20251001",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.375,
+    "median_tokens": 7190,
+    "median_tool_calls": 3,
+    "median_wall_ms": 7594.7207499993965,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /api/products -> 200": 1.0,
+      "http GET /products -> 200": 0.0,
+      "ssr /products": 0.0,
+      "dom /products h1": 0.0,
+      "dom /products ul": 0.0,
+      "dom /products li": 0.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 74,
+          "is_error": false,
+          "tokens_after": 1361
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 39,
+          "is_error": false,
+          "tokens_after": 2985
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 36,
+          "is_error": false,
+          "tokens_after": 4950
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t2-02",
+    "task_name": "API route + data page",
+    "tier": 2,
+    "condition": "tanstack_raw",
+    "model": "claude-haiku-4-5-20251001",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.375,
+    "median_tokens": 265803,
+    "median_tool_calls": 38,
+    "median_wall_ms": 69552.23212498822,
+    "median_errors": 4,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /api/products -> 200": 0.0,
+      "http GET /products -> 200": 1.0,
+      "ssr /products": 0.0,
+      "dom /products h1": 0.0,
+      "dom /products ul": 0.0,
+      "dom /products li": 0.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 21,
+          "is_error": false,
+          "tokens_after": 1427
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 114,
+          "is_error": true,
+          "tokens_after": 1427
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 219,
+          "is_error": false,
+          "tokens_after": 3093
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 96,
+          "is_error": false,
+          "tokens_after": 3093
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 374,
+          "is_error": false,
+          "tokens_after": 5039
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 580,
+          "is_error": false,
+          "tokens_after": 5039
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 44,
+          "is_error": false,
+          "tokens_after": 7635
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 41,
+          "is_error": false,
+          "tokens_after": 10596
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 40,
+          "is_error": true,
+          "tokens_after": 13698
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 166,
+          "is_error": false,
+          "tokens_after": 16903
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 214,
+          "is_error": false,
+          "tokens_after": 20300
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 40,
+          "is_error": false,
+          "tokens_after": 23942
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 3250,
+          "is_error": false,
+          "tokens_after": 27725
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 44,
+          "is_error": false,
+          "tokens_after": 32909
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 72,
+          "is_error": false,
+          "tokens_after": 38197
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 1945,
+          "is_error": true,
+          "tokens_after": 43643
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 148,
+          "is_error": false,
+          "tokens_after": 50136
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 707,
+          "is_error": false,
+          "tokens_after": 56852
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 11,
+          "is_error": true,
+          "tokens_after": 63990
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 1145,
+          "is_error": false,
+          "tokens_after": 71284
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 92,
+          "is_error": false,
+          "tokens_after": 79338
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 283,
+          "is_error": false,
+          "tokens_after": 87562
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 3199,
+          "is_error": false,
+          "tokens_after": 96100
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 11,
+          "is_error": false,
+          "tokens_after": 105749
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 68,
+          "is_error": false,
+          "tokens_after": 115555
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 44,
+          "is_error": false,
+          "tokens_after": 125638
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 41,
+          "is_error": false,
+          "tokens_after": 136074
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 3250,
+          "is_error": false,
+          "tokens_after": 146649
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 365,
+          "is_error": false,
+          "tokens_after": 158491
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 37,
+          "is_error": false,
+          "tokens_after": 170737
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 41,
+          "is_error": false,
+          "tokens_after": 183317
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 11,
+          "is_error": false,
+          "tokens_after": 196066
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 1417,
+          "is_error": false,
+          "tokens_after": 208953
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 129,
+          "is_error": false,
+          "tokens_after": 222420
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 372,
+          "is_error": false,
+          "tokens_after": 236106
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 745,
+          "is_error": false,
+          "tokens_after": 236106
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 365,
+          "is_error": false,
+          "tokens_after": 236106
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 1156,
+          "is_error": false,
+          "tokens_after": 250538
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t2-02",
+    "task_name": "API route + data page",
+    "tier": 2,
+    "condition": "remix_raw",
+    "model": "claude-haiku-4-5-20251001",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.0,
+    "median_tokens": 9128,
+    "median_tool_calls": 6,
+    "median_wall_ms": 9281.302333023632,
+    "median_errors": 0,
+    "checks": {
+      "build": 0.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 19,
+          "is_error": false,
+          "tokens_after": 1443
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 435,
+          "is_error": false,
+          "tokens_after": 1443
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 45,
+          "is_error": false,
+          "tokens_after": 3608
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 41,
+          "is_error": false,
+          "tokens_after": 3608
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 261,
+          "is_error": false,
+          "tokens_after": 5979
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 722,
+          "is_error": false,
+          "tokens_after": 5979
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t2-03",
+    "task_name": "Blog index + detail",
+    "tier": 2,
+    "condition": "rex_harness",
+    "model": "claude-haiku-4-5-20251001",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.0,
+    "median_tokens": 7122,
+    "median_tool_calls": 2,
+    "median_wall_ms": 6300.411582982633,
+    "median_errors": 0,
+    "checks": {
+      "build": 0.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "create_page",
+          "input_keys": [
+            "route",
+            "body_tsx"
+          ],
+          "result_len": 45,
+          "is_error": false,
+          "tokens_after": 2035
+        },
+        {
+          "tool": "create_page",
+          "input_keys": [
+            "route",
+            "body_tsx"
+          ],
+          "result_len": 59,
+          "is_error": false,
+          "tokens_after": 4434
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t2-03",
+    "task_name": "Blog index + detail",
+    "tier": 2,
+    "condition": "rex_raw",
+    "model": "claude-haiku-4-5-20251001",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 10409,
+    "median_tool_calls": 5,
+    "median_wall_ms": 10480.493040988222,
+    "median_errors": 1,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /blog -> 200": 1.0,
+      "http GET /blog/getting-started -> 200": 1.0,
+      "http GET /blog/advanced-tips -> 200": 1.0,
+      "ssr /blog": 1.0,
+      "ssr /blog/getting-started": 1.0,
+      "ssr /blog/advanced-tips": 1.0,
+      "dom /blog h1": 1.0,
+      "dom /blog a[href]": 1.0,
+      "dom /blog/getting-started h1": 1.0,
+      "dom /blog/advanced-tips h1": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 59,
+          "is_error": false,
+          "tokens_after": 1394
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 105,
+          "is_error": true,
+          "tokens_after": 1394
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 327,
+          "is_error": false,
+          "tokens_after": 2995
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 32,
+          "is_error": false,
+          "tokens_after": 5091
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 39,
+          "is_error": false,
+          "tokens_after": 7559
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t2-03",
+    "task_name": "Blog index + detail",
+    "tier": 2,
+    "condition": "nextjs_raw",
+    "model": "claude-haiku-4-5-20251001",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 6220,
+    "median_tool_calls": 2,
+    "median_wall_ms": 7153.701208997518,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /blog -> 200": 1.0,
+      "http GET /blog/getting-started -> 200": 1.0,
+      "http GET /blog/advanced-tips -> 200": 1.0,
+      "ssr /blog": 1.0,
+      "ssr /blog/getting-started": 1.0,
+      "ssr /blog/advanced-tips": 1.0,
+      "dom /blog h1": 1.0,
+      "dom /blog a[href]": 1.0,
+      "dom /blog/getting-started h1": 1.0,
+      "dom /blog/advanced-tips h1": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 38,
+          "is_error": false,
+          "tokens_after": 1661
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 40,
+          "is_error": false,
+          "tokens_after": 3776
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t2-03",
+    "task_name": "Blog index + detail",
+    "tier": 2,
+    "condition": "tanstack_raw",
+    "model": "claude-haiku-4-5-20251001",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 40488,
+    "median_tool_calls": 13,
+    "median_wall_ms": 24260.3786670079,
+    "median_errors": 1,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /blog -> 200": 1.0,
+      "http GET /blog/getting-started -> 200": 1.0,
+      "http GET /blog/advanced-tips -> 200": 1.0,
+      "ssr /blog": 1.0,
+      "ssr /blog/getting-started": 1.0,
+      "ssr /blog/advanced-tips": 1.0,
+      "dom /blog h1": 1.0,
+      "dom /blog a[href]": 1.0,
+      "dom /blog/getting-started h1": 1.0,
+      "dom /blog/advanced-tips h1": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 96,
+          "is_error": false,
+          "tokens_after": 1422
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 580,
+          "is_error": false,
+          "tokens_after": 1422
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 219,
+          "is_error": false,
+          "tokens_after": 3299
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 374,
+          "is_error": false,
+          "tokens_after": 3299
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 43,
+          "is_error": false,
+          "tokens_after": 5785
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 43,
+          "is_error": false,
+          "tokens_after": 8718
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 40,
+          "is_error": true,
+          "tokens_after": 11797
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 1545,
+          "is_error": false,
+          "tokens_after": 15033
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 2490,
+          "is_error": false,
+          "tokens_after": 18909
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 73,
+          "is_error": false,
+          "tokens_after": 23670
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 780,
+          "is_error": false,
+          "tokens_after": 28592
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 963,
+          "is_error": false,
+          "tokens_after": 28592
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 85,
+          "is_error": false,
+          "tokens_after": 34311
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t2-03",
+    "task_name": "Blog index + detail",
+    "tier": 2,
+    "condition": "remix_raw",
+    "model": "claude-haiku-4-5-20251001",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.0,
+    "median_tokens": 18113,
+    "median_tool_calls": 8,
+    "median_wall_ms": 13032.650124980137,
+    "median_errors": 0,
+    "checks": {
+      "build": 0.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 115,
+          "is_error": false,
+          "tokens_after": 1389
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 435,
+          "is_error": false,
+          "tokens_after": 2946
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 623,
+          "is_error": false,
+          "tokens_after": 2946
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 44,
+          "is_error": false,
+          "tokens_after": 5355
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 43,
+          "is_error": false,
+          "tokens_after": 8156
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 72,
+          "is_error": false,
+          "tokens_after": 11053
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 844,
+          "is_error": false,
+          "tokens_after": 14107
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 795,
+          "is_error": false,
+          "tokens_after": 14107
+        }
+      ]
+    ]
+  }
+]

@@ -1,0 +1,77 @@
+[task]
+id = "t2-03"
+tier = 2
+name = "Blog index + detail"
+prompt = """
+Build a blog with an index page and dynamic detail pages:
+
+1. Create a page at /blog that:
+   - Displays an h1 "Blog"
+   - Lists 3 blog posts, each as an <a> link:
+     * "Getting Started" linking to /blog/getting-started
+     * "Advanced Tips" linking to /blog/advanced-tips
+     * "Best Practices" linking to /blog/best-practices
+   - The data for these posts should come from server-side data fetching
+     (hardcode an array of posts in the server data function, not in the component)
+
+2. Create a dynamic route at /blog/[slug] that:
+   - Looks up the post by slug from the same hardcoded data
+   - Displays an h1 with the post title
+   - Displays a paragraph with "This is the {title} post."
+   - If the slug doesn't match any post, still render (a fallback is fine)
+
+All content must be server-rendered.
+"""
+
+[starter]
+template = "rex"
+
+[checks]
+build = true
+serve = true
+
+# Blog index
+[[checks.http]]
+path = "/blog"
+status = 200
+
+[[checks.ssr]]
+path = "/blog"
+contains = ["Blog", "Getting Started", "Advanced Tips", "Best Practices"]
+
+[[checks.dom]]
+path = "/blog"
+selector = "h1"
+text = "Blog"
+
+[[checks.dom]]
+path = "/blog"
+selector = "a[href]"
+contains = "Getting Started"
+
+# Detail pages
+[[checks.http]]
+path = "/blog/getting-started"
+status = 200
+
+[[checks.ssr]]
+path = "/blog/getting-started"
+contains = ["Getting Started"]
+
+[[checks.dom]]
+path = "/blog/getting-started"
+selector = "h1"
+text = "Getting Started"
+
+[[checks.http]]
+path = "/blog/advanced-tips"
+status = 200
+
+[[checks.ssr]]
+path = "/blog/advanced-tips"
+contains = ["Advanced Tips"]
+
+[[checks.dom]]
+path = "/blog/advanced-tips"
+selector = "h1"
+text = "Advanced Tips"

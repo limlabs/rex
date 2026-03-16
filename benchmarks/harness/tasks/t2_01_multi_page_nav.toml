@@ -1,0 +1,93 @@
+[task]
+id = "t2-01"
+tier = 2
+name = "Multi-page with nav"
+prompt = """
+Build a small site with 3 pages and a shared navigation:
+
+1. Home page at / with:
+   - An h1 "Welcome"
+   - A paragraph "This is the home page."
+
+2. About page at /about with:
+   - An h1 "About"
+   - A paragraph "About this site."
+
+3. Contact page at /contact with:
+   - An h1 "Contact"
+   - A paragraph "Get in touch."
+
+Every page must include a <nav> element containing links to all 3 pages.
+The links should contain the text "Home", "About", and "Contact".
+
+All content must be server-rendered.
+"""
+
+[starter]
+template = "rex"
+
+[checks]
+build = true
+serve = true
+
+# Home page
+[[checks.http]]
+path = "/"
+status = 200
+
+[[checks.ssr]]
+path = "/"
+contains = ["Welcome", "This is the home page."]
+
+[[checks.dom]]
+path = "/"
+selector = "h1"
+text = "Welcome"
+
+[[checks.dom]]
+path = "/"
+selector = "nav"
+exists = true
+
+[[checks.dom]]
+path = "/"
+selector = "nav a"
+contains = "About"
+
+# About page
+[[checks.http]]
+path = "/about"
+status = 200
+
+[[checks.ssr]]
+path = "/about"
+contains = ["About", "About this site."]
+
+[[checks.dom]]
+path = "/about"
+selector = "h1"
+text = "About"
+
+[[checks.dom]]
+path = "/about"
+selector = "nav"
+exists = true
+
+# Contact page
+[[checks.http]]
+path = "/contact"
+status = 200
+
+[[checks.ssr]]
+path = "/contact"
+contains = ["Contact", "Get in touch."]
+
+[[checks.dom]]
+path = "/contact"
+selector = "h1"
+text = "Contact"
+
+[[checks.dom]]
+path = "/contact"
+selector = "nav"
+exists = true

@@ -249,28 +249,34 @@ def _check_dom(base: str, check: dict) -> CheckResult:
     # Strip React HTML comments before parsing so text extraction is clean
     clean_html = _strip_html_comments(r.text)
     tree = HTMLParser(clean_html)
-    node = tree.css_first(selector)
+    nodes = tree.css(selector)
 
     # Existence check
     if "exists" in check:
-        found = node is not None
+        found = len(nodes) > 0
         if found != check["exists"]:
             return CheckResult(name, False, f"exists={found}, expected={check['exists']}")
         return CheckResult(name, True)
 
     # Selector must be found for text/contains checks
-    if node is None:
+    if not nodes:
         return CheckResult(name, False, "selector not found")
 
-    text = node.text(strip=True)
-
+    # For "text" check, use the first matching node (exact match)
     if "text" in check:
+        text = nodes[0].text(strip=True)
         if text != check["text"]:
             return CheckResult(name, False, f"text={text!r}, expected={check['text']!r}")
 
+    # For "contains" check, search across ALL matching nodes
     if "contains" in check:
-        if check["contains"] not in text:
-            return CheckResult(name, False, f"text={text!r} does not contain {check['contains']!r}")
+        all_text = " ".join(n.text(strip=True) for n in nodes)
+        if check["contains"] not in all_text:
+            return CheckResult(
+                name,
+                False,
+                f"text across {len(nodes)} nodes does not contain {check['contains']!r}",
+            )
 
     return CheckResult(name, True)
 

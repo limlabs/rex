@@ -1,0 +1,61 @@
+[task]
+id = "t2-02"
+tier = 2
+name = "API route + data page"
+prompt = """
+Build an API route and a page that consumes it:
+
+1. Create an API route at /api/products that returns this JSON array:
+   [
+     { "id": 1, "name": "Widget", "price": 9.99 },
+     { "id": 2, "name": "Gadget", "price": 24.99 },
+     { "id": 3, "name": "Doohickey", "price": 4.99 }
+   ]
+
+2. Create a page at /products that:
+   - Fetches the product data SERVER-SIDE (not from the browser — use the
+     framework's server-side data fetching to call the API or directly return
+     the same data)
+   - Displays an h1 "Products"
+   - Renders each product in a <ul> list
+   - Each <li> should show: "{name} - ${price}"
+     For example: "Widget - $9.99"
+
+All content must be server-rendered (visible in raw HTML).
+"""
+
+[starter]
+template = "rex"
+
+[checks]
+build = true
+serve = true
+
+# API route
+[[checks.http]]
+path = "/api/products"
+status = 200
+
+# Products page
+[[checks.http]]
+path = "/products"
+status = 200
+
+[[checks.ssr]]
+path = "/products"
+contains = ["Products", "Widget", "Gadget", "Doohickey", "9.99", "24.99", "4.99"]
+
+[[checks.dom]]
+path = "/products"
+selector = "h1"
+text = "Products"
+
+[[checks.dom]]
+path = "/products"
+selector = "ul"
+exists = true
+
+[[checks.dom]]
+path = "/products"
+selector = "li"
+contains = "Widget"
