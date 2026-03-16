@@ -1,0 +1,47 @@
+[task]
+id = "t1-03"
+tier = 1
+name = "GSSP data fetching"
+prompt = """
+Create a page at /users that:
+1. Uses getServerSideProps to generate a list of 3 users:
+   - { name: "Alice", role: "Engineer" }
+   - { name: "Bob", role: "Designer" }
+   - { name: "Carol", role: "Manager" }
+2. Displays an h1 heading with the text "Team"
+3. Renders each user as a list item in a <ul> element
+4. Each list item should contain the text "{name} - {role}"
+
+The data must be generated server-side in getServerSideProps, not hardcoded in the component.
+The content must appear in the raw HTML (server-rendered).
+"""
+
+[starter]
+template = "rex"
+
+[checks]
+build = true
+serve = true
+
+[[checks.http]]
+path = "/users"
+status = 200
+
+[[checks.ssr]]
+path = "/users"
+contains = ["Team", "Alice - Engineer", "Bob - Designer", "Carol - Manager"]
+
+[[checks.dom]]
+path = "/users"
+selector = "h1"
+text = "Team"
+
+[[checks.dom]]
+path = "/users"
+selector = "ul"
+exists = true
+
+[[checks.dom]]
+path = "/users"
+selector = "li"
+contains = "Alice"
