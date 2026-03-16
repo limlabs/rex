@@ -6,7 +6,10 @@ use crate::page_exports::{detect_data_strategy, detect_has_static_paths};
 use anyhow::Result;
 use rex_core::{ProjectConfig, RexConfig};
 use rex_router::ScanResult;
-use rolldown_common::Output;
+use rolldown_common::{
+    ManualCodeSplittingOptions, MatchGroup, MatchGroupName, MatchGroupTest, Output,
+};
+use rolldown_utils::js_regex::HybridRegex;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -224,13 +227,29 @@ if (!window.__REX_NAVIGATING__) {{
     // Append user-defined aliases from rex.config build.alias
     client_aliases.extend(project_config.build.resolved_aliases(&config.project_root));
 
+    // Force react/react-dom into a stable vendor chunk so HMR doesn't
+    // re-initialize React and break the running component tree.
+    let vendor_chunk = MatchGroup {
+        name: MatchGroupName::Static("vendor".to_string()),
+        test: Some(MatchGroupTest::Regex(
+            HybridRegex::new("node_modules[\\\\/](react|react-dom)[\\\\/]")
+                .expect("valid vendor regex"),
+        )),
+        priority: Some(100),
+        ..Default::default()
+    };
+
     let options = rolldown::BundlerOptions {
         input: Some(inputs),
         cwd: Some(config.project_root.clone()),
         format: Some(rolldown::OutputFormat::Esm),
         dir: Some(output_dir.to_string_lossy().to_string()),
         entry_filenames: Some(format!("[name]-{hash}.js").into()),
-        chunk_filenames: Some(format!("chunk-[name]-{hash}.js").into()),
+        // Use rolldown's content-based [hash] for shared chunks so that stable
+        // dependencies (e.g. the vendor/React chunk) keep the same filename
+        // across HMR rebuilds — the browser reuses the cached ESM module and
+        // React stays a singleton instead of being re-initialized.
+        chunk_filenames: Some("chunk-[name]-[hash].js".to_string().into()),
         asset_filenames: Some(format!("[name]-{hash}.[ext]").into()),
         platform: Some(rolldown::Platform::Browser),
         module_types: Some(module_types),
@@ -238,6 +257,10 @@ if (!window.__REX_NAVIGATING__) {{
         define: Some(define.iter().cloned().collect()),
         tsconfig: Some(rolldown_common::TsConfig::Auto(true)),
         treeshake: crate::rsc_build_config::react_treeshake_options(),
+        manual_code_splitting: Some(ManualCodeSplittingOptions {
+            groups: Some(vec![vendor_chunk]),
+            ..Default::default()
+        }),
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(client_aliases),
             extensions: Some(vec![
