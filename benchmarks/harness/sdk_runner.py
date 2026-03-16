@@ -383,8 +383,19 @@ def setup_workdir(condition: SDKCondition) -> Path:
     # Ensure pages/ or routes/ dir exists
     (tmp / "pages").mkdir(exist_ok=True)
 
-    # Write CLAUDE.md
-    (tmp / "CLAUDE.md").write_text(condition.claude_md)
+    # Symlink rex binary into the project so `rex` is available in Bash
+    rex_bin_path = Path(REX_BIN)
+    if rex_bin_path.exists():
+        link = tmp / "rex"
+        if not link.exists():
+            link.symlink_to(rex_bin_path.resolve())
+
+    # Write CLAUDE.md — include rex binary location
+    claude_md = condition.claude_md.replace(
+        "The rex binary is available",
+        f"The rex binary is at ./rex (or {REX_BIN}). It is also available",
+    )
+    (tmp / "CLAUDE.md").write_text(claude_md)
 
     # Write hooks config
     if condition.hooks:
@@ -477,6 +488,13 @@ async def run_one(
 ) -> EvalResult:
     """Run a single task under a single condition via SDK."""
     workdir = setup_workdir(condition)
+
+    # Inject any starter files from the task spec
+    inject = task.get("starter", {}).get("inject", {})
+    for rel_path, content in inject.items():
+        fp = workdir / rel_path
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        fp.write_text(content)
 
     try:
         metrics = await run_sdk_agent(

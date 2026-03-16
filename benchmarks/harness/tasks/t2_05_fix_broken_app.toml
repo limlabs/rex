@@ -1,0 +1,77 @@
+[task]
+id = "t2-05"
+tier = 2
+name = "Fix broken deploy"
+prompt = """
+This Rex project has a broken page that fails to build. Your job is to:
+
+1. Try building the project with `rex build --root .`
+2. Read the error output and fix the broken page
+3. Rebuild until the build succeeds
+4. Start the server with `rex start --root . --port 4567` and verify
+   http://localhost:4567/dashboard returns a page with an h1 "Dashboard"
+5. Stop the server when done.
+
+The broken page is at pages/dashboard.tsx. Do not delete it — fix it.
+"""
+
+[starter]
+template = "rex"
+
+[starter.inject]
+"pages/dashboard.tsx" = """
+import React from "react";
+
+// BUG: missing closing tag, wrong export syntax, bad JSX
+export function DashboardPage({ stats }) {
+  return (
+    <div>
+      <h1>Dashboard</h1>
+      <p>Welcome to the dashboard.</p>
+      <ul>
+        {stats.map(s =>
+          <li key={s.id}>{s.name}: {s.value}</li>
+        }
+      </ul>
+    </div>
+  );
+}
+
+export async function getServerSideProps() {
+  return {
+    props: {
+      stats: [
+        { id: 1, name: "Users", value: 42 },
+        { id: 2, name: "Revenue", value: "$1,234" },
+      ]
+    }
+  };
+}
+"""
+
+[checks]
+build = true
+serve = true
+
+[[checks.http]]
+path = "/dashboard"
+status = 200
+
+[[checks.ssr]]
+path = "/dashboard"
+contains = ["Dashboard", "Users", "42", "Revenue"]
+
+[[checks.dom]]
+path = "/dashboard"
+selector = "h1"
+text = "Dashboard"
+
+[[checks.dom]]
+path = "/dashboard"
+selector = "ul"
+exists = true
+
+[[checks.dom]]
+path = "/dashboard"
+selector = "li"
+contains = "Users"

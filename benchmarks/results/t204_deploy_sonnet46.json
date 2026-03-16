@@ -1,0 +1,68 @@
+[
+  {
+    "task_id": "t2-04",
+    "task_name": "Build and verify",
+    "tier": 2,
+    "condition": "rex_mcp",
+    "model": "claude-sonnet-4-6",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.3333333333333333,
+    "median_tokens": 117064,
+    "median_tool_calls": 20,
+    "median_wall_ms": 38717.7327090003,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET / -> 200": 0.0,
+      "http GET /api/health -> 200": 0.0,
+      "ssr /": 0.0,
+      "dom / h1": 0.0
+    }
+  },
+  {
+    "task_id": "t2-04",
+    "task_name": "Build and verify",
+    "tier": 2,
+    "condition": "rex_guided",
+    "model": "claude-sonnet-4-6",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 148181,
+    "median_tool_calls": 19,
+    "median_wall_ms": 37120.66362499991,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET / -> 200": 1.0,
+      "http GET /api/health -> 200": 1.0,
+      "ssr /": 1.0,
+      "dom / h1": 1.0
+    }
+  },
+  {
+    "task_id": "t2-04",
+    "task_name": "Build and verify",
+    "tier": 2,
+    "condition": "rex_raw",
+    "model": "claude-sonnet-4-6",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.3333333333333333,
+    "median_tokens": 119457,
+    "median_tool_calls": 18,
+    "median_wall_ms": 35646.96249999997,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET / -> 200": 0.0,
+      "http GET /api/health -> 200": 0.0,
+      "ssr /": 0.0,
+      "dom / h1": 0.0
+    }
+  }
+]

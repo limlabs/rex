@@ -1,0 +1,71 @@
+[
+  {
+    "task_id": "t2-05",
+    "task_name": "Fix broken deploy",
+    "tier": 2,
+    "condition": "rex_mcp",
+    "model": "claude-sonnet-4-6",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 195534,
+    "median_tool_calls": 25,
+    "median_wall_ms": 55563.491833000626,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /dashboard -> 200": 1.0,
+      "ssr /dashboard": 1.0,
+      "dom /dashboard h1": 1.0,
+      "dom /dashboard ul": 1.0,
+      "dom /dashboard li": 1.0
+    }
+  },
+  {
+    "task_id": "t2-05",
+    "task_name": "Fix broken deploy",
+    "tier": 2,
+    "condition": "rex_guided",
+    "model": "claude-sonnet-4-6",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 129656,
+    "median_tool_calls": 21,
+    "median_wall_ms": 36549.03091599954,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /dashboard -> 200": 1.0,
+      "ssr /dashboard": 1.0,
+      "dom /dashboard h1": 1.0,
+      "dom /dashboard ul": 1.0,
+      "dom /dashboard li": 1.0
+    }
+  },
+  {
+    "task_id": "t2-05",
+    "task_name": "Fix broken deploy",
+    "tier": 2,
+    "condition": "rex_raw",
+    "model": "claude-sonnet-4-6",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 129146,
+    "median_tool_calls": 19,
+    "median_wall_ms": 38820.30487500015,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /dashboard -> 200": 1.0,
+      "ssr /dashboard": 1.0,
+      "dom /dashboard h1": 1.0,
+      "dom /dashboard ul": 1.0,
+      "dom /dashboard li": 1.0
+    }
+  }
+]

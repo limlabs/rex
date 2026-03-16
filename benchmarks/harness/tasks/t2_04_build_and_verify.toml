@@ -1,0 +1,48 @@
+[task]
+id = "t2-04"
+tier = 2
+name = "Build and verify"
+prompt = """
+Create a Rex app, build it for production, and verify it works:
+
+1. Create a home page at / with an h1 "Hello World" and a paragraph "Welcome to my app."
+2. Create a page at /api/health that returns JSON: { "status": "ok" }
+3. Run `rex build` to build the project for production. If the build fails,
+   fix any errors and rebuild until it succeeds.
+4. After a successful build, run `rex start --port 4567` to start the
+   production server.
+5. Verify the app works by curling both endpoints:
+   - curl http://localhost:4567/ should return HTML containing "Hello World"
+   - curl http://localhost:4567/api/health should return {"status":"ok"}
+6. After verifying, stop the server.
+
+The rex binary is available at the path in your PATH. Use `rex build --root .`
+and `rex start --root . --port 4567` to build and serve.
+
+Do NOT skip the verification step — you must actually start the server and
+curl the endpoints to confirm they work.
+"""
+
+[starter]
+template = "rex"
+
+[checks]
+build = true
+serve = true
+
+[[checks.http]]
+path = "/"
+status = 200
+
+[[checks.ssr]]
+path = "/"
+contains = ["Hello World", "Welcome to my app."]
+
+[[checks.dom]]
+path = "/"
+selector = "h1"
+text = "Hello World"
+
+[[checks.http]]
+path = "/api/health"
+status = 200
