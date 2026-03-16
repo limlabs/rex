@@ -63,7 +63,7 @@ def evaluate(
 
     # --- Gate: build ---
     if checks.get("build"):
-        ok, detail = _check_build(condition.build_cmd, workdir)
+        ok, detail = _check_build(condition.build_cmd, workdir, condition.name)
         result.checks.append(CheckResult("build", ok, detail))
         if not ok:
             return result
@@ -72,7 +72,7 @@ def evaluate(
     server = None
     port = None
     if checks.get("serve"):
-        server, port, detail = _start_server(condition.serve_cmd, workdir)
+        server, port, detail = _start_server(condition.serve_cmd, workdir, condition.name)
         ok = server is not None
         result.checks.append(CheckResult("serve", ok, detail))
         if not ok:
@@ -109,11 +109,16 @@ def evaluate(
 # ---------------------------------------------------------------------------
 
 
-def _check_build(cmd: list[str], workdir: Path) -> tuple[bool, str]:
+def _check_build(
+    cmd: list[str], workdir: Path, condition_name: str = "rex_raw"
+) -> tuple[bool, str]:
     """Run the build command, return (success, detail)."""
+    full_cmd = cmd[:]
+    if condition_name.startswith("rex"):
+        full_cmd += ["--root", str(workdir)]
     try:
         proc = subprocess.run(
-            cmd,
+            full_cmd,
             cwd=workdir,
             capture_output=True,
             text=True,
@@ -134,10 +139,23 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
-def _start_server(cmd: list[str], workdir: Path) -> tuple[subprocess.Popen | None, int | None, str]:
+def _build_serve_cmd(cmd: list[str], port: int, workdir: Path, condition_name: str) -> list[str]:
+    """Build the full serve command with port and any condition-specific flags."""
+    if condition_name.startswith("rex"):
+        return cmd + ["--port", str(port), "--root", str(workdir)]
+    elif condition_name == "tanstack_raw":
+        return cmd + ["--port", str(port), "--host", "127.0.0.1"]
+    else:
+        # Next.js, Remix: use --port
+        return cmd + ["--port", str(port)]
+
+
+def _start_server(
+    cmd: list[str], workdir: Path, condition_name: str = "rex_raw"
+) -> tuple[subprocess.Popen | None, int | None, str]:
     """Start the server, wait for it to respond, return (process, port, detail)."""
     port = _find_free_port()
-    full_cmd = cmd + ["--port", str(port), "--root", str(workdir)]
+    full_cmd = _build_serve_cmd(cmd, port, workdir, condition_name)
 
     proc = subprocess.Popen(
         full_cmd,

@@ -7,7 +7,8 @@ Create a page at /about that displays:
 - An h1 heading with the text "About Us"
 - A paragraph with the text "Learn more about our company."
 
-The page should be server-rendered (the content must appear in the raw HTML).
+The page should be server-rendered (the content must appear in the raw HTML
+response before any JavaScript runs).
 """
 
 [starter]

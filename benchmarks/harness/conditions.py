@@ -215,7 +215,61 @@ class Condition:
     build_cmd: list[str]
     serve_cmd: list[str]
     starter: str
+    system_prompt: str = ""
     setup_hook: Callable[[Path], None] | None = None
+
+
+# ---------------------------------------------------------------------------
+# System prompts per framework (tells the agent which conventions to use)
+# ---------------------------------------------------------------------------
+
+_REX_SYSTEM = (
+    "You are building a web application in a Rex project. "
+    "Rex is a Rust-native React framework with file-based routing. "
+    "Pages go in the pages/ directory (e.g. pages/about.tsx, pages/blog/[slug].tsx). "
+    "Use getServerSideProps(context) for server-side data fetching — it receives "
+    "context.params, context.query, context.req, context.res. "
+    "API routes go in pages/api/ (e.g. pages/api/hello.ts) and export a default handler(req, res). "
+    "All pages must import React and export a default component."
+)
+
+_NEXTJS_SYSTEM = (
+    "You are building a web application in a Next.js 16 project (Pages Router). "
+    "Pages go in the pages/ directory (e.g. pages/about.tsx, pages/blog/[slug].tsx). "
+    "Use getServerSideProps(context) for server-side data fetching — it receives "
+    "context.params, context.query, context.req, context.res. "
+    "API routes go in pages/api/ (e.g. pages/api/hello.ts) and export a default handler(req, res). "
+    "All pages export a default React component. Do NOT use the App Router."
+)
+
+_TANSTACK_SYSTEM = (
+    "You are building a web application in a TanStack Start project. "
+    "Routes go in src/routes/ using file-based routing. "
+    "Each route file exports a Route created with createFileRoute('/path')({...}). "
+    "Use the 'loader' option for server-side data fetching — loaders run on the server "
+    "and their return value is available via useLoaderData() in the component. "
+    "Dynamic segments use $ prefix in filenames: src/routes/blog/$slug.tsx. "
+    "API routes use createAPIFileRoute and export GET/POST handlers. "
+    "The root route (__root.tsx) and router.tsx are already set up. "
+    "After creating route files, run 'npx tsr generate' to update the route tree."
+)
+
+_REMIX_SYSTEM = (
+    "You are building a web application in a React Router v7 (Remix) project with framework mode. "
+    "Routes go in app/routes/ using file-based routing with flat file convention. "
+    "Route filenames use dot-delimited segments: app/routes/about.tsx, app/routes/blog.$slug.tsx. "
+    "The index route is app/routes/_index.tsx. "
+    "Use the 'loader' function export for server-side data fetching — it receives a "
+    "LoaderFunctionArgs with params and request. Return data directly or use json(). "
+    "Access loader data in the component with useLoaderData(). "
+    "Import Route types from './+types/<route-name>' for type safety. "
+    "The root layout (app/root.tsx) is already set up."
+)
+
+
+# ---------------------------------------------------------------------------
+# Condition factories
+# ---------------------------------------------------------------------------
 
 
 def rex_harness(rex_bin: str) -> Condition:
@@ -226,6 +280,7 @@ def rex_harness(rex_bin: str) -> Condition:
         build_cmd=[rex_bin, "build"],
         serve_cmd=[rex_bin, "start"],
         starter="rex",
+        system_prompt=_REX_SYSTEM,
     )
 
 
@@ -237,6 +292,49 @@ def rex_raw(rex_bin: str) -> Condition:
         build_cmd=[rex_bin, "build"],
         serve_cmd=[rex_bin, "start"],
         starter="rex",
+        system_prompt=_REX_SYSTEM,
+    )
+
+
+def nextjs_raw() -> Condition:
+    """Next.js 16 Pages Router with raw file editing."""
+    return Condition(
+        name="nextjs_raw",
+        tools=FILE_TOOLS,
+        build_cmd=["npx", "next", "build"],
+        serve_cmd=["npx", "next", "start"],
+        starter="nextjs",
+        system_prompt=_NEXTJS_SYSTEM,
+    )
+
+
+def tanstack_raw() -> Condition:
+    """TanStack Start with raw file editing."""
+
+    def setup(workdir: Path) -> None:
+        # Generate the route tree after agent creates files.
+        # This is handled as a pre-build step instead.
+        pass
+
+    return Condition(
+        name="tanstack_raw",
+        tools=FILE_TOOLS,
+        build_cmd=["npx", "vite", "build"],
+        serve_cmd=["npx", "vite", "preview"],
+        starter="tanstack",
+        system_prompt=_TANSTACK_SYSTEM,
+    )
+
+
+def remix_raw() -> Condition:
+    """React Router v7 (Remix) framework mode with raw file editing."""
+    return Condition(
+        name="remix_raw",
+        tools=FILE_TOOLS,
+        build_cmd=["npx", "react-router", "build"],
+        serve_cmd=["npx", "react-router-serve", "./build/server/index.js"],
+        starter="remix",
+        system_prompt=_REMIX_SYSTEM,
     )
 
 

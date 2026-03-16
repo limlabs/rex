@@ -39,7 +39,8 @@ def run_agent(
     tool_executor: ToolExecutor,
     *,
     max_turns: int = 50,
-    model: str = "claude-sonnet-4-6-20250514",
+    model: str = "claude-sonnet-4-20250514",
+    system_prompt: str = "",
 ) -> AgentMetrics:
     """
     Agentic tool-use loop. Sends the prompt, executes tool calls returned by the
@@ -52,9 +53,7 @@ def run_agent(
     t0 = time.monotonic()
 
     system = (
-        f"You are building a web application in a Rex project. "
-        f"Rex is a Rust-native React framework with file-based routing (pages/ directory), "
-        f"getServerSideProps for server-side data fetching, and API routes in pages/api/. "
+        f"{system_prompt}\n\n"
         f"Your working directory is: {workdir}\n\n"
         f"Complete the task described in the user message. Use the tools provided. "
         f"When you are finished, respond with text only (no tool calls) summarizing what you did."

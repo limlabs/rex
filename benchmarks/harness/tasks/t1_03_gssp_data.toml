@@ -4,7 +4,7 @@ tier = 1
 name = "GSSP data fetching"
 prompt = """
 Create a page at /users that:
-1. Uses getServerSideProps to generate a list of 3 users:
+1. Fetches data on the server (not in the browser) with this list of 3 users:
    - { name: "Alice", role: "Engineer" }
    - { name: "Bob", role: "Designer" }
    - { name: "Carol", role: "Manager" }
@@ -12,8 +12,9 @@ Create a page at /users that:
 3. Renders each user as a list item in a <ul> element
 4. Each list item should contain the text "{name} - {role}"
 
-The data must be generated server-side in getServerSideProps, not hardcoded in the component.
-The content must appear in the raw HTML (server-rendered).
+The data must be fetched/generated server-side (using whatever server-side data
+fetching mechanism the framework provides). The content must appear in the raw
+HTML (server-rendered).
 """
 
 [starter]

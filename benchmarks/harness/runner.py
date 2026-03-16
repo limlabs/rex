@@ -34,8 +34,11 @@ from .conditions import (
     Condition,
     make_harness_executor,
     make_raw_executor,
+    nextjs_raw,
+    remix_raw,
     rex_harness,
     rex_raw,
+    tanstack_raw,
 )
 from .evaluator import EvalResult, evaluate
 
@@ -169,7 +172,8 @@ def run_one(
     dry_run: bool = False,
 ) -> EvalResult:
     """Run a single task under a single condition. Returns evaluation result."""
-    starter = task.get("starter", {}).get("template", condition.starter)
+    # Each condition forces its own starter template (rex, nextjs, tanstack, remix)
+    starter = condition.starter
     workdir = setup_workdir(starter)
 
     try:
@@ -202,6 +206,7 @@ def run_one(
                 workdir=workdir,
                 tool_executor=executor,
                 model=model,
+                system_prompt=condition.system_prompt,
             )
 
         # Evaluate the result
@@ -378,7 +383,7 @@ def main() -> None:
     parser.add_argument(
         "--condition",
         nargs="+",
-        choices=["rex_harness", "rex_raw"],
+        choices=["rex_harness", "rex_raw", "nextjs_raw", "tanstack_raw", "remix_raw"],
         help="Conditions to test (default: all)",
     )
     parser.add_argument(
@@ -406,8 +411,11 @@ def main() -> None:
         print("Set it with: export ANTHROPIC_API_KEY=sk-ant-...")
         sys.exit(1)
 
-    # Check rex binary
-    if not Path(REX_BIN).exists():
+    # Check rex binary (only needed for rex conditions)
+    rex_conditions_requested = not args.condition or any(
+        c.startswith("rex") for c in (args.condition or [])
+    )
+    if rex_conditions_requested and not Path(REX_BIN).exists():
         print(f"{red('ERROR')}: Rex binary not found at {REX_BIN}")
         print("Build with: cargo build")
         print("Or set REX_BIN env var to the path of the rex binary.")
@@ -420,10 +428,13 @@ def main() -> None:
         sys.exit(1)
 
     # Build conditions
-    all_conditions = {
-        "rex_harness": rex_harness(REX_BIN),
-        "rex_raw": rex_raw(REX_BIN),
-    }
+    all_conditions: dict[str, Condition] = {}
+    if Path(REX_BIN).exists():
+        all_conditions["rex_harness"] = rex_harness(REX_BIN)
+        all_conditions["rex_raw"] = rex_raw(REX_BIN)
+    all_conditions["nextjs_raw"] = nextjs_raw()
+    all_conditions["tanstack_raw"] = tanstack_raw()
+    all_conditions["remix_raw"] = remix_raw()
     conditions = {
         k: v for k, v in all_conditions.items() if not args.condition or k in args.condition
     }
