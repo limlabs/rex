@@ -1,18 +1,29 @@
 """
 Agent loop: sends a task prompt to the Anthropic API with condition-specific
-tools, dispatches tool calls, and collects metrics.
+tools, dispatches tool calls, and collects metrics + trajectory.
 """
 
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
 import anthropic
 
 client = anthropic.Anthropic()
+
+
+@dataclass
+class TrajectoryStep:
+    """One tool call + result in the agent's trajectory."""
+
+    tool: str
+    input_keys: list[str]
+    result_len: int
+    is_error: bool
+    tokens_after: int  # cumulative tokens after this step
 
 
 @dataclass
@@ -23,10 +34,24 @@ class AgentMetrics:
     errors: int = 0
     wall_clock_ms: float = 0
     turns: int = 0
+    trajectory: list[TrajectoryStep] = field(default_factory=list)
 
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
+
+    def trajectory_summary(self) -> list[dict]:
+        """Serializable trajectory for JSON output."""
+        return [
+            {
+                "tool": s.tool,
+                "input_keys": s.input_keys,
+                "result_len": s.result_len,
+                "is_error": s.is_error,
+                "tokens_after": s.tokens_after,
+            }
+            for s in self.trajectory
+        ]
 
 
 ToolExecutor = Callable[[str, dict, Path], tuple[str, bool]]
@@ -47,7 +72,7 @@ def run_agent(
     model, feeds results back, and repeats until the model stops calling tools
     or max_turns is reached.
 
-    Returns collected metrics (tokens, tool calls, timing).
+    Returns collected metrics including full trajectory.
     """
     metrics = AgentMetrics()
     t0 = time.monotonic()
@@ -90,6 +115,18 @@ def run_agent(
             result_text, is_error = tool_executor(block.name, block.input, workdir)
             if is_error:
                 metrics.errors += 1
+
+            # Record trajectory step
+            metrics.trajectory.append(
+                TrajectoryStep(
+                    tool=block.name,
+                    input_keys=list(block.input.keys()),
+                    result_len=len(str(result_text)),
+                    is_error=is_error,
+                    tokens_after=metrics.total_tokens,
+                )
+            )
+
             tool_results.append(
                 {
                     "type": "tool_result",

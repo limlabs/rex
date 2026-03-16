@@ -1,0 +1,1323 @@
+[
+  {
+    "task_id": "t1-01",
+    "task_name": "Static page",
+    "tier": 1,
+    "condition": "rex_harness",
+    "model": "claude-sonnet-4-20250514",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 3163,
+    "median_tool_calls": 1,
+    "median_wall_ms": 5725.3700839937665,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /about -> 200": 1.0,
+      "ssr /about": 1.0,
+      "dom /about h1": 1.0,
+      "dom /about p": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "create_page",
+          "input_keys": [
+            "route",
+            "body_tsx"
+          ],
+          "result_len": 47,
+          "is_error": false,
+          "tokens_after": 1522
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t1-01",
+    "task_name": "Static page",
+    "tier": 1,
+    "condition": "rex_raw",
+    "model": "claude-sonnet-4-20250514",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 3667,
+    "median_tool_calls": 2,
+    "median_wall_ms": 8747.683249996044,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /about -> 200": 1.0,
+      "ssr /about": 1.0,
+      "dom /about h1": 1.0,
+      "dom /about p": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 59,
+          "is_error": false,
+          "tokens_after": 1007
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 33,
+          "is_error": false,
+          "tokens_after": 2255
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t1-01",
+    "task_name": "Static page",
+    "tier": 1,
+    "condition": "nextjs_raw",
+    "model": "claude-sonnet-4-20250514",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 5429,
+    "median_tool_calls": 3,
+    "median_wall_ms": 10989.411374990596,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /about -> 200": 1.0,
+      "ssr /about": 1.0,
+      "dom /about h1": 1.0,
+      "dom /about p": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 74,
+          "is_error": false,
+          "tokens_after": 1005
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 33,
+          "is_error": false,
+          "tokens_after": 2300
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 552,
+          "is_error": false,
+          "tokens_after": 3688
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t1-01",
+    "task_name": "Static page",
+    "tier": 1,
+    "condition": "tanstack_raw",
+    "model": "claude-sonnet-4-20250514",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 61072,
+    "median_tool_calls": 19,
+    "median_wall_ms": 74956.08770899707,
+    "median_errors": 2,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /about -> 200": 1.0,
+      "ssr /about": 1.0,
+      "dom /about h1": 1.0,
+      "dom /about p": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 21,
+          "is_error": false,
+          "tokens_after": 1037
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 219,
+          "is_error": false,
+          "tokens_after": 2152
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 38,
+          "is_error": false,
+          "tokens_after": 3524
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 40,
+          "is_error": true,
+          "tokens_after": 4991
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 117,
+          "is_error": false,
+          "tokens_after": 6557
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 374,
+          "is_error": false,
+          "tokens_after": 8235
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 16,
+          "is_error": false,
+          "tokens_after": 10109
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 580,
+          "is_error": false,
+          "tokens_after": 12068
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 166,
+          "is_error": false,
+          "tokens_after": 14365
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 163,
+          "is_error": true,
+          "tokens_after": 16807
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 1665,
+          "is_error": false,
+          "tokens_after": 19404
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 153,
+          "is_error": false,
+          "tokens_after": 22564
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 20,
+          "is_error": false,
+          "tokens_after": 25875
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 1801,
+          "is_error": false,
+          "tokens_after": 29279
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 1411,
+          "is_error": false,
+          "tokens_after": 33340
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 1487,
+          "is_error": false,
+          "tokens_after": 38010
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 264,
+          "is_error": false,
+          "tokens_after": 43356
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 281,
+          "is_error": false,
+          "tokens_after": 48963
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 281,
+          "is_error": false,
+          "tokens_after": 54837
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t1-01",
+    "task_name": "Static page",
+    "tier": 1,
+    "condition": "remix_raw",
+    "model": "claude-sonnet-4-20250514",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.0,
+    "median_tokens": 6889,
+    "median_tool_calls": 4,
+    "median_wall_ms": 12730.432916985592,
+    "median_errors": 0,
+    "checks": {
+      "build": 0.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 32,
+          "is_error": false,
+          "tokens_after": 1042
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 435,
+          "is_error": false,
+          "tokens_after": 2166
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 38,
+          "is_error": false,
+          "tokens_after": 3604
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 139,
+          "is_error": false,
+          "tokens_after": 5134
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t1-02",
+    "task_name": "Dynamic route",
+    "tier": 1,
+    "condition": "rex_harness",
+    "model": "claude-sonnet-4-20250514",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 3515,
+    "median_tool_calls": 1,
+    "median_wall_ms": 7653.414833010174,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /blog/hello-world -> 200": 1.0,
+      "http GET /blog/another-post -> 200": 1.0,
+      "ssr /blog/hello-world": 1.0,
+      "ssr /blog/another-post": 1.0,
+      "dom /blog/hello-world h1": 1.0,
+      "dom /blog/hello-world p": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "create_page",
+          "input_keys": [
+            "route",
+            "body_tsx",
+            "gssp"
+          ],
+          "result_len": 59,
+          "is_error": false,
+          "tokens_after": 1645
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t1-02",
+    "task_name": "Dynamic route",
+    "tier": 1,
+    "condition": "rex_raw",
+    "model": "claude-sonnet-4-20250514",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 9810,
+    "median_tool_calls": 5,
+    "median_wall_ms": 16827.485416986747,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /blog/hello-world -> 200": 1.0,
+      "http GET /blog/another-post -> 200": 1.0,
+      "ssr /blog/hello-world": 1.0,
+      "ssr /blog/another-post": 1.0,
+      "dom /blog/hello-world h1": 1.0,
+      "dom /blog/hello-world p": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 59,
+          "is_error": false,
+          "tokens_after": 1098
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 327,
+          "is_error": false,
+          "tokens_after": 2283
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 39,
+          "is_error": false,
+          "tokens_after": 3888
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 476,
+          "is_error": false,
+          "tokens_after": 5587
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 81,
+          "is_error": false,
+          "tokens_after": 7525
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t1-02",
+    "task_name": "Dynamic route",
+    "tier": 1,
+    "condition": "nextjs_raw",
+    "model": "claude-sonnet-4-20250514",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 5873,
+    "median_tool_calls": 3,
+    "median_wall_ms": 12530.05766600836,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /blog/hello-world -> 200": 1.0,
+      "http GET /blog/another-post -> 200": 1.0,
+      "ssr /blog/hello-world": 1.0,
+      "ssr /blog/another-post": 1.0,
+      "dom /blog/hello-world h1": 1.0,
+      "dom /blog/hello-world p": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 74,
+          "is_error": false,
+          "tokens_after": 1098
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 39,
+          "is_error": false,
+          "tokens_after": 2482
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 449,
+          "is_error": false,
+          "tokens_after": 3961
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t1-02",
+    "task_name": "Dynamic route",
+    "tier": 1,
+    "condition": "tanstack_raw",
+    "model": "claude-sonnet-4-20250514",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 51314,
+    "median_tool_calls": 17,
+    "median_wall_ms": 107274.0215829981,
+    "median_errors": 2,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /blog/hello-world -> 200": 1.0,
+      "http GET /blog/another-post -> 200": 1.0,
+      "ssr /blog/hello-world": 1.0,
+      "ssr /blog/another-post": 1.0,
+      "dom /blog/hello-world h1": 1.0,
+      "dom /blog/hello-world p": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 36,
+          "is_error": false,
+          "tokens_after": 1110
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 219,
+          "is_error": false,
+          "tokens_after": 2304
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 43,
+          "is_error": false,
+          "tokens_after": 3833
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 40,
+          "is_error": true,
+          "tokens_after": 5459
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 59,
+          "is_error": false,
+          "tokens_after": 7189
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 580,
+          "is_error": false,
+          "tokens_after": 9007
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 166,
+          "is_error": false,
+          "tokens_after": 11156
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 769,
+          "is_error": false,
+          "tokens_after": 13441
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 55,
+          "is_error": true,
+          "tokens_after": 16060
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 374,
+          "is_error": false,
+          "tokens_after": 18798
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 1899,
+          "is_error": false,
+          "tokens_after": 21740
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 16,
+          "is_error": false,
+          "tokens_after": 25377
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 16,
+          "is_error": false,
+          "tokens_after": 29085
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 143,
+          "is_error": false,
+          "tokens_after": 32873
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 1411,
+          "is_error": false,
+          "tokens_after": 36800
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 264,
+          "is_error": false,
+          "tokens_after": 41311
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 434,
+          "is_error": false,
+          "tokens_after": 46053
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t1-02",
+    "task_name": "Dynamic route",
+    "tier": 1,
+    "condition": "remix_raw",
+    "model": "claude-sonnet-4-20250514",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.0,
+    "median_tokens": 4594,
+    "median_tool_calls": 2,
+    "median_wall_ms": 12516.37920900248,
+    "median_errors": 0,
+    "checks": {
+      "build": 0.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 43,
+          "is_error": false,
+          "tokens_after": 1306
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 497,
+          "is_error": false,
+          "tokens_after": 2711
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t1-03",
+    "task_name": "GSSP data fetching",
+    "tier": 1,
+    "condition": "rex_harness",
+    "model": "claude-sonnet-4-20250514",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 3702,
+    "median_tool_calls": 1,
+    "median_wall_ms": 7379.203207994578,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /users -> 200": 1.0,
+      "ssr /users": 1.0,
+      "dom /users h1": 1.0,
+      "dom /users ul": 1.0,
+      "dom /users li": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "create_page",
+          "input_keys": [
+            "route",
+            "body_tsx",
+            "gssp"
+          ],
+          "result_len": 47,
+          "is_error": false,
+          "tokens_after": 1742
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t1-03",
+    "task_name": "GSSP data fetching",
+    "tier": 1,
+    "condition": "rex_raw",
+    "model": "claude-sonnet-4-20250514",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 8192,
+    "median_tool_calls": 4,
+    "median_wall_ms": 14432.860417000484,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /users -> 200": 1.0,
+      "ssr /users": 1.0,
+      "dom /users h1": 1.0,
+      "dom /users ul": 1.0,
+      "dom /users li": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 59,
+          "is_error": false,
+          "tokens_after": 1122
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 327,
+          "is_error": false,
+          "tokens_after": 2346
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 33,
+          "is_error": false,
+          "tokens_after": 4066
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 709,
+          "is_error": false,
+          "tokens_after": 5874
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t1-03",
+    "task_name": "GSSP data fetching",
+    "tier": 1,
+    "condition": "nextjs_raw",
+    "model": "claude-sonnet-4-20250514",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 10841,
+    "median_tool_calls": 5,
+    "median_wall_ms": 33509.89225000376,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /users -> 200": 1.0,
+      "ssr /users": 1.0,
+      "dom /users h1": 1.0,
+      "dom /users ul": 1.0,
+      "dom /users li": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 74,
+          "is_error": false,
+          "tokens_after": 1129
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 398,
+          "is_error": false,
+          "tokens_after": 2366
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 33,
+          "is_error": false,
+          "tokens_after": 4165
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 557,
+          "is_error": false,
+          "tokens_after": 6052
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 193,
+          "is_error": false,
+          "tokens_after": 8261
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t1-03",
+    "task_name": "GSSP data fetching",
+    "tier": 1,
+    "condition": "tanstack_raw",
+    "model": "claude-sonnet-4-20250514",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 64508,
+    "median_tool_calls": 19,
+    "median_wall_ms": 126471.95487498539,
+    "median_errors": 2,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /users -> 200": 1.0,
+      "ssr /users": 1.0,
+      "dom /users h1": 1.0,
+      "dom /users ul": 1.0,
+      "dom /users li": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 36,
+          "is_error": false,
+          "tokens_after": 1150
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 38,
+          "is_error": false,
+          "tokens_after": 2673
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 40,
+          "is_error": true,
+          "tokens_after": 4292
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 59,
+          "is_error": false,
+          "tokens_after": 6009
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 580,
+          "is_error": false,
+          "tokens_after": 7814
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 166,
+          "is_error": false,
+          "tokens_after": 9950
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 374,
+          "is_error": false,
+          "tokens_after": 12219
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 16,
+          "is_error": false,
+          "tokens_after": 14690
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 55,
+          "is_error": true,
+          "tokens_after": 17261
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 1411,
+          "is_error": false,
+          "tokens_after": 19939
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 20,
+          "is_error": false,
+          "tokens_after": 23206
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 1801,
+          "is_error": false,
+          "tokens_after": 26573
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 219,
+          "is_error": false,
+          "tokens_after": 30603
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 215,
+          "is_error": false,
+          "tokens_after": 34800
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 11,
+          "is_error": false,
+          "tokens_after": 39188
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 264,
+          "is_error": false,
+          "tokens_after": 43674
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 510,
+          "is_error": false,
+          "tokens_after": 48398
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 758,
+          "is_error": false,
+          "tokens_after": 53418
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 85,
+          "is_error": false,
+          "tokens_after": 58796
+        }
+      ]
+    ]
+  },
+  {
+    "task_id": "t1-03",
+    "task_name": "GSSP data fetching",
+    "tier": 1,
+    "condition": "remix_raw",
+    "model": "claude-sonnet-4-20250514",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 50305,
+    "median_tool_calls": 15,
+    "median_wall_ms": 121490.19779099035,
+    "median_errors": 3,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /users -> 200": 1.0,
+      "ssr /users": 1.0,
+      "dom /users h1": 1.0,
+      "dom /users ul": 1.0,
+      "dom /users li": 1.0
+    },
+    "trajectories": [
+      [
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 115,
+          "is_error": false,
+          "tokens_after": 1150
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 435,
+          "is_error": false,
+          "tokens_after": 2427
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 38,
+          "is_error": false,
+          "tokens_after": 4192
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 40,
+          "is_error": false,
+          "tokens_after": 6051
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 1375,
+          "is_error": true,
+          "tokens_after": 8006
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 107,
+          "is_error": false,
+          "tokens_after": 10722
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 623,
+          "is_error": false,
+          "tokens_after": 13561
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 31,
+          "is_error": false,
+          "tokens_after": 16846
+        },
+        {
+          "tool": "write_file",
+          "input_keys": [
+            "path",
+            "content"
+          ],
+          "result_len": 39,
+          "is_error": false,
+          "tokens_after": 20302
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 55,
+          "is_error": true,
+          "tokens_after": 23848
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 859,
+          "is_error": false,
+          "tokens_after": 27502
+        },
+        {
+          "tool": "run_command",
+          "input_keys": [
+            "command"
+          ],
+          "result_len": 153,
+          "is_error": true,
+          "tokens_after": 31619
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 268,
+          "is_error": false,
+          "tokens_after": 35887
+        },
+        {
+          "tool": "read_file",
+          "input_keys": [
+            "path"
+          ],
+          "result_len": 752,
+          "is_error": false,
+          "tokens_after": 40377
+        },
+        {
+          "tool": "list_files",
+          "input_keys": [
+            "pattern"
+          ],
+          "result_len": 62,
+          "is_error": false,
+          "tokens_after": 45179
+        }
+      ]
+    ]
+  }
+]

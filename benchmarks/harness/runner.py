@@ -485,6 +485,7 @@ def main() -> None:
                     "task_name": tname,
                     "tier": task["task"]["tier"],
                     "condition": cname,
+                    "model": args.model,
                     "runs": len(runs),
                     "pass_rate": sum(r.passed for r in runs) / len(runs),
                     "avg_score": sum(r.score for r in runs) / len(runs),
@@ -493,6 +494,7 @@ def main() -> None:
                     "median_wall_ms": median([r.metrics.wall_clock_ms for r in runs]),
                     "median_errors": median([r.metrics.errors for r in runs]),
                     "checks": aggregate_checks(runs),
+                    "trajectories": [r.metrics.trajectory_summary() for r in runs],
                 }
             )
 
