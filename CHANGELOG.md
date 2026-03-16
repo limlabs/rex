@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.19.2](https://github.com/limlabs/rex/compare/v0.19.1...v0.19.2) (2026-03-16)
+
+
+### Bug Fixes
+
+* **image:** handle static asset imports in Image component ([ca403d9](https://github.com/limlabs/rex/commit/ca403d95a31ebcaa9ef837fcfe33e1e8e872c3fa))
+* **image:** resolve static asset URLs, handle object src, skip SVG optimizer ([b45546c](https://github.com/limlabs/rex/commit/b45546c9676fd11169d28f4222932e4bf62c077a))
+* **tui:** wrap long error messages and log entries to terminal width ([#215](https://github.com/limlabs/rex/issues/215)) ([38ffe57](https://github.com/limlabs/rex/commit/38ffe574e4dec0b2c7b0e7719709e98ea7b81424))
+
 ## [0.19.1](https://github.com/limlabs/rex/compare/v0.19.0...v0.19.1) (2026-03-15)
 
 
