@@ -91,11 +91,21 @@ pub async fn build_dep_esm_modules(
         let flight_deps = vec![
             (
                 "react-server-dom-webpack/server",
-                "export * from 'react-server-dom-webpack/server';",
+                concat!(
+                    "import S from 'react-server-dom-webpack/server';\n",
+                    "var { renderToReadableStream, registerServerReference, decodeReply, decodeAction } = S;\n",
+                    "export { renderToReadableStream, registerServerReference, decodeReply, decodeAction };\n",
+                    "export default S;\n",
+                ),
             ),
             (
                 "react-server-dom-webpack/client",
-                "export * from 'react-server-dom-webpack/client';",
+                concat!(
+                    "import C from 'react-server-dom-webpack/client';\n",
+                    "var { createFromReadableStream } = C;\n",
+                    "export { createFromReadableStream };\n",
+                    "export default C;\n",
+                ),
             ),
         ];
 
