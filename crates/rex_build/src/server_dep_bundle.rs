@@ -43,43 +43,68 @@ pub async fn build_dep_esm_modules(
 ) -> Result<ServerDepBundles> {
     let mut modules = Vec::new();
 
-    // Standard deps: React + renderToString.
-    // Use explicit named re-exports because `export *` doesn't always
-    // re-export CJS default exports correctly through rolldown.
-    let standard_deps = vec![
-        ("react", concat!(
-            "import React from 'react';\n",
-            "var { createElement, useState, useEffect, useContext, useReducer, useCallback,\n",
-            "  useMemo, useRef, useLayoutEffect, useImperativeHandle, useDebugValue,\n",
-            "  useDeferredValue, useTransition, useId, useSyncExternalStore, useInsertionEffect,\n",
-            "  useActionState, useOptimistic, use, memo, forwardRef, lazy, Suspense, Fragment,\n",
-            "  Children, Component, PureComponent, createContext, createRef, cloneElement,\n",
-            "  isValidElement, startTransition, cache } = React;\n",
-            "export { createElement, useState, useEffect, useContext, useReducer, useCallback,\n",
-            "  useMemo, useRef, useLayoutEffect, useImperativeHandle, useDebugValue,\n",
-            "  useDeferredValue, useTransition, useId, useSyncExternalStore, useInsertionEffect,\n",
-            "  useActionState, useOptimistic, use, memo, forwardRef, lazy, Suspense, Fragment,\n",
-            "  Children, Component, PureComponent, createContext, createRef, cloneElement,\n",
-            "  isValidElement, startTransition, cache };\n",
-            "export default React;\n",
-        )),
+    // React core module.
+    // For app router, use `react-server` conditions so RSC rendering works.
+    // For pages router, use standard conditions (hooks must be available).
+    let react_entry = concat!(
+        "import React from 'react';\n",
+        "var { createElement, useState, useEffect, useContext, useReducer, useCallback,\n",
+        "  useMemo, useRef, useLayoutEffect, useImperativeHandle, useDebugValue,\n",
+        "  useDeferredValue, useTransition, useId, useSyncExternalStore, useInsertionEffect,\n",
+        "  useActionState, useOptimistic, use, memo, forwardRef, lazy, Suspense, Fragment,\n",
+        "  Children, Component, PureComponent, createContext, createRef, cloneElement,\n",
+        "  isValidElement, startTransition, cache } = React;\n",
+        "export { createElement, useState, useEffect, useContext, useReducer, useCallback,\n",
+        "  useMemo, useRef, useLayoutEffect, useImperativeHandle, useDebugValue,\n",
+        "  useDeferredValue, useTransition, useId, useSyncExternalStore, useInsertionEffect,\n",
+        "  useActionState, useOptimistic, use, memo, forwardRef, lazy, Suspense, Fragment,\n",
+        "  Children, Component, PureComponent, createContext, createRef, cloneElement,\n",
+        "  isValidElement, startTransition, cache };\n",
+        "export default React;\n",
+    );
+
+    let react_conditions: &[&str] = if has_app_dir {
+        &["react-server", "workerd", "browser", "import", "default"]
+    } else {
+        &["require", "default"]
+    };
+
+    // React core + jsx-runtime + jsx-dev-runtime: same conditions
+    let react_deps = vec![
+        ("react", react_entry),
         ("react/jsx-runtime", "import { jsx, jsxs, Fragment } from 'react/jsx-runtime'; export { jsx, jsxs, Fragment };"),
         ("react/jsx-dev-runtime", "import { jsxDEV, Fragment } from 'react/jsx-dev-runtime'; export { jsxDEV, Fragment };"),
-        ("react-dom/server", "import S from 'react-dom/server'; var { renderToString, renderToStaticMarkup } = S; export { renderToString, renderToStaticMarkup }; export default S;"),
     ];
 
-    for (specifier, entry_source) in &standard_deps {
+    for (specifier, entry_source) in &react_deps {
         let source = build_dep_esm(
             config,
             entry_source,
             specifier,
-            &["require", "default"],
+            react_conditions,
             "",
             module_dirs,
         )
         .await?;
         modules.push(DepEsmModule {
             specifier: specifier.to_string(),
+            source,
+        });
+    }
+
+    // react-dom/server always uses standard conditions (renderToString)
+    {
+        let source = build_dep_esm(
+            config,
+            "import S from 'react-dom/server'; var { renderToString, renderToStaticMarkup } = S; export { renderToString, renderToStaticMarkup }; export default S;",
+            "react-dom/server",
+            &["require", "default"],
+            "",
+            module_dirs,
+        )
+        .await?;
+        modules.push(DepEsmModule {
+            specifier: "react-dom/server".to_string(),
             source,
         });
     }

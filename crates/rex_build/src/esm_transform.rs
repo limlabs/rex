@@ -26,6 +26,17 @@ pub struct DepImport {
     pub has_default: bool,
 }
 
+/// A discovered "use client" boundary with its reference IDs.
+#[derive(Debug, Clone)]
+pub struct ClientBoundary {
+    /// Relative path (from project root) of the client boundary module.
+    pub rel_path: String,
+    /// Export names from this module.
+    pub exports: Vec<String>,
+    /// Client reference IDs (one per export), computed via `client_reference_id`.
+    pub ref_ids: Vec<String>,
+}
+
 /// Result of collecting source modules from an import graph walk.
 pub struct CollectedModules {
     /// Source modules (local files), OXC-transformed to valid ESM JS.
@@ -33,6 +44,9 @@ pub struct CollectedModules {
     /// Bare specifier imports (node_modules deps) discovered during the walk.
     /// Does NOT include deps already covered by the dep IIFE (React, etc.).
     pub extra_dep_imports: Vec<DepImport>,
+    /// Client boundaries discovered during the walk (only populated when
+    /// `collect_source_modules_with_stubs` is used).
+    pub client_boundaries: Vec<ClientBoundary>,
 }
 
 /// Transform a TypeScript/TSX source file to valid ESM JavaScript.
@@ -67,6 +81,8 @@ pub fn transform_to_esm(source: &str, filename: &str) -> Result<String> {
 /// - Rewrites import specifiers in generated code to use absolute paths
 /// - Collects bare specifier imports for dep IIFE generation
 /// - Skips asset imports (CSS, images, etc.)
+/// - If `build_id` is provided, replaces `"use client"` modules with client
+///   reference stubs and stops walking their imports
 ///
 /// `known_dep_specifiers` lists deps already handled by the dep IIFE (e.g., "react").
 /// These are not included in the returned `extra_dep_imports`.
@@ -75,8 +91,29 @@ pub fn collect_source_modules(
     project_root: &Path,
     known_dep_specifiers: &HashSet<String>,
 ) -> Result<CollectedModules> {
+    collect_source_modules_inner(entries, project_root, known_dep_specifiers, None)
+}
+
+/// Like `collect_source_modules` but generates client reference stubs for
+/// `"use client"` modules (needed for app router RSC rendering).
+pub fn collect_source_modules_with_stubs(
+    entries: &[PathBuf],
+    project_root: &Path,
+    known_dep_specifiers: &HashSet<String>,
+    build_id: &str,
+) -> Result<CollectedModules> {
+    collect_source_modules_inner(entries, project_root, known_dep_specifiers, Some(build_id))
+}
+
+fn collect_source_modules_inner(
+    entries: &[PathBuf],
+    project_root: &Path,
+    known_dep_specifiers: &HashSet<String>,
+    build_id: Option<&str>,
+) -> Result<CollectedModules> {
     let mut source_modules = Vec::new();
     let mut dep_imports: HashMap<String, DepImport> = HashMap::new();
+    let mut client_boundaries: Vec<ClientBoundary> = Vec::new();
     let mut visited: HashSet<PathBuf> = HashSet::new();
     let mut queue: VecDeque<PathBuf> = VecDeque::new();
 
@@ -104,6 +141,40 @@ pub fn collect_source_modules(
             .with_context(|| format!("Failed to read {}", path.display()))?;
 
         let filename = path.to_string_lossy().to_string();
+
+        // Check for "use client" directive — generate stub and stop walking imports
+        if let Some(bid) = build_id {
+            let source_type = source_type_from_filename(&filename);
+            if crate::rsc_graph::has_use_client_directive(&source, source_type) {
+                let rel_path = path
+                    .strip_prefix(project_root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .to_string();
+                let exports = extract_export_names(&source, &filename);
+                let ref_ids: Vec<String> = exports
+                    .iter()
+                    .map(|e| crate::client_manifest::client_reference_id(&rel_path, e, bid))
+                    .collect();
+                tracing::debug!(
+                    rel_path = %rel_path,
+                    exports = ?exports,
+                    ref_ids = ?ref_ids,
+                    "ESM: generating client stub"
+                );
+                client_boundaries.push(ClientBoundary {
+                    rel_path: rel_path.clone(),
+                    exports: exports.clone(),
+                    ref_ids: ref_ids.clone(),
+                });
+                let stub = crate::rsc_stubs::generate_client_stub(&rel_path, &exports, bid);
+                source_modules.push(EsmSourceModule {
+                    specifier: filename,
+                    source: stub,
+                });
+                continue; // Don't follow imports from client boundary modules
+            }
+        }
 
         // Extract imports and resolve them
         let (local_imports, bare_imports) =
@@ -157,6 +228,7 @@ pub fn collect_source_modules(
     Ok(CollectedModules {
         source_modules,
         extra_dep_imports: dep_imports.into_values().collect(),
+        client_boundaries,
     })
 }
 
@@ -322,6 +394,59 @@ fn is_asset_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|ext| ASSET_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+}
+
+/// Extract export names from a source file (used for client reference stubs).
+fn extract_export_names(source: &str, filename: &str) -> Vec<String> {
+    let allocator = oxc_allocator::Allocator::default();
+    let source_type = source_type_from_filename(filename);
+    let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
+    let mut exports = Vec::new();
+
+    for stmt in &parsed.program.body {
+        match stmt {
+            oxc_ast::ast::Statement::ExportDefaultDeclaration(_) => {
+                exports.push("default".to_string());
+            }
+            oxc_ast::ast::Statement::ExportNamedDeclaration(export) => {
+                if let Some(decl) = &export.declaration {
+                    match decl {
+                        oxc_ast::ast::Declaration::FunctionDeclaration(f) => {
+                            if let Some(id) = &f.id {
+                                exports.push(id.name.to_string());
+                            }
+                        }
+                        oxc_ast::ast::Declaration::VariableDeclaration(v) => {
+                            for decl in &v.declarations {
+                                if let oxc_ast::ast::BindingPattern::BindingIdentifier(ref id) =
+                                    decl.id
+                                {
+                                    exports.push(id.name.to_string());
+                                }
+                            }
+                        }
+                        oxc_ast::ast::Declaration::ClassDeclaration(c) => {
+                            if let Some(id) = &c.id {
+                                exports.push(id.name.to_string());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                for specifier in &export.specifiers {
+                    exports.push(specifier.exported.name().to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Default to "default" if no exports found (common for components)
+    if exports.is_empty() {
+        exports.push("default".to_string());
+    }
+
+    exports
 }
 
 #[cfg(test)]

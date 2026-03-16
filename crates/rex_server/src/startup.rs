@@ -65,12 +65,22 @@ pub async fn esm_startup(
 
     debug!(entries = entry_paths.len(), "Walking import graph for ESM");
 
-    // Walk import graph and transform source files
-    let collected = esm_transform::collect_source_modules(
-        &entry_paths,
-        &config.project_root,
-        &known_specifiers,
-    )?;
+    // Walk import graph and transform source files.
+    // For app router, generate client reference stubs for "use client" modules.
+    let collected = if has_app {
+        esm_transform::collect_source_modules_with_stubs(
+            &entry_paths,
+            &config.project_root,
+            &known_specifiers,
+            &build_result.build_id,
+        )?
+    } else {
+        esm_transform::collect_source_modules(
+            &entry_paths,
+            &config.project_root,
+            &known_specifiers,
+        )?
+    };
 
     debug!(
         source_modules = collected.source_modules.len(),
@@ -81,20 +91,43 @@ pub async fn esm_startup(
     // Generate entry source
     let entry_specifier = "rex://entry".to_string();
     let entry_source = if let Some(app_scan) = &scan.app_scan {
-        let webpack_config = build_result
-            .manifest
-            .client_reference_manifest
-            .as_ref()
-            .map(|m| serde_json::to_string(m).unwrap_or_default())
-            .unwrap_or_else(|| "{}".to_string());
+        // Build webpack config from ESM-discovered client boundaries (not the IIFE
+        // manifest, which may use different path resolution and produce mismatched IDs).
+        let webpack_config = {
+            let mut config = serde_json::Map::new();
+            for boundary in &collected.client_boundaries {
+                for (export, ref_id) in boundary.exports.iter().zip(boundary.ref_ids.iter()) {
+                    config.insert(
+                        ref_id.clone(),
+                        serde_json::json!({
+                            "id": ref_id,
+                            "name": export,
+                            "chunks": []
+                        }),
+                    );
+                }
+            }
+            debug!(
+                manifest_keys = ?config.keys().collect::<Vec<_>>(),
+                "Webpack bundler config for RSC (from ESM stubs)"
+            );
+            serde_json::to_string(&serde_json::Value::Object(config)).unwrap_or_default()
+        };
+
+        // OXC-transform TypeScript runtimes to valid JS for V8
+        let metadata_runtime_ts = include_str!("../../../runtime/server/metadata.ts");
+        let flight_runtime_ts = include_str!("../../../runtime/rsc/flight.ts");
+        let metadata_runtime_js =
+            esm_transform::transform_to_esm(metadata_runtime_ts, "metadata.ts")?;
+        let flight_runtime_js = esm_transform::transform_to_esm(flight_runtime_ts, "flight.ts")?;
 
         rex_v8::esm_rsc_entry::generate_rsc_esm_entry(
             app_scan,
             &config.project_root,
             &webpack_config,
-            "", // server_actions_js
-            "", // flight_runtime_js
-            "", // metadata_runtime_js
+            "", // server_actions_js — wired separately when manifest available
+            &flight_runtime_js,
+            &metadata_runtime_js,
         )
     } else {
         let page_sources: Vec<(String, std::path::PathBuf)> = scan
