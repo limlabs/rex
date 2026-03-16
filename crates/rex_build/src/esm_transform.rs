@@ -157,6 +157,47 @@ fn collect_source_modules_inner(
     }
 
     while let Some(path) = queue.pop_front() {
+        // Node modules: register as empty stub and don't walk further.
+        // Only user source files are OXC-transformed and walked.
+        let in_node_modules = path.components().any(|c| c.as_os_str() == "node_modules");
+        if in_node_modules {
+            let filename = path.to_string_lossy().to_string();
+            // Check for "use client" to generate proper client reference stubs
+            if let Some(bid) = build_id {
+                if let Ok(source) = std::fs::read_to_string(&path) {
+                    let source_type = source_type_from_filename(&filename);
+                    if crate::rsc_graph::has_use_client_directive(&source, source_type) {
+                        let rel_path = path
+                            .strip_prefix(project_root)
+                            .unwrap_or(&path)
+                            .to_string_lossy()
+                            .to_string();
+                        let exports = extract_export_names(&source, &filename);
+                        let ref_ids: Vec<String> = exports
+                            .iter()
+                            .map(|e| crate::client_manifest::client_reference_id(&rel_path, e, bid))
+                            .collect();
+                        client_boundaries.push(ClientBoundary {
+                            rel_path: rel_path.clone(),
+                            exports: exports.clone(),
+                            ref_ids,
+                        });
+                        let stub = crate::rsc_stubs::generate_client_stub(&rel_path, &exports, bid);
+                        source_modules.push(EsmSourceModule {
+                            specifier: filename,
+                            source: stub,
+                        });
+                        continue;
+                    }
+                }
+            }
+            source_modules.push(EsmSourceModule {
+                specifier: filename,
+                source: "export default {};".to_string(),
+            });
+            continue;
+        }
+
         // Asset files (CSS, images, etc.) get registered as empty modules
         // so V8 can resolve `import '../styles/globals.css'` without errors.
         if is_asset_file(&path) {
@@ -255,6 +296,27 @@ fn collect_source_modules_inner(
         }
     }
 
+    // Register bare specifier deps as stub modules so V8 can resolve them.
+    // These are node_modules imports not covered by pre-bundled deps (react, etc.).
+    // Stubs use no-op functions (not undefined) so they don't crash when called.
+    for dep in dep_imports.values() {
+        let mut stub = String::new();
+        let noop = "function(){return null}";
+        if dep.has_default {
+            stub.push_str(&format!("export default {noop};\n"));
+        }
+        for name in &dep.named_exports {
+            stub.push_str(&format!("export var {name} = {noop};\n"));
+        }
+        if stub.is_empty() {
+            stub.push_str(&format!("export default {noop};\n"));
+        }
+        source_modules.push(EsmSourceModule {
+            specifier: dep.specifier.clone(),
+            source: stub,
+        });
+    }
+
     Ok(CollectedModules {
         source_modules,
         extra_dep_imports: dep_imports.into_values().collect(),
@@ -343,18 +405,23 @@ fn extract_and_resolve_imports(
             _ => continue,
         };
 
-        // Skip specifiers handled by synthetic modules (rex/*, react, etc.)
-        if known_specifiers.contains(specifier) || specifier.starts_with("rex/") {
+        // Skip specifiers handled by pre-registered modules (rex/*, next/*, react, etc.)
+        if known_specifiers.contains(specifier)
+            || specifier.starts_with("rex/")
+            || specifier.starts_with("next/")
+        {
             continue;
         }
 
-        // Try to resolve as a local import
-        if let Some(resolved) = crate::rsc_graph::resolve_import(file_path, specifier, project_root)
+        // Bare specifiers (not starting with . or /) are node_modules deps.
+        // Don't resolve them through node_modules — register as bare imports
+        // and create stub modules. Only resolve relative/absolute imports locally.
+        if !specifier.starts_with('.') && !specifier.starts_with('/') {
+            bare_imports.push((specifier.to_string(), named, has_default));
+        } else if let Some(resolved) =
+            crate::rsc_graph::resolve_import(file_path, specifier, project_root)
         {
             local_imports.push((specifier.to_string(), resolved));
-        } else if !specifier.starts_with('.') && !specifier.starts_with('/') {
-            // Bare specifier — node_modules dependency
-            bare_imports.push((specifier.to_string(), named, has_default));
         }
     }
 

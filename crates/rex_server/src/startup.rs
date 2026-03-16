@@ -61,6 +61,9 @@ pub async fn esm_startup(
             entry_paths.push(route.page_path.clone());
             entry_paths.extend(route.layout_chain.iter().cloned());
         }
+        for api_route in &app_scan.api_routes {
+            entry_paths.push(api_route.handler_path.clone());
+        }
     }
 
     debug!(entries = entry_paths.len(), "Walking import graph for ESM");
@@ -138,7 +141,8 @@ pub async fn esm_startup(
         rex_v8::esm_rsc_entry::generate_pages_esm_entry(&page_sources, SSR_RUNTIME)
     };
 
-    // Add rex/* stub modules for framework imports (rex/head, rex/link, etc.)
+    // Add rex/* and next/* stub modules for framework imports.
+    // These are server-side stubs that return null components or no-op functions.
     let mut all_dep_modules = dep_modules;
     let rex_stub = "export default function() { return null; }; export var Html = function() { return null; }; export var Head = function() { return null; }; export var Main = function() { return null; }; export var NextScript = function() { return null; };";
     for specifier in &["rex/head", "rex/link", "rex/image", "rex/document"] {
@@ -146,6 +150,35 @@ pub async fn esm_startup(
             specifier: specifier.to_string(),
             source: rex_stub.to_string(),
         });
+    }
+
+    // Add next/* compatibility stubs from runtime/server/ directory.
+    // OXC-transform TypeScript stubs to valid JS for V8.
+    let runtime_dir = rex_build::build_utils::runtime_server_dir()?;
+    let next_stubs: &[(&str, &str)] = &[
+        ("next/link", "next-link.ts"),
+        ("next/image", "next-image.ts"),
+        ("next/head", "head.ts"),
+        ("next/navigation", "next-navigation.ts"),
+        ("next/headers", "next-headers.ts"),
+        ("next/cache", "next-cache.ts"),
+        ("next/server", "next-server.ts"),
+        ("next/font/google", "next-font.ts"),
+        ("next/font/local", "next-font.ts"),
+        ("next/dynamic", "next-dynamic.ts"),
+        ("next/router", "next-router.ts"),
+    ];
+    for (specifier, filename) in next_stubs {
+        let stub_path = runtime_dir.join(filename);
+        if stub_path.exists() {
+            let stub_ts = std::fs::read_to_string(&stub_path).unwrap_or_default();
+            let stub_js = esm_transform::transform_to_esm(&stub_ts, filename)
+                .unwrap_or_else(|_| "export default function() { return null; };".to_string());
+            all_dep_modules.push(EsmSourceModule {
+                specifier: specifier.to_string(),
+                source: stub_js,
+            });
+        }
     }
 
     // Create pool with minimal bootstrap (just stub functions for SsrIsolate::new)
