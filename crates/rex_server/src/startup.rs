@@ -25,7 +25,7 @@ globalThis.__rex_get_static_props = function() { return JSON.stringify({ props: 
 pub async fn esm_startup(
     config: &RexConfig,
     scan: &ScanResult,
-    build_result: &rex_build::bundler::BuildResult,
+    build_id: &str,
     pool_size: usize,
     project_root_str: &str,
 ) -> Result<(IsolatePool, EsmState)> {
@@ -75,7 +75,7 @@ pub async fn esm_startup(
             &entry_paths,
             &config.project_root,
             &known_specifiers,
-            &build_result.build_id,
+            build_id,
         )?
     } else {
         esm_transform::collect_source_modules(
@@ -217,6 +217,45 @@ pub async fn esm_startup(
     };
 
     Ok((pool, esm_state))
+}
+
+/// Run the full build pipeline (CSS, Tailwind, fonts, client bundles) in the
+/// background and update HotState when done. This is spawned in dev mode so
+/// the server can start accepting requests immediately (~125ms vs ~1.2s).
+pub fn spawn_deferred_build(
+    state: Arc<crate::state::AppState>,
+    config: RexConfig,
+    scan: ScanResult,
+) {
+    tokio::spawn(async move {
+        let project_config =
+            rex_core::ProjectConfig::load(&config.project_root).unwrap_or_default();
+
+        let build_result = match rex_build::build_bundles(&config, &scan, &project_config).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("Deferred build failed: {e:#}");
+                return;
+            }
+        };
+
+        debug!(
+            build_id = %build_result.build_id,
+            app_routes = build_result.manifest.app_routes.len(),
+            global_css = build_result.manifest.global_css.len(),
+            "Deferred build complete"
+        );
+
+        // Update HotState with the real manifest (CSS, client chunks, etc.)
+        if let Ok(mut guard) = state.hot.write() {
+            let mut hot = (**guard).clone();
+            hot.manifest = build_result.manifest;
+            hot.build_id = build_result.build_id;
+            hot.manifest_json =
+                crate::state::HotState::compute_manifest_json(&hot.build_id, &hot.manifest);
+            *guard = Arc::new(hot);
+        }
+    });
 }
 
 /// Build RSC client bundles in the background and update HotState when done.
