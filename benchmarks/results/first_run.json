@@ -1,0 +1,134 @@
+[
+  {
+    "task_id": "t1-01",
+    "task_name": "Static page",
+    "tier": 1,
+    "condition": "rex_harness",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 2957,
+    "median_tool_calls": 1,
+    "median_wall_ms": 5447.954667004524,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /about -> 200": 1.0,
+      "ssr /about": 1.0,
+      "dom /about h1": 1.0,
+      "dom /about p": 1.0
+    }
+  },
+  {
+    "task_id": "t1-01",
+    "task_name": "Static page",
+    "tier": 1,
+    "condition": "rex_raw",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 6835,
+    "median_tool_calls": 4,
+    "median_wall_ms": 14403.036875010002,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /about -> 200": 1.0,
+      "ssr /about": 1.0,
+      "dom /about h1": 1.0,
+      "dom /about p": 1.0
+    }
+  },
+  {
+    "task_id": "t1-02",
+    "task_name": "Dynamic route",
+    "tier": 1,
+    "condition": "rex_harness",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 3263,
+    "median_tool_calls": 1,
+    "median_wall_ms": 6553.86037498829,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /blog/hello-world -> 200": 1.0,
+      "http GET /blog/another-post -> 200": 1.0,
+      "ssr /blog/hello-world": 1.0,
+      "ssr /blog/another-post": 1.0,
+      "dom /blog/hello-world h1": 1.0,
+      "dom /blog/hello-world p": 1.0
+    }
+  },
+  {
+    "task_id": "t1-02",
+    "task_name": "Dynamic route",
+    "tier": 1,
+    "condition": "rex_raw",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 10789,
+    "median_tool_calls": 6,
+    "median_wall_ms": 19910.24512500735,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /blog/hello-world -> 200": 1.0,
+      "http GET /blog/another-post -> 200": 1.0,
+      "ssr /blog/hello-world": 1.0,
+      "ssr /blog/another-post": 1.0,
+      "dom /blog/hello-world h1": 1.0,
+      "dom /blog/hello-world p": 1.0
+    }
+  },
+  {
+    "task_id": "t1-03",
+    "task_name": "GSSP data fetching",
+    "tier": 1,
+    "condition": "rex_harness",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 3482,
+    "median_tool_calls": 1,
+    "median_wall_ms": 6904.8359589942265,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /users -> 200": 1.0,
+      "ssr /users": 1.0,
+      "dom /users h1": 1.0,
+      "dom /users ul": 1.0,
+      "dom /users li": 1.0
+    }
+  },
+  {
+    "task_id": "t1-03",
+    "task_name": "GSSP data fetching",
+    "tier": 1,
+    "condition": "rex_raw",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 5884,
+    "median_tool_calls": 3,
+    "median_wall_ms": 11147.24679198116,
+    "median_errors": 0,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /users -> 200": 1.0,
+      "ssr /users": 1.0,
+      "dom /users h1": 1.0,
+      "dom /users ul": 1.0,
+      "dom /users li": 1.0
+    }
+  }
+]
