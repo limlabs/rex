@@ -26,6 +26,7 @@ pub struct SyntheticModuleDef {
 }
 
 /// Source modules to load into the ESM registry.
+#[derive(Clone)]
 pub struct EsmSourceModule {
     /// Canonical specifier (typically absolute path).
     pub specifier: String,

@@ -31,6 +31,8 @@ oxc_semantic = "0.115"
 oxc_ast = "0.115"
 oxc_span = "0.115"
 oxc_syntax = "0.115"
+oxc_codegen = "0.115"
+oxc_transformer = "0.115"
 rex_v8 = { path = "../rex_v8" }
 lightningcss = { workspace = true }
 

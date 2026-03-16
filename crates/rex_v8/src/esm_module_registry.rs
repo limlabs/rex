@@ -22,9 +22,15 @@ thread_local! {
 }
 
 // Thread-local storage for synthetic module globalThis keys.
-// Maps specifier → globalThis property name where the namespace object is stored.
+// Maps module identity hash → globalThis property name where the namespace object is stored.
 thread_local! {
     static SYNTHETIC_KEYS: RefCell<HashMap<i32, String>> = RefCell::new(HashMap::new());
+}
+
+// Thread-local storage mapping module identity hash → specifier (absolute path).
+// Used by the resolve callback to resolve relative imports against the referrer.
+thread_local! {
+    static MODULE_PATHS: RefCell<HashMap<i32, String>> = RefCell::new(HashMap::new());
 }
 
 /// Registry for V8 native ESM modules within a single isolate.
@@ -89,6 +95,14 @@ impl EsmModuleRegistry {
                 let tc_msg = format!("Failed to compile module: {specifier}");
                 anyhow::anyhow!(tc_msg)
             })?;
+
+        // Store identity hash → specifier for relative import resolution
+        let identity_hash = module.get_identity_hash().get();
+        MODULE_PATHS.with(|paths| {
+            paths
+                .borrow_mut()
+                .insert(identity_hash, specifier.to_string());
+        });
 
         let global_module = v8::Global::new(scope, module);
 
@@ -288,6 +302,9 @@ impl EsmModuleRegistry {
         SYNTHETIC_KEYS.with(|keys| {
             keys.borrow_mut().clear();
         });
+        MODULE_PATHS.with(|paths| {
+            paths.borrow_mut().clear();
+        });
         self.hashes.clear();
     }
 
@@ -301,11 +318,15 @@ impl EsmModuleRegistry {
 ///
 /// Called by V8 during `instantiate_module()` for each `import` statement.
 /// Uses `CallbackScope` to get a proper scope for converting Global → Local.
+///
+/// Resolution order:
+/// 1. Direct lookup by specifier (handles absolute paths and synthetic modules)
+/// 2. For relative specifiers, resolve against the referrer's path with extension probing
 fn resolve_callback<'s>(
     context: v8::Local<'s, v8::Context>,
     specifier: v8::Local<'s, v8::String>,
     _import_attributes: v8::Local<'s, v8::FixedArray>,
-    _referrer: v8::Local<'s, v8::Module>,
+    referrer: v8::Local<'s, v8::Module>,
 ) -> Option<v8::Local<'s, v8::Module>> {
     // SAFETY: This callback is called by V8 during instantiate_module(),
     // which is called from within a valid scope. CallbackScope creates a
@@ -314,11 +335,64 @@ fn resolve_callback<'s>(
 
     let spec_str = specifier.to_rust_string_lossy(scope);
 
-    MODULE_MAP.with(|map| {
-        let map = map.borrow();
-        map.get(&spec_str)
+    // 1. Direct lookup (handles absolute paths, synthetic modules, and bare specifiers)
+    let direct = MODULE_MAP.with(|map| {
+        map.borrow()
+            .get(&spec_str)
             .map(|global| v8::Local::new(scope, global))
-    })
+    });
+    if direct.is_some() {
+        return direct;
+    }
+
+    // 2. Relative import resolution using referrer's path
+    if spec_str.starts_with('.') {
+        let referrer_hash = referrer.get_identity_hash().get();
+        let referrer_path = MODULE_PATHS.with(|paths| paths.borrow().get(&referrer_hash).cloned());
+
+        if let Some(ref_path) = referrer_path {
+            let ref_dir = std::path::Path::new(&ref_path).parent()?;
+            let candidate = ref_dir.join(&spec_str);
+
+            // Try exact path, then with extensions
+            let extensions = ["", ".tsx", ".ts", ".jsx", ".js"];
+            for ext in &extensions {
+                let try_path = if ext.is_empty() {
+                    candidate.clone()
+                } else {
+                    let fname = candidate.file_name()?.to_str()?;
+                    candidate.with_file_name(format!("{fname}{ext}"))
+                };
+                let try_str = try_path.to_string_lossy().to_string();
+                let found = MODULE_MAP.with(|map| {
+                    map.borrow()
+                        .get(&try_str)
+                        .map(|global| v8::Local::new(scope, global))
+                });
+                if found.is_some() {
+                    return found;
+                }
+            }
+
+            // Try index files in directory
+            if candidate.is_dir() {
+                for ext in &[".tsx", ".ts", ".jsx", ".js"] {
+                    let index = candidate.join(format!("index{ext}"));
+                    let try_str = index.to_string_lossy().to_string();
+                    let found = MODULE_MAP.with(|map| {
+                        map.borrow()
+                            .get(&try_str)
+                            .map(|global| v8::Local::new(scope, global))
+                    });
+                    if found.is_some() {
+                        return found;
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Evaluation callback for synthetic modules.

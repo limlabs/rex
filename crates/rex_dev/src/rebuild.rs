@@ -111,6 +111,33 @@ pub async fn handle_file_event(
         | FileEventKind::SourceModified => {
             let t0 = Instant::now();
 
+            // ESM fast path: for source/page changes, try re-transforming just
+            // the changed file instead of a full rolldown rebuild.
+            if matches!(
+                event.kind,
+                FileEventKind::PageModified | FileEventKind::SourceModified
+            ) {
+                match crate::rebuild_esm::try_esm_fast_path(state, &event.path).await {
+                    Ok(true) => {
+                        let elapsed = t0.elapsed();
+                        info!(
+                            esm_ms = elapsed.as_millis(),
+                            path = %event.path.display(),
+                            "ESM fast path rebuild"
+                        );
+                        hmr.send_full_reload();
+                        debug!("ESM fast path complete — sent full reload");
+                        return Ok(());
+                    }
+                    Ok(false) => {
+                        debug!("ESM fast path not available, falling back to full rebuild");
+                    }
+                    Err(e) => {
+                        debug!("ESM fast path error: {e:#}, falling back to full rebuild");
+                    }
+                }
+            }
+
             // Determine if we can skip the filesystem rescan
             let can_skip_scan = match event.kind {
                 // Content-only changes never add/remove routes (but need a cached scan)

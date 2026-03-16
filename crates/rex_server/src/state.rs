@@ -56,6 +56,17 @@ impl HotState {
     }
 }
 
+/// ESM module loading state for HMR invalidation.
+///
+/// Persists the dep config and source modules across rebuilds so that
+/// the HMR fast path can re-transform a single file and invalidate.
+pub struct EsmState {
+    pub dep_config: Arc<rex_v8::DepModuleConfig>,
+    pub source_modules: Vec<rex_v8::EsmSourceModule>,
+    pub entry_specifier: String,
+    pub entry_source: String,
+}
+
 /// Shared application state
 pub struct AppState {
     pub isolate_pool: rex_v8::IsolatePool,
@@ -63,6 +74,8 @@ pub struct AppState {
     pub project_root: PathBuf,
     pub image_cache: rex_image::ImageCache,
     pub hot: RwLock<Arc<HotState>>,
+    /// ESM module state for HMR fast path. None if using IIFE loading.
+    pub esm: Option<RwLock<EsmState>>,
 }
 
 /// Snapshot the hot state (O(1) Arc clone, no lock held across await).

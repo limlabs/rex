@@ -1,6 +1,6 @@
 use crate::core::{self, body_to_string, RexRequest, RexResponse, RouteMatchResult};
 use crate::server::RexServer;
-use crate::state::{snapshot, AppState, HotState};
+use crate::state::{snapshot, AppState, EsmState, HotState};
 use anyhow::Result;
 use axum::Router;
 use rex_core::{AssetManifest, DataStrategy, ProjectConfig, RexConfig, ServerSidePropsContext};
@@ -95,6 +95,9 @@ impl Rex {
     ///
     /// This is the primary constructor for dev mode and fresh builds.
     /// Requires the `build` feature (pulls in the rolldown bundler).
+    ///
+    /// In dev mode, uses native ESM module loading for fast HMR (~100ms vs ~3500ms).
+    /// The IIFE approach is used for production and as fallback.
     #[cfg(feature = "build")]
     pub async fn new(opts: RexOptions) -> Result<Self> {
         let root = std::fs::canonicalize(&opts.root)?;
@@ -114,7 +117,7 @@ impl Rex {
             "Routes scanned"
         );
 
-        // Build bundles
+        // Build bundles (client bundles + manifest; server IIFE used as fallback)
         debug!("Building bundles...");
         let build_result = rex_build::build_bundles(&config, &scan, &project_config).await?;
         debug!(build_id = %build_result.build_id, "Build complete");
@@ -123,34 +126,34 @@ impl Rex {
         debug!("Initializing V8...");
         init_v8();
 
-        let mut server_bundle = std::fs::read_to_string(&build_result.server_bundle_path)?;
-
-        // If RSC bundles exist, append them so RSC functions are available in V8
-        if let Some(rsc_path) = &build_result.manifest.rsc_server_bundle {
-            let rsc_bundle = std::fs::read_to_string(rsc_path)?;
-            server_bundle.push_str("\n;\n");
-            server_bundle.push_str(&rsc_bundle);
-            debug!("RSC flight bundle appended to V8 bundle");
-        }
-        if let Some(ssr_path) = &build_result.manifest.rsc_ssr_bundle {
-            let ssr_bundle = std::fs::read_to_string(ssr_path)?;
-            server_bundle.push_str("\n;\n");
-            server_bundle.push_str(&ssr_bundle);
-            debug!("RSC SSR bundle appended to V8 bundle");
-        }
-
         let pool_size = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(4)
             .min(if opts.dev { 4 } else { 8 });
 
-        debug!(pool_size, "Creating V8 isolate pool");
         let project_root_str = config.project_root.to_string_lossy().to_string();
-        let pool = IsolatePool::new(
+
+        // Try ESM loading path; fall back to IIFE if it fails
+        let (pool, esm_state) = match crate::startup::try_esm_startup(
+            &config,
+            &scan,
+            &build_result,
             pool_size,
-            Arc::new(server_bundle),
-            Some(Arc::new(project_root_str)),
-        )?;
+            &project_root_str,
+        )
+        .await
+        {
+            Ok((pool, esm)) => {
+                debug!("ESM module loading succeeded");
+                (pool, Some(esm))
+            }
+            Err(e) => {
+                debug!("ESM loading failed ({e:#}), falling back to IIFE");
+                let pool =
+                    crate::startup::iife_startup(&build_result, pool_size, &project_root_str)?;
+                (pool, None)
+            }
+        };
 
         let static_dir = config.client_build_dir();
 
@@ -162,6 +165,7 @@ impl Rex {
             build_result.build_id,
             static_dir,
             project_config,
+            esm_state,
             opts.port,
             opts.host,
         )
@@ -225,6 +229,7 @@ impl Rex {
             build_id,
             static_dir,
             project_config,
+            None, // ESM state not used for from_build (IIFE path)
             opts.port,
             opts.host,
         )
@@ -242,6 +247,7 @@ impl Rex {
         build_id: String,
         static_dir: PathBuf,
         project_config: ProjectConfig,
+        esm_state: Option<EsmState>,
         port: u16,
         host: IpAddr,
     ) -> Result<Self> {
@@ -318,6 +324,7 @@ impl Rex {
             is_dev: config.dev,
             project_root: config.project_root.clone(),
             image_cache,
+            esm: esm_state.map(RwLock::new),
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
                 api_route_trie: api_trie,

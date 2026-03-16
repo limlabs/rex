@@ -4,6 +4,7 @@ pub mod client_manifest;
 pub mod dce;
 pub(crate) mod diagnostics;
 pub mod embedded_runtime;
+pub mod esm_transform;
 pub mod manifest;
 pub mod rsc_bundler;
 pub mod rsc_graph;

@@ -409,6 +409,7 @@ impl TestAppBuilder {
             is_dev: self.is_dev,
             image_cache: rex_image::ImageCache::new(project_root.join(".rex-cache")),
             project_root,
+            esm: None,
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
                 api_route_trie: api_trie,

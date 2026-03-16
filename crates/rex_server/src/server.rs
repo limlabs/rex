@@ -71,6 +71,7 @@ impl RexServer {
             is_dev: config.is_dev,
             project_root: config.project_root.clone(),
             image_cache,
+            esm: None,
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: config.route_trie,
                 api_route_trie: config.api_route_trie,
