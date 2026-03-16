@@ -1,36 +1,51 @@
-//! Tests for builtin_modules — covers ensure_internal_packages.
+//! Tests for builtin_modules — covers ensure_missing_builtin_packages.
 #![allow(clippy::unwrap_used)]
 
 use rex_build::builtin_modules;
 use std::fs;
 
 #[test]
-fn ensure_internal_packages_extracts_missing() {
+fn ensure_missing_builtin_packages_extracts_all_missing() {
     let tmp = tempfile::tempdir().unwrap();
-    // Create a node_modules dir (simulating a project with its own deps)
+
+    // Before: no node_modules at all
+    assert!(!tmp.path().join("node_modules").exists());
+
+    builtin_modules::ensure_missing_builtin_packages(tmp.path()).unwrap();
+
     let nm = tmp.path().join("node_modules");
-    fs::create_dir_all(&nm).unwrap();
-
-    // Before: react-server-dom-webpack should not exist
-    assert!(!nm.join("react-server-dom-webpack/package.json").exists());
-
-    builtin_modules::ensure_internal_packages(tmp.path()).unwrap();
-
-    // After: react-server-dom-webpack should be extracted
+    // All embedded packages should be extracted
+    assert!(nm.join("react/package.json").exists());
+    assert!(nm.join("react-dom/package.json").exists());
     assert!(nm.join("react-server-dom-webpack/package.json").exists());
+    assert!(nm.join("scheduler/package.json").exists());
+    assert!(nm.join("@types/react/package.json").exists());
+    assert!(nm.join("@types/react-dom/package.json").exists());
+    assert!(nm.join("@limlabs/rex/package.json").exists());
 }
 
 #[test]
-fn ensure_internal_packages_skips_existing() {
+fn ensure_missing_builtin_packages_skips_existing() {
     let tmp = tempfile::tempdir().unwrap();
     let nm = tmp.path().join("node_modules");
-    fs::create_dir_all(nm.join("react-server-dom-webpack")).unwrap();
-    fs::write(nm.join("react-server-dom-webpack/package.json"), "{}").unwrap();
 
-    // Should not error when package already exists
-    builtin_modules::ensure_internal_packages(tmp.path()).unwrap();
-    // Verify it's still there
-    assert!(nm.join("react-server-dom-webpack/package.json").exists());
+    // Simulate user-installed react
+    fs::create_dir_all(nm.join("react")).unwrap();
+    fs::write(
+        nm.join("react/package.json"),
+        r#"{"name":"react","version":"18.0.0"}"#,
+    )
+    .unwrap();
+
+    builtin_modules::ensure_missing_builtin_packages(tmp.path()).unwrap();
+
+    // User's react version should be preserved
+    let content = fs::read_to_string(nm.join("react/package.json")).unwrap();
+    assert!(content.contains("18.0.0"));
+
+    // But missing packages should be extracted
+    assert!(nm.join("react-dom/package.json").exists());
+    assert!(nm.join("scheduler/package.json").exists());
 }
 
 #[test]
