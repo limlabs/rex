@@ -25,8 +25,10 @@ pub use crate::tailwind::{
 /// Compute the `modules` resolve dirs for rolldown.
 ///
 /// If the project has no `package.json`, extract the embedded React packages
-/// into the project's `node_modules/` first (zero-config mode). Either way
-/// rolldown resolves from the standard `node_modules/` path.
+/// into the project's `node_modules/` first (zero-config mode). If it does
+/// have a `package.json`, fill in any missing packages (react, react-dom, etc.)
+/// so users don't need to `npm install` them. Either way rolldown resolves
+/// from the standard `node_modules/` path.
 pub fn resolve_modules_dirs(config: &RexConfig) -> Result<Vec<String>> {
     if !crate::builtin_modules::has_package_json(&config.project_root) {
         crate::builtin_modules::ensure_builtin_modules(&config.project_root)?;
@@ -35,8 +37,8 @@ pub fn resolve_modules_dirs(config: &RexConfig) -> Result<Vec<String>> {
             crate::builtin_modules::EMBEDDED_REACT_VERSION
         );
     } else {
-        // Project manages its own deps — still ensure Rex-internal packages
-        crate::builtin_modules::ensure_internal_packages(&config.project_root)?;
+        // Project has package.json — fill in any missing builtin packages
+        crate::builtin_modules::ensure_missing_builtin_packages(&config.project_root)?;
     }
     Ok(vec![
         config
