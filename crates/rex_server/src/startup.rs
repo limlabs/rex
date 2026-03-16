@@ -1,15 +1,14 @@
-//! V8 isolate pool startup strategies.
+//! V8 isolate pool startup via native ESM module loading.
 //!
-//! - **ESM** (pages router): Native V8 ESM modules with dep IIFEs + OXC-transformed source.
-//!   Enables fast HMR (~100ms vs ~3500ms for full rolldown rebuild).
-//! - **IIFE** (app router): Monolithic rolldown bundles. RSC requires dual React instances
-//!   (react-server + standard conditions) which ESM can't provide with one module namespace.
+//! Pre-bundles deps with rolldown as ESM modules, OXC-transforms user source
+//! files, and loads everything into V8's native module system. This enables
+//! per-file HMR invalidation (~100ms vs ~3500ms for full rolldown rebuild).
 
 use crate::state::EsmState;
 use anyhow::Result;
 use rex_core::RexConfig;
 use rex_router::ScanResult;
-use rex_v8::IsolatePool;
+use rex_v8::{EsmSourceModule, IsolatePool};
 use std::sync::Arc;
 use tracing::debug;
 
@@ -22,43 +21,11 @@ globalThis.__rex_get_server_side_props = function() { return JSON.stringify({ pr
 globalThis.__rex_get_static_props = function() { return JSON.stringify({ props: {} }); };
 "#;
 
-/// IIFE startup: read rolldown-built server bundle from disk and load into isolate pool.
-///
-/// Used for app router (RSC needs dual React instances) and `rex start` (production).
-pub fn iife_startup(
-    build_result: &rex_build::bundler::BuildResult,
-    pool_size: usize,
-    project_root_str: &str,
-) -> Result<IsolatePool> {
-    let mut server_bundle = std::fs::read_to_string(&build_result.server_bundle_path)?;
-
-    if let Some(rsc_path) = &build_result.manifest.rsc_server_bundle {
-        let rsc_bundle = std::fs::read_to_string(rsc_path)?;
-        server_bundle.push_str("\n;\n");
-        server_bundle.push_str(&rsc_bundle);
-    }
-    if let Some(ssr_path) = &build_result.manifest.rsc_ssr_bundle {
-        let ssr_bundle = std::fs::read_to_string(ssr_path)?;
-        server_bundle.push_str("\n;\n");
-        server_bundle.push_str(&ssr_bundle);
-    }
-
-    debug!(pool_size, "Creating V8 isolate pool (IIFE)");
-    IsolatePool::new(
-        pool_size,
-        Arc::new(server_bundle),
-        Some(Arc::new(project_root_str.to_string())),
-    )
-}
-
-/// ESM startup: pre-bundle deps, OXC-transform source files, load via V8 native ESM.
-///
-/// Used for pages router projects. Each source file is individually transformed
-/// and loaded as a V8 ESM module, enabling per-file HMR invalidation.
+/// ESM startup: pre-bundle deps as ESM, OXC-transform source files, load into V8.
 pub async fn esm_startup(
     config: &RexConfig,
     scan: &ScanResult,
-    _build_result: &rex_build::bundler::BuildResult,
+    build_result: &rex_build::bundler::BuildResult,
     pool_size: usize,
     project_root_str: &str,
 ) -> Result<(IsolatePool, EsmState)> {
@@ -66,15 +33,35 @@ pub async fn esm_startup(
     use rex_build::server_bundle::SSR_RUNTIME;
 
     let module_dirs = rex_build::resolve_modules_dirs(config)?;
+    let has_app = scan.app_scan.is_some();
 
-    // Build pages dep IIFE (standard React + renderToString)
-    let iife_js = rex_build::server_dep_bundle::build_pages_dep_iife(config, &module_dirs).await?;
-    let synthetic_modules = esm_transform::pages_synthetic_modules();
-    let known_specifiers = esm_transform::pages_known_specifiers();
+    // Pre-bundle deps as ESM modules (rolldown resolves + bundles each dep)
+    let dep_bundles =
+        rex_build::server_dep_bundle::build_dep_esm_modules(config, has_app, &module_dirs).await?;
 
-    // Collect entry paths from pages routes
-    let entry_paths: Vec<std::path::PathBuf> =
-        scan.routes.iter().map(|r| r.abs_path.clone()).collect();
+    let dep_modules: Vec<EsmSourceModule> = dep_bundles
+        .modules
+        .into_iter()
+        .map(|m| EsmSourceModule {
+            specifier: m.specifier,
+            source: m.source,
+        })
+        .collect();
+
+    // Build known specifiers set (deps handled by rolldown, skip in import graph)
+    let known_specifiers = esm_transform::dep_specifiers(has_app);
+
+    // Collect entry paths for import graph walking
+    let mut entry_paths: Vec<std::path::PathBuf> = Vec::new();
+    for route in &scan.routes {
+        entry_paths.push(route.abs_path.clone());
+    }
+    if let Some(app_scan) = &scan.app_scan {
+        for route in &app_scan.routes {
+            entry_paths.push(route.page_path.clone());
+            entry_paths.extend(route.layout_chain.iter().cloned());
+        }
+    }
 
     debug!(entries = entry_paths.len(), "Walking import graph for ESM");
 
@@ -91,37 +78,45 @@ pub async fn esm_startup(
         "Source modules collected"
     );
 
-    // Generate pages ESM entry
+    // Generate entry source
     let entry_specifier = "rex://entry".to_string();
-    let page_sources: Vec<(String, std::path::PathBuf)> = scan
-        .routes
-        .iter()
-        .map(|r| (r.module_name(), r.abs_path.clone()))
-        .collect();
-    let entry_source = rex_v8::esm_rsc_entry::generate_pages_esm_entry(&page_sources, SSR_RUNTIME);
+    let entry_source = if let Some(app_scan) = &scan.app_scan {
+        let webpack_config = build_result
+            .manifest
+            .client_reference_manifest
+            .as_ref()
+            .map(|m| serde_json::to_string(m).unwrap_or_default())
+            .unwrap_or_else(|| "{}".to_string());
 
-    // Add rex/* synthetic modules (server-side stubs for framework components)
-    let mut all_synthetic = synthetic_modules;
-    let rex_stub = "({ default: function() { return null; } })";
+        rex_v8::esm_rsc_entry::generate_rsc_esm_entry(
+            app_scan,
+            &config.project_root,
+            &webpack_config,
+            "", // server_actions_js
+            "", // flight_runtime_js
+            "", // metadata_runtime_js
+        )
+    } else {
+        let page_sources: Vec<(String, std::path::PathBuf)> = scan
+            .routes
+            .iter()
+            .map(|r| (r.module_name(), r.abs_path.clone()))
+            .collect();
+        rex_v8::esm_rsc_entry::generate_pages_esm_entry(&page_sources, SSR_RUNTIME)
+    };
+
+    // Add rex/* stub modules for framework imports (rex/head, rex/link, etc.)
+    let mut all_dep_modules = dep_modules;
+    let rex_stub = "export default function() { return null; }; export var Html = function() { return null; }; export var Head = function() { return null; }; export var Main = function() { return null; }; export var NextScript = function() { return null; };";
     for specifier in &["rex/head", "rex/link", "rex/image", "rex/document"] {
-        all_synthetic.push(rex_v8::SyntheticModuleDef {
+        all_dep_modules.push(EsmSourceModule {
             specifier: specifier.to_string(),
-            export_names: vec![
-                "default".into(),
-                "Html".into(),
-                "Head".into(),
-                "Main".into(),
-                "NextScript".into(),
-            ],
-            globals_expr: rex_stub.to_string(),
+            source: rex_stub.to_string(),
         });
     }
 
-    // Build dep config
-    let dep_config = Arc::new(esm_transform::build_dep_config(iife_js, all_synthetic));
-
-    // Create pool with V8 polyfills + stub functions as bootstrap
-    let bootstrap = format!("{}\n{}\n", rex_build::V8_POLYFILLS, STUB_FUNCTIONS);
+    // Create pool with minimal bootstrap (just stub functions for SsrIsolate::new)
+    let bootstrap = STUB_FUNCTIONS.to_string();
 
     debug!(pool_size, "Creating V8 isolate pool (ESM)");
     let pool = IsolatePool::new(
@@ -131,12 +126,15 @@ pub async fn esm_startup(
     )?;
 
     // Load ESM modules into all isolates
+    let polyfills_arc = Arc::new(dep_bundles.polyfills);
+    let dep_modules_arc = Arc::new(all_dep_modules.clone());
     let source_modules_arc = Arc::new(collected.source_modules.clone());
     let entry_spec_arc = Arc::new(entry_specifier.clone());
     let entry_src_arc = Arc::new(entry_source.clone());
 
     pool.load_esm_modules_all(
-        dep_config.clone(),
+        polyfills_arc,
+        dep_modules_arc.clone(),
         source_modules_arc,
         entry_spec_arc,
         entry_src_arc,
@@ -146,7 +144,7 @@ pub async fn esm_startup(
     debug!("ESM modules loaded into V8");
 
     let esm_state = EsmState {
-        dep_config,
+        dep_modules: dep_modules_arc,
         source_modules: collected.source_modules,
         entry_specifier,
         entry_source,

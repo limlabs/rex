@@ -58,10 +58,10 @@ impl HotState {
 
 /// ESM module loading state for HMR invalidation.
 ///
-/// Persists the dep config and source modules across rebuilds so that
+/// Persists dep modules and source modules across rebuilds so that
 /// the HMR fast path can re-transform a single file and invalidate.
 pub struct EsmState {
-    pub dep_config: Arc<rex_v8::DepModuleConfig>,
+    pub dep_modules: Arc<Vec<rex_v8::EsmSourceModule>>,
     pub source_modules: Vec<rex_v8::EsmSourceModule>,
     pub entry_specifier: String,
     pub entry_source: String,

@@ -37,7 +37,7 @@ pub async fn try_esm_fast_path(state: &Arc<AppState>, changed_path: &Path) -> Re
     };
 
     // Update the source module in ESM state
-    let (dep_config, source_modules, entry_specifier, entry_source) = {
+    let (dep_modules, source_modules, entry_specifier, entry_source) = {
         let mut esm = esm_lock
             .write()
             .map_err(|e| anyhow::anyhow!("ESM state lock poisoned: {e}"))?;
@@ -53,13 +53,12 @@ pub async fn try_esm_fast_path(state: &Arc<AppState>, changed_path: &Path) -> Re
         }
 
         if !found {
-            // New file not in the module list — need full rebuild
             debug!("File not in ESM module list, falling back to full rebuild");
             return Ok(false);
         }
 
         (
-            esm.dep_config.clone(),
+            esm.dep_modules.clone(),
             esm.source_modules.clone(),
             esm.entry_specifier.clone(),
             esm.entry_source.clone(),
@@ -74,7 +73,7 @@ pub async fn try_esm_fast_path(state: &Arc<AppState>, changed_path: &Path) -> Re
     state
         .isolate_pool
         .invalidate_esm_module_all(
-            dep_config,
+            dep_modules,
             source_modules_arc,
             entry_spec_arc,
             entry_src_arc,

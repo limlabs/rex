@@ -96,9 +96,9 @@ impl Rex {
     /// This is the primary constructor for dev mode and fresh builds.
     /// Requires the `build` feature (pulls in the rolldown bundler).
     ///
-    /// Pages router: uses native V8 ESM module loading for fast HMR.
-    /// App router: uses rolldown-built RSC bundles (IIFEs) because RSC requires
-    /// dual React instances (react-server + standard conditions).
+    /// Uses native V8 ESM module loading. Deps are pre-bundled by rolldown as
+    /// ESM, user source files are OXC-transformed individually. Enables fast
+    /// per-file HMR invalidation (~100ms vs ~3500ms full rebuild).
     #[cfg(feature = "build")]
     pub async fn new(opts: RexOptions) -> Result<Self> {
         let root = std::fs::canonicalize(&opts.root)?;
@@ -118,7 +118,7 @@ impl Rex {
             "Routes scanned"
         );
 
-        // Build bundles (client + RSC bundles via rolldown)
+        // Build client bundles + manifest via rolldown
         debug!("Building bundles...");
         let build_result = rex_build::build_bundles(&config, &scan, &project_config).await?;
         debug!(build_id = %build_result.build_id, "Build complete");
@@ -134,11 +134,8 @@ impl Rex {
 
         let project_root_str = config.project_root.to_string_lossy().to_string();
 
-        // Pages router with no app dir: ESM loading (fast HMR path)
-        // App router: IIFE loading (RSC needs dual React instances)
-        let has_pages_only = !scan.routes.is_empty() && scan.app_scan.is_none();
-
-        let (pool, esm_state) = if has_pages_only {
+        // ESM startup: pre-bundle deps as ESM, transform source, load into V8
+        let (pool, esm_state) = {
             let (pool, esm) = crate::startup::esm_startup(
                 &config,
                 &scan,
@@ -148,9 +145,6 @@ impl Rex {
             )
             .await?;
             (pool, Some(esm))
-        } else {
-            let pool = crate::startup::iife_startup(&build_result, pool_size, &project_root_str)?;
-            (pool, None)
         };
 
         let static_dir = config.client_build_dir();

@@ -215,7 +215,8 @@ impl IsolatePool {
     /// Load ESM modules into all isolates in the pool.
     pub async fn load_esm_modules_all(
         &self,
-        dep_config: std::sync::Arc<crate::ssr_isolate_esm::DepModuleConfig>,
+        polyfills_js: std::sync::Arc<String>,
+        dep_modules: std::sync::Arc<Vec<crate::ssr_isolate_esm::EsmSourceModule>>,
         source_modules: std::sync::Arc<Vec<crate::ssr_isolate_esm::EsmSourceModule>>,
         entry_specifier: std::sync::Arc<String>,
         entry_source: std::sync::Arc<String>,
@@ -223,14 +224,15 @@ impl IsolatePool {
         let mut handles = Vec::new();
 
         for i in 0..self.size {
-            let dep = dep_config.clone();
+            let polyfills = polyfills_js.clone();
+            let deps = dep_modules.clone();
             let sources = source_modules.clone();
             let spec = entry_specifier.clone();
             let src = entry_source.clone();
             let (tx, rx) = tokio::sync::oneshot::channel();
 
             let work: WorkItem = Box::new(move |isolate| {
-                let result = isolate.load_esm_modules(&dep, &sources, &spec, &src);
+                let result = isolate.load_esm_modules(&polyfills, &deps, &sources, &spec, &src);
                 let _ = tx.send(result);
             });
 
@@ -251,10 +253,10 @@ impl IsolatePool {
         Ok(())
     }
 
-    /// Invalidate an ESM module in all isolates (for HMR).
+    /// Invalidate ESM modules in all isolates (for HMR).
     pub async fn invalidate_esm_module_all(
         &self,
-        dep_config: std::sync::Arc<crate::ssr_isolate_esm::DepModuleConfig>,
+        dep_modules: std::sync::Arc<Vec<crate::ssr_isolate_esm::EsmSourceModule>>,
         source_modules: std::sync::Arc<Vec<crate::ssr_isolate_esm::EsmSourceModule>>,
         entry_specifier: std::sync::Arc<String>,
         entry_source: std::sync::Arc<String>,
@@ -262,14 +264,14 @@ impl IsolatePool {
         let mut handles = Vec::new();
 
         for i in 0..self.size {
-            let dep = dep_config.clone();
+            let deps = dep_modules.clone();
             let sources = source_modules.clone();
             let spec = entry_specifier.clone();
             let src = entry_source.clone();
             let (tx, rx) = tokio::sync::oneshot::channel();
 
             let work: WorkItem = Box::new(move |isolate| {
-                let result = isolate.invalidate_esm_module(&dep, &sources, &spec, &src);
+                let result = isolate.invalidate_esm_module(&deps, &sources, &spec, &src);
                 let _ = tx.send(result);
             });
 

@@ -18,4 +18,4 @@ pub use eval::eval_once;
 pub use isolate_pool::IsolatePool;
 pub use platform::init_v8;
 pub use ssr_isolate::{RenderResult, RscRenderResult, SsrIsolate};
-pub use ssr_isolate_esm::{DepModuleConfig, EsmSourceModule, SyntheticModuleDef};
+pub use ssr_isolate_esm::EsmSourceModule;

@@ -1,13 +1,13 @@
 //! Server dependency pre-bundling for ESM module loading.
 //!
-//! Produces self-contained IIFEs that bundle React and friends, evaluated once
-//! as V8 scripts. The IIFE sets globals (`globalThis.__rex_deps_*`) that the
-//! ESM module registry wraps as synthetic modules.
+//! Bundles React and friends into self-contained ESM modules using rolldown.
+//! Each dep is resolved with the correct conditions (standard or react-server)
+//! and output as ESM so it can be loaded directly into V8's module registry.
 //!
-//! Two variants:
-//! - **Pages dep IIFE**: React (standard conditions) + renderToString + polyfills
-//! - **RSC flight dep IIFE**: React (react-server condition) + renderToReadableStream
-//!   + registerServerReference + decodeReply/decodeAction + polyfills + webpack shims
+//! Dep modules are grouped by condition:
+//! - **Standard**: `react`, `react/jsx-runtime`, `react-dom/server` (renderToString)
+//! - **RSC flight** (react-server condition): `react-server-dom-webpack/server`
+//!   (renderToReadableStream), `react-server-dom-webpack/client` (createFromReadableStream)
 
 use crate::build_utils::{node_polyfill_aliases, runtime_server_dir};
 use crate::server_bundle::V8_POLYFILLS;
@@ -16,126 +16,114 @@ use rex_core::RexConfig;
 use std::sync::Arc;
 use tracing::debug;
 
+/// A pre-bundled dependency ESM module ready to load into V8.
+pub struct DepEsmModule {
+    /// The specifier user code imports from (e.g., "react", "react-dom/server").
+    pub specifier: String,
+    /// Self-contained ESM source bundled by rolldown.
+    pub source: String,
+}
+
 /// Result of server dep pre-bundling.
-pub struct ServerDepBundle {
-    /// Pages dep IIFE: React + renderToString + V8 polyfills.
-    /// Evaluated as a script, sets `globalThis.__rex_deps`.
-    pub pages_iife: String,
-    /// RSC flight dep IIFE: React (react-server) + flight protocol + polyfills + webpack shims.
-    /// Evaluated as a script, sets `globalThis.__rex_flight_deps`.
-    /// `None` if the project has no app/ directory.
-    pub flight_iife: Option<String>,
+pub struct ServerDepBundles {
+    /// V8 polyfills to evaluate before any modules.
+    pub polyfills: String,
+    /// Pre-bundled dep ESM modules.
+    pub modules: Vec<DepEsmModule>,
 }
 
-/// Build the pages dep IIFE.
+/// Build all dep ESM modules for the project.
 ///
-/// Entry bundles React + react-dom/server with standard Node.js conditions,
-/// exposing them on `globalThis.__rex_deps` for synthetic module wrapping.
-pub async fn build_pages_dep_iife(config: &RexConfig, module_dirs: &[String]) -> Result<String> {
-    let entry_source = r#"
-import * as React from 'react';
-import * as ReactJSXRuntime from 'react/jsx-runtime';
-import * as ReactJSXDevRuntime from 'react/jsx-dev-runtime';
-import { renderToString } from 'react-dom/server';
-
-globalThis.__rex_deps = {
-    react: React,
-    "react/jsx-runtime": ReactJSXRuntime,
-    "react/jsx-dev-runtime": ReactJSXDevRuntime,
-    "react-dom/server": { renderToString },
-};
-
-// Also set individual globals for backwards compat with existing runtime
-globalThis.__rex_React = React;
-globalThis.__rex_renderToString = renderToString;
-"#;
-
-    build_dep_iife(
-        config,
-        entry_source,
-        "pages-deps",
-        &["require", "default"],
-        V8_POLYFILLS,
-        module_dirs,
-    )
-    .await
-}
-
-/// Build the RSC flight dep IIFE.
-///
-/// Entry bundles React with `react-server` condition + flight protocol APIs,
-/// exposing them on `globalThis.__rex_flight_deps` for synthetic module wrapping.
-pub async fn build_flight_dep_iife(config: &RexConfig, module_dirs: &[String]) -> Result<String> {
-    let webpack_shims = include_str!("../../../runtime/rsc/webpack-shims.ts");
-    let banner = format!("{}\n{}", V8_POLYFILLS, webpack_shims);
-
-    let entry_source = r#"
-import * as React from 'react';
-import * as ReactJSXRuntime from 'react/jsx-runtime';
-import * as ReactJSXDevRuntime from 'react/jsx-dev-runtime';
-import { renderToReadableStream } from 'react-server-dom-webpack/server';
-import { registerServerReference, decodeReply, decodeAction } from 'react-server-dom-webpack/server';
-import { createElement } from 'react';
-import { renderToString } from 'react-dom/server';
-import { createFromReadableStream } from 'react-server-dom-webpack/client';
-
-globalThis.__rex_flight_deps = {
-    react: React,
-    "react/jsx-runtime": ReactJSXRuntime,
-    "react/jsx-dev-runtime": ReactJSXDevRuntime,
-    "react-server-dom-webpack/server": {
-        renderToReadableStream,
-        registerServerReference,
-        decodeReply,
-        decodeAction,
-    },
-    "react-dom/server": { renderToString },
-    "react-server-dom-webpack/client": { createFromReadableStream },
-};
-
-// Individual globals used by the flight runtime
-globalThis.__rex_createElement = createElement;
-globalThis.__rex_renderToReadableStream = renderToReadableStream;
-globalThis.__rex_renderToString = renderToString;
-globalThis.__rex_createFromReadableStream = createFromReadableStream;
-globalThis.__rex_registerServerReference = registerServerReference;
-globalThis.__rex_decodeReply = decodeReply;
-globalThis.__rex_decodeAction = decodeAction;
-"#;
-
-    build_dep_iife(
-        config,
-        entry_source,
-        "flight-deps",
-        &["react-server", "workerd", "browser", "import", "default"],
-        &banner,
-        module_dirs,
-    )
-    .await
-}
-
-/// Build both dep IIFEs (pages + optional flight).
-pub async fn build_server_dep_bundles(
+/// Standard deps (React, renderToString) are always built.
+/// RSC flight deps are built only if the project has an app/ directory.
+pub async fn build_dep_esm_modules(
     config: &RexConfig,
     has_app_dir: bool,
     module_dirs: &[String],
-) -> Result<ServerDepBundle> {
-    let pages_iife = build_pages_dep_iife(config, module_dirs).await?;
+) -> Result<ServerDepBundles> {
+    let mut modules = Vec::new();
 
-    let flight_iife = if has_app_dir {
-        Some(build_flight_dep_iife(config, module_dirs).await?)
-    } else {
-        None
-    };
+    // Standard deps: React + renderToString.
+    // Use explicit named re-exports because `export *` doesn't always
+    // re-export CJS default exports correctly through rolldown.
+    let standard_deps = vec![
+        ("react", concat!(
+            "import React from 'react';\n",
+            "var { createElement, useState, useEffect, useContext, useReducer, useCallback,\n",
+            "  useMemo, useRef, useLayoutEffect, useImperativeHandle, useDebugValue,\n",
+            "  useDeferredValue, useTransition, useId, useSyncExternalStore, useInsertionEffect,\n",
+            "  useActionState, useOptimistic, use, memo, forwardRef, lazy, Suspense, Fragment,\n",
+            "  Children, Component, PureComponent, createContext, createRef, cloneElement,\n",
+            "  isValidElement, startTransition, cache } = React;\n",
+            "export { createElement, useState, useEffect, useContext, useReducer, useCallback,\n",
+            "  useMemo, useRef, useLayoutEffect, useImperativeHandle, useDebugValue,\n",
+            "  useDeferredValue, useTransition, useId, useSyncExternalStore, useInsertionEffect,\n",
+            "  useActionState, useOptimistic, use, memo, forwardRef, lazy, Suspense, Fragment,\n",
+            "  Children, Component, PureComponent, createContext, createRef, cloneElement,\n",
+            "  isValidElement, startTransition, cache };\n",
+            "export default React;\n",
+        )),
+        ("react/jsx-runtime", "import { jsx, jsxs, Fragment } from 'react/jsx-runtime'; export { jsx, jsxs, Fragment };"),
+        ("react/jsx-dev-runtime", "import { jsxDEV, Fragment } from 'react/jsx-dev-runtime'; export { jsxDEV, Fragment };"),
+        ("react-dom/server", "import S from 'react-dom/server'; var { renderToString, renderToStaticMarkup } = S; export { renderToString, renderToStaticMarkup }; export default S;"),
+    ];
 
-    Ok(ServerDepBundle {
-        pages_iife,
-        flight_iife,
+    for (specifier, entry_source) in &standard_deps {
+        let source = build_dep_esm(
+            config,
+            entry_source,
+            specifier,
+            &["require", "default"],
+            "",
+            module_dirs,
+        )
+        .await?;
+        modules.push(DepEsmModule {
+            specifier: specifier.to_string(),
+            source,
+        });
+    }
+
+    // RSC flight deps (react-server conditions) — only if app/ exists
+    if has_app_dir {
+        let webpack_shims = include_str!("../../../runtime/rsc/webpack-shims.ts");
+
+        let flight_deps = vec![
+            (
+                "react-server-dom-webpack/server",
+                "export * from 'react-server-dom-webpack/server';",
+            ),
+            (
+                "react-server-dom-webpack/client",
+                "export * from 'react-server-dom-webpack/client';",
+            ),
+        ];
+
+        for (specifier, entry_source) in &flight_deps {
+            let source = build_dep_esm(
+                config,
+                entry_source,
+                specifier,
+                &["react-server", "workerd", "browser", "import", "default"],
+                webpack_shims,
+                module_dirs,
+            )
+            .await?;
+            modules.push(DepEsmModule {
+                specifier: specifier.to_string(),
+                source,
+            });
+        }
+    }
+
+    Ok(ServerDepBundles {
+        polyfills: V8_POLYFILLS.to_string(),
+        modules,
     })
 }
 
-/// Internal: build a dep IIFE using rolldown.
-async fn build_dep_iife(
+/// Internal: build a single dep as a self-contained ESM module using rolldown.
+async fn build_dep_esm(
     config: &RexConfig,
     entry_source: &str,
     name: &str,
@@ -143,38 +131,34 @@ async fn build_dep_iife(
     banner: &str,
     module_dirs: &[String],
 ) -> Result<String> {
+    let sanitized_name = name.replace(['/', '-', '.', '@'], "_");
     let output_dir = config.server_build_dir().join("_dep_bundles");
     std::fs::create_dir_all(&output_dir)?;
 
-    // Write entry to temp file
-    let entry_path = output_dir.join(format!("{name}-entry.js"));
+    let entry_path = output_dir.join(format!("{sanitized_name}-entry.js"));
     std::fs::write(&entry_path, entry_source)?;
 
-    // Build resolve aliases
     let runtime_dir = runtime_server_dir()?;
     let mut aliases: Vec<(String, Vec<Option<String>>)> = Vec::new();
     aliases.extend(node_polyfill_aliases(&runtime_dir));
 
-    // Rex built-in aliases for server
     let make_alias = |spec: &str, file: &str| {
         (
             spec.to_string(),
             vec![Some(runtime_dir.join(file).to_string_lossy().to_string())],
         )
     };
-    let rex_aliases = [
+    for (s, f) in &[
         ("rex/head", "head.ts"),
         ("rex/link", "link.ts"),
         ("rex/router", "router.ts"),
         ("rex/document", "document.ts"),
         ("rex/image", "image.ts"),
         ("rex/middleware", "middleware.ts"),
-    ];
-    for (s, f) in &rex_aliases {
+    ] {
         aliases.push(make_alias(s, f));
     }
 
-    // Non-JS asset module types
     let mut module_types = rustc_hash::FxHashMap::default();
     for ext in &[".css", ".scss", ".sass", ".less", ".mdx", ".svg", ".wasm"] {
         module_types.insert((*ext).to_string(), rolldown::ModuleType::Empty);
@@ -191,15 +175,22 @@ async fn build_dep_iife(
         "\"production\""
     };
 
+    // Combine V8 polyfills + any extra banner (e.g., webpack shims for RSC)
+    let full_banner = if banner.is_empty() {
+        V8_POLYFILLS.to_string()
+    } else {
+        format!("{}\n{}", V8_POLYFILLS, banner)
+    };
+
     let options = rolldown::BundlerOptions {
         input: Some(vec![rolldown::InputItem {
-            name: Some(name.to_string()),
+            name: Some(sanitized_name.clone()),
             import: entry_path.to_string_lossy().to_string(),
         }]),
         cwd: Some(config.project_root.clone()),
-        format: Some(rolldown::OutputFormat::Iife),
+        format: Some(rolldown::OutputFormat::Esm),
         dir: Some(output_dir.to_string_lossy().to_string()),
-        entry_filenames: Some(format!("{name}.js").into()),
+        entry_filenames: Some(format!("{sanitized_name}.js").into()),
         platform: Some(rolldown::Platform::Browser),
         module_types: Some(module_types),
         define: Some(
@@ -207,9 +198,7 @@ async fn build_dep_iife(
                 .into_iter()
                 .collect(),
         ),
-        banner: Some(rolldown::AddonOutputOption::String(Some(
-            banner.to_string(),
-        ))),
+        banner: Some(rolldown::AddonOutputOption::String(Some(full_banner))),
         tsconfig: Some(rolldown_common::TsConfig::Auto(false)),
         shim_missing_exports: Some(true),
         treeshake: crate::rsc_build_config::react_treeshake_options(),
@@ -256,13 +245,12 @@ async fn build_dep_iife(
         }
     }
 
-    let bundle_path = output_dir.join(format!("{name}.js"));
+    let bundle_path = output_dir.join(format!("{sanitized_name}.js"));
     let content = std::fs::read_to_string(&bundle_path)?;
 
-    // Clean up temp files
     let _ = std::fs::remove_file(&entry_path);
     let _ = std::fs::remove_file(&bundle_path);
 
-    debug!(name, size = content.len(), "Dep IIFE built");
+    debug!(name, size = content.len(), "Dep ESM module built");
     Ok(content)
 }

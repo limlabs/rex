@@ -4,7 +4,7 @@
 //! and walks import graphs to collect all source modules needed for V8 loading.
 
 use anyhow::{Context, Result};
-use rex_v8::{EsmSourceModule, SyntheticModuleDef};
+use rex_v8::EsmSourceModule;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
@@ -160,81 +160,10 @@ pub fn collect_source_modules(
     })
 }
 
-/// Generate synthetic module definitions for the pages dep IIFE.
-///
-/// These wrap `globalThis.__rex_deps` properties as ESM modules.
-pub fn pages_synthetic_modules() -> Vec<SyntheticModuleDef> {
-    vec![
-        SyntheticModuleDef {
-            specifier: "react".to_string(),
-            export_names: react_export_names(),
-            globals_expr: "globalThis.__rex_deps.react".to_string(),
-        },
-        SyntheticModuleDef {
-            specifier: "react/jsx-runtime".to_string(),
-            export_names: vec!["jsx".into(), "jsxs".into(), "Fragment".into()],
-            globals_expr: "globalThis.__rex_deps[\"react/jsx-runtime\"]".to_string(),
-        },
-        SyntheticModuleDef {
-            specifier: "react/jsx-dev-runtime".to_string(),
-            export_names: vec!["jsxDEV".into(), "Fragment".into()],
-            globals_expr: "globalThis.__rex_deps[\"react/jsx-dev-runtime\"]".to_string(),
-        },
-        SyntheticModuleDef {
-            specifier: "react-dom/server".to_string(),
-            export_names: vec!["renderToString".into(), "default".into()],
-            globals_expr: "globalThis.__rex_deps[\"react-dom/server\"]".to_string(),
-        },
-    ]
-}
-
-/// Generate synthetic module definitions for the RSC flight dep IIFE.
-pub fn flight_synthetic_modules() -> Vec<SyntheticModuleDef> {
-    vec![
-        SyntheticModuleDef {
-            specifier: "react".to_string(),
-            export_names: react_export_names(),
-            globals_expr: "globalThis.__rex_flight_deps.react".to_string(),
-        },
-        SyntheticModuleDef {
-            specifier: "react/jsx-runtime".to_string(),
-            export_names: vec!["jsx".into(), "jsxs".into(), "Fragment".into()],
-            globals_expr: "globalThis.__rex_flight_deps[\"react/jsx-runtime\"]".to_string(),
-        },
-        SyntheticModuleDef {
-            specifier: "react/jsx-dev-runtime".to_string(),
-            export_names: vec!["jsxDEV".into(), "Fragment".into()],
-            globals_expr: "globalThis.__rex_flight_deps[\"react/jsx-dev-runtime\"]".to_string(),
-        },
-        SyntheticModuleDef {
-            specifier: "react-server-dom-webpack/server".to_string(),
-            export_names: vec![
-                "renderToReadableStream".into(),
-                "registerServerReference".into(),
-                "decodeReply".into(),
-                "decodeAction".into(),
-                "default".into(),
-            ],
-            globals_expr: "globalThis.__rex_flight_deps[\"react-server-dom-webpack/server\"]"
-                .to_string(),
-        },
-        SyntheticModuleDef {
-            specifier: "react-dom/server".to_string(),
-            export_names: vec!["renderToString".into(), "default".into()],
-            globals_expr: "globalThis.__rex_flight_deps[\"react-dom/server\"]".to_string(),
-        },
-        SyntheticModuleDef {
-            specifier: "react-server-dom-webpack/client".to_string(),
-            export_names: vec!["createFromReadableStream".into(), "default".into()],
-            globals_expr: "globalThis.__rex_flight_deps[\"react-server-dom-webpack/client\"]"
-                .to_string(),
-        },
-    ]
-}
-
-/// Specifiers handled by the pages dep IIFE.
-pub fn pages_known_specifiers() -> HashSet<String> {
-    [
+/// Specifiers that are pre-bundled as dep ESM modules.
+/// The import graph walker skips these (they're not user source files).
+pub fn dep_specifiers(has_app: bool) -> HashSet<String> {
+    let mut set: HashSet<String> = [
         "react",
         "react/jsx-runtime",
         "react/jsx-dev-runtime",
@@ -242,33 +171,14 @@ pub fn pages_known_specifiers() -> HashSet<String> {
     ]
     .into_iter()
     .map(String::from)
-    .collect()
-}
+    .collect();
 
-/// Specifiers handled by the RSC flight dep IIFE.
-pub fn flight_known_specifiers() -> HashSet<String> {
-    [
-        "react",
-        "react/jsx-runtime",
-        "react/jsx-dev-runtime",
-        "react-server-dom-webpack/server",
-        "react-dom/server",
-        "react-server-dom-webpack/client",
-    ]
-    .into_iter()
-    .map(String::from)
-    .collect()
-}
-
-/// Build a `DepModuleConfig` from an IIFE JS string and synthetic module defs.
-pub fn build_dep_config(
-    iife_js: String,
-    synthetic_modules: Vec<SyntheticModuleDef>,
-) -> rex_v8::DepModuleConfig {
-    rex_v8::DepModuleConfig {
-        iife_js,
-        synthetic_modules,
+    if has_app {
+        set.insert("react-server-dom-webpack/server".to_string());
+        set.insert("react-server-dom-webpack/client".to_string());
     }
+
+    set
 }
 
 // --- Internal helpers ---
@@ -414,48 +324,6 @@ fn is_asset_file(path: &Path) -> bool {
         .is_some_and(|ext| ASSET_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
 }
 
-fn react_export_names() -> Vec<String> {
-    [
-        "createElement",
-        "useState",
-        "useEffect",
-        "useContext",
-        "useReducer",
-        "useCallback",
-        "useMemo",
-        "useRef",
-        "useLayoutEffect",
-        "useImperativeHandle",
-        "useDebugValue",
-        "useDeferredValue",
-        "useTransition",
-        "useId",
-        "useSyncExternalStore",
-        "useInsertionEffect",
-        "useActionState",
-        "useOptimistic",
-        "use",
-        "memo",
-        "forwardRef",
-        "lazy",
-        "Suspense",
-        "Fragment",
-        "Children",
-        "Component",
-        "PureComponent",
-        "createContext",
-        "createRef",
-        "cloneElement",
-        "isValidElement",
-        "startTransition",
-        "cache",
-        "default",
-    ]
-    .into_iter()
-    .map(String::from)
-    .collect()
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -508,17 +376,17 @@ import { format } from "./utils";
     }
 
     #[test]
-    fn pages_synthetic_modules_has_react() {
-        let mods = pages_synthetic_modules();
-        assert!(mods.iter().any(|m| m.specifier == "react"));
-        assert!(mods.iter().any(|m| m.specifier == "react/jsx-runtime"));
+    fn dep_specifiers_pages_only() {
+        let specs = dep_specifiers(false);
+        assert!(specs.contains("react"));
+        assert!(specs.contains("react/jsx-runtime"));
+        assert!(!specs.contains("react-server-dom-webpack/server"));
     }
 
     #[test]
-    fn flight_synthetic_modules_has_rsdw() {
-        let mods = flight_synthetic_modules();
-        assert!(mods
-            .iter()
-            .any(|m| m.specifier == "react-server-dom-webpack/server"));
+    fn dep_specifiers_with_app() {
+        let specs = dep_specifiers(true);
+        assert!(specs.contains("react"));
+        assert!(specs.contains("react-server-dom-webpack/server"));
     }
 }
