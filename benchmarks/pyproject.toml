@@ -11,6 +11,9 @@ dependencies = [
     "playwright>=1.58.0",
     "plotly",
     "polars>=1.38.1",
+    "anthropic>=0.52.0",
+    "requests>=2.32.0",
+    "selectolax>=0.3.0",
 ]
 
 [dependency-groups]

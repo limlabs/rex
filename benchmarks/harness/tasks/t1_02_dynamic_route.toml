@@ -1,0 +1,49 @@
+[task]
+id = "t1-02"
+tier = 1
+name = "Dynamic route"
+prompt = """
+Create a dynamic route at /blog/[slug] that:
+1. Accepts a slug parameter from the URL
+2. Displays an h1 heading with the text "Blog: {slug}" where {slug} is the actual slug from the URL
+3. Displays a paragraph with the text "You are reading {slug}"
+
+Use getServerSideProps to extract the slug from context.params.
+
+For example, visiting /blog/hello-world should show:
+- h1: "Blog: hello-world"
+- p: "You are reading hello-world"
+"""
+
+[starter]
+template = "rex"
+
+[checks]
+build = true
+serve = true
+
+[[checks.http]]
+path = "/blog/hello-world"
+status = 200
+
+[[checks.http]]
+path = "/blog/another-post"
+status = 200
+
+[[checks.ssr]]
+path = "/blog/hello-world"
+contains = ["Blog: hello-world", "You are reading hello-world"]
+
+[[checks.ssr]]
+path = "/blog/another-post"
+contains = ["Blog: another-post", "You are reading another-post"]
+
+[[checks.dom]]
+path = "/blog/hello-world"
+selector = "h1"
+text = "Blog: hello-world"
+
+[[checks.dom]]
+path = "/blog/hello-world"
+selector = "p"
+contains = "You are reading hello-world"
