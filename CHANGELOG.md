@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.3](https://github.com/limlabs/rex/compare/v0.19.2...v0.19.3) (2026-03-16)
+
+
+### Bug Fixes
+
+* **benchmarks:** upgrade undici to resolve Dependabot alerts ([#217](https://github.com/limlabs/rex/issues/217)) ([6f7b3ee](https://github.com/limlabs/rex/commit/6f7b3eefa5f5bb03044a30a5991f76b901bfc1c0))
+
 ## [0.19.2](https://github.com/limlabs/rex/compare/v0.19.1...v0.19.2) (2026-03-16)
 
 
