@@ -28,6 +28,15 @@ pub async fn page_handler(
     let path = uri.path();
     info!(path, method = %method, "Handling page request");
 
+    // Lazy init: first request triggers build + ESM loading (dev mode only)
+    if let Err(e) = state.ensure_initialized().await {
+        tracing::error!("Initialization failed: {e:#}");
+        return Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Body::from(format!("Initialization failed: {e}")))
+            .expect("response build");
+    }
+
     let hot = snapshot(&state);
 
     // Run middleware before anything else

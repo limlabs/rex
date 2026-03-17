@@ -1,6 +1,6 @@
 use crate::document::DocumentDescriptor;
-use rex_core::{AssetManifest, ProjectConfig};
-use rex_router::RouteTrie;
+use rex_core::{AssetManifest, ProjectConfig, RexConfig};
+use rex_router::{RouteTrie, ScanResult};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -67,6 +67,14 @@ pub struct EsmState {
     pub entry_source: String,
 }
 
+/// Context for lazy initialization on first request (dev mode only).
+pub struct LazyInitContext {
+    pub config: RexConfig,
+    pub scan: ScanResult,
+    pub build_id: String,
+    pub pool_size: usize,
+}
+
 /// Shared application state
 pub struct AppState {
     pub isolate_pool: rex_v8::IsolatePool,
@@ -76,6 +84,73 @@ pub struct AppState {
     pub hot: RwLock<Arc<HotState>>,
     /// ESM module state for HMR fast path. None if using IIFE loading.
     pub esm: Option<RwLock<EsmState>>,
+    /// Lazy init gate — first request triggers build + ESM loading (dev mode only).
+    pub lazy_init: tokio::sync::OnceCell<()>,
+    /// Context needed for lazy init. Consumed on first use.
+    pub lazy_init_ctx: std::sync::Mutex<Option<LazyInitContext>>,
+}
+
+impl AppState {
+    /// Ensure the dev server is fully initialized (build + ESM + V8).
+    /// First call does the work; subsequent calls return immediately.
+    /// No-op in production mode (everything is initialized eagerly).
+    pub async fn ensure_initialized(self: &Arc<Self>) -> anyhow::Result<()> {
+        let state = Arc::clone(self);
+        self.lazy_init
+            .get_or_try_init(|| async {
+                let ctx = {
+                    let mut guard = state
+                        .lazy_init_ctx
+                        .lock()
+                        .map_err(|e| anyhow::anyhow!("lazy_init_ctx lock poisoned: {e}"))?;
+                    match guard.take() {
+                        Some(ctx) => ctx,
+                        None => return Ok::<(), anyhow::Error>(()), // already consumed
+                    }
+                };
+
+                tracing::debug!("Lazy init: building bundles + loading ESM...");
+
+                let project_config =
+                    ProjectConfig::load(&ctx.config.project_root).unwrap_or_default();
+                // Run build and ESM loading in parallel.
+                // build_bundles produces CSS/manifest; esm_load_modules loads V8.
+                let build_fut = rex_build::build_bundles(&ctx.config, &ctx.scan, &project_config);
+                let esm_fut = crate::startup::esm_load_modules(
+                    &ctx.config,
+                    &ctx.scan,
+                    &ctx.build_id,
+                    &state.isolate_pool,
+                );
+                let (build_result, esm_state) = tokio::try_join!(build_fut, esm_fut)?;
+
+                tracing::debug!(
+                    build_id = %build_result.build_id,
+                    "Lazy init complete"
+                );
+
+                // Update HotState with real manifest
+                if let Ok(mut guard) = state.hot.write() {
+                    let mut hot = (**guard).clone();
+                    hot.manifest = build_result.manifest;
+                    hot.build_id = build_result.build_id.clone();
+                    hot.manifest_json =
+                        HotState::compute_manifest_json(&hot.build_id, &hot.manifest);
+                    *guard = Arc::new(hot);
+                }
+
+                // Set ESM state for HMR
+                if let Some(esm_lock) = &state.esm {
+                    if let Ok(mut guard) = esm_lock.write() {
+                        *guard = esm_state;
+                    }
+                }
+
+                Ok(())
+            })
+            .await?;
+        Ok(())
+    }
 }
 
 /// Snapshot the hot state (O(1) Arc clone, no lock held across await).

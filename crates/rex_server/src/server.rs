@@ -72,6 +72,8 @@ impl RexServer {
             project_root: config.project_root.clone(),
             image_cache,
             esm: None,
+            lazy_init: tokio::sync::OnceCell::const_new_with(()),
+            lazy_init_ctx: std::sync::Mutex::new(None),
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: config.route_trie,
                 api_route_trie: config.api_route_trie,

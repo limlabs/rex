@@ -14,7 +14,7 @@ use tracing::debug;
 
 /// Stub render functions for ESM bootstrap. Overwritten by `load_esm_modules()`
 /// once the real entry module is evaluated.
-const STUB_FUNCTIONS: &str = r#"
+pub const STUB_FUNCTIONS: &str = r#"
 globalThis.__rex_pages = {};
 globalThis.__rex_render_page = function() { return JSON.stringify({ body: '', head: '' }); };
 globalThis.__rex_get_server_side_props = function() { return JSON.stringify({ props: {} }); };
@@ -22,6 +22,10 @@ globalThis.__rex_get_static_props = function() { return JSON.stringify({ props: 
 "#;
 
 /// ESM startup: pre-bundle deps as ESM, OXC-transform source files, load into V8.
+/// ESM startup: pre-bundle deps as ESM, OXC-transform source files, load into V8.
+///
+/// If `pool` is provided, loads modules into the existing pool.
+/// If `None`, creates a new pool. Returns the pool and ESM state.
 pub async fn esm_startup(
     config: &RexConfig,
     scan: &ScanResult,
@@ -29,6 +33,25 @@ pub async fn esm_startup(
     pool_size: usize,
     project_root_str: &str,
 ) -> Result<(IsolatePool, EsmState)> {
+    let pool = IsolatePool::new(
+        pool_size,
+        Arc::new(STUB_FUNCTIONS.to_string()),
+        Some(Arc::new(project_root_str.to_string())),
+    )?;
+    let esm_state = esm_load_modules(config, scan, build_id, &pool).await?;
+    Ok((pool, esm_state))
+}
+
+/// Load ESM modules into an existing isolate pool.
+///
+/// Builds dep ESM modules, transforms source files, generates entry,
+/// and loads everything into the pool's V8 isolates.
+pub async fn esm_load_modules(
+    config: &RexConfig,
+    scan: &ScanResult,
+    build_id: &str,
+    pool: &IsolatePool,
+) -> Result<EsmState> {
     use rex_build::esm_transform;
     use rex_build::server_bundle::SSR_RUNTIME;
 
@@ -181,16 +204,6 @@ pub async fn esm_startup(
         }
     }
 
-    // Create pool with minimal bootstrap (just stub functions for SsrIsolate::new)
-    let bootstrap = STUB_FUNCTIONS.to_string();
-
-    debug!(pool_size, "Creating V8 isolate pool (ESM)");
-    let pool = IsolatePool::new(
-        pool_size,
-        Arc::new(bootstrap),
-        Some(Arc::new(project_root_str.to_string())),
-    )?;
-
     // Load ESM modules into all isolates
     let polyfills_arc = Arc::new(dep_bundles.polyfills);
     let dep_modules_arc = Arc::new(all_dep_modules.clone());
@@ -209,14 +222,12 @@ pub async fn esm_startup(
 
     debug!("ESM modules loaded into V8");
 
-    let esm_state = EsmState {
+    Ok(EsmState {
         dep_modules: dep_modules_arc,
         source_modules: collected.source_modules,
         entry_specifier,
         entry_source,
-    };
-
-    Ok((pool, esm_state))
+    })
 }
 
 /// Build RSC client bundles in the background and update HotState when done.

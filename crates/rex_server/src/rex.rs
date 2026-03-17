@@ -119,7 +119,6 @@ impl Rex {
         );
 
         // Initialize V8
-        debug!("Initializing V8...");
         init_v8();
 
         let pool_size = std::thread::available_parallelism()
@@ -129,35 +128,55 @@ impl Rex {
 
         let project_root_str = config.project_root.to_string_lossy().to_string();
 
-        // In dev mode, run build_bundles() and esm_startup() in parallel.
-        // build_bundles produces CSS/Tailwind/manifest (needed for styled pages).
-        // esm_startup produces the V8 isolate pool (needed for SSR).
-        // They're independent, so running concurrently saves ~40% of startup time.
-        debug!("Building bundles...");
-        let build_id = rex_build::build_utils::generate_build_id();
-        let (build_result, (pool, esm_state)) = if opts.dev {
-            let build_fut = rex_build::build_bundles(&config, &scan, &project_config);
-            let esm_fut = crate::startup::esm_startup(
-                &config,
-                &scan,
-                &build_id,
+        if opts.dev {
+            // Dev mode: create stub pool and return immediately.
+            // Full initialization (build + ESM) happens lazily on first request.
+            let build_id = rex_build::build_utils::generate_build_id();
+            let pool = IsolatePool::new(
                 pool_size,
-                &project_root_str,
-            );
-            tokio::try_join!(build_fut, esm_fut)?
-        } else {
-            let build_result = rex_build::build_bundles(&config, &scan, &project_config).await?;
-            let (pool, esm_state) = crate::startup::esm_startup(
-                &config,
-                &scan,
-                &build_result.build_id,
+                Arc::new(crate::startup::STUB_FUNCTIONS.to_string()),
+                Some(Arc::new(project_root_str)),
+            )?;
+
+            let lazy_ctx = crate::state::LazyInitContext {
+                config: config.clone(),
+                scan: scan.clone(),
+                build_id: build_id.clone(),
                 pool_size,
-                &project_root_str,
+            };
+
+            let static_dir = config.client_build_dir();
+            let rex = Self::init_from_parts(
+                config,
+                scan,
+                pool,
+                AssetManifest::new(build_id.clone()),
+                build_id,
+                static_dir,
+                project_config,
+                None, // ESM state set during lazy init
+                opts.port,
+                opts.host,
+                Some(lazy_ctx),
             )
             .await?;
-            (build_result, (pool, esm_state))
-        };
+
+            return Ok(rex);
+        }
+
+        // Production: build everything eagerly
+        debug!("Building bundles...");
+        let build_result = rex_build::build_bundles(&config, &scan, &project_config).await?;
         debug!(build_id = %build_result.build_id, "Build complete");
+
+        let (pool, esm_state) = crate::startup::esm_startup(
+            &config,
+            &scan,
+            &build_result.build_id,
+            pool_size,
+            &project_root_str,
+        )
+        .await?;
 
         let static_dir = config.client_build_dir();
 
@@ -172,6 +191,7 @@ impl Rex {
             Some(esm_state),
             opts.port,
             opts.host,
+            None, // No lazy init in production
         )
         .await?;
 
@@ -238,6 +258,7 @@ impl Rex {
             None, // ESM state not used for from_build (IIFE path)
             opts.port,
             opts.host,
+            None, // No lazy init in production
         )
         .await
     }
@@ -256,6 +277,7 @@ impl Rex {
         esm_state: Option<EsmState>,
         port: u16,
         host: IpAddr,
+        lazy_init_ctx: Option<crate::state::LazyInitContext>,
     ) -> Result<Self> {
         let trie = RouteTrie::from_routes(&scan.routes);
         let api_trie = RouteTrie::from_routes(&scan.api_routes);
@@ -331,6 +353,8 @@ impl Rex {
             project_root: config.project_root.clone(),
             image_cache,
             esm: esm_state.map(RwLock::new),
+            lazy_init: tokio::sync::OnceCell::new(),
+            lazy_init_ctx: std::sync::Mutex::new(lazy_init_ctx),
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
                 api_route_trie: api_trie,
