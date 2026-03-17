@@ -49,158 +49,14 @@ from .runner import (
 
 # Reuse Condition for eval compatibility
 from .conditions import Condition
-
-# ---------------------------------------------------------------------------
-# CLAUDE.md content per condition
-# ---------------------------------------------------------------------------
-
-_REX_GUIDED_CLAUDE_MD = """\
-# Rex Project
-
-This is a Rex project — a Rust-native React framework with file-based routing.
-
-## Quick Reference
-
-- Pages go in `pages/` (e.g. `pages/about.tsx`, `pages/blog/[slug].tsx`)
-- API routes go in `pages/api/` (e.g. `pages/api/hello.ts`)
-- All pages must `import React from "react"` and export a default component
-- Server-side data fetching uses `getServerSideProps(context)`:
-  - `context.params` — dynamic route params
-  - `context.query` — query string
-  - Must return `{ props: { ... } }`
-- The component receives props from getServerSideProps as its props argument
-
-## Example Page
-
-```tsx
-import React from "react";
-
-export default function AboutPage() {
-  return <div><h1>About</h1></div>;
-}
-```
-
-## Example with Data Fetching
-
-```tsx
-import React from "react";
-
-export default function UserPage({ name }: { name: string }) {
-  return <h1>Hello {name}</h1>;
-}
-
-export async function getServerSideProps(context: any) {
-  return { props: { name: context.params.slug } };
-}
-```
-
-## Example API Route
-
-```ts
-export default function handler(req: any, res: any) {
-  res.status(200).json({ message: "hello" });
-}
-```
-"""
-
-_REX_RAW_CLAUDE_MD = """\
-# Rex Project
-
-This is a Rex project. Pages go in `pages/`, API routes in `pages/api/`.
-"""
-
-_NEXTJS_CLAUDE_MD = """\
-# Next.js Project (Pages Router)
-
-- Pages go in `pages/` (e.g. `pages/about.tsx`, `pages/blog/[slug].tsx`)
-- API routes go in `pages/api/` (e.g. `pages/api/hello.ts`)
-- Server-side data: `getServerSideProps(context)` returns `{ props: {...} }`
-- Do NOT use the App Router
-"""
-
-_TANSTACK_CLAUDE_MD = """\
-# TanStack Start Project
-
-- Routes go in `src/routes/` using file-based routing
-- Each route exports `Route = createFileRoute('/path')({ component, loader })`
-- Dynamic segments use `$` prefix: `src/routes/blog/$slug.tsx`
-- Loaders run server-side; access data with `useLoaderData()` or `Route.useLoaderData()`
-- Root route (`__root.tsx`) and router (`router.tsx`) are already set up
-- After creating routes, run `npx tsr generate` to update the route tree
-"""
-
-_REMIX_CLAUDE_MD = """\
-# React Router v7 (Remix) Project
-
-- Routes go in `app/routes/` with flat file convention
-- Filenames: `about.tsx`, `blog.$slug.tsx`, `_index.tsx` (index route)
-- Server data: export `loader({ params, request })`, return data directly
-- Access data: `useLoaderData()` from `react-router`
-- Root layout (`app/root.tsx`) is already set up
-"""
-
-_REX_MCP_CLAUDE_MD = """\
-# Rex Project
-
-This is a Rex project — a Rust-native React framework with file-based routing.
-
-## Quick Reference
-
-- Pages go in `pages/` (e.g. `pages/about.tsx`, `pages/blog/[slug].tsx`)
-- API routes go in `pages/api/` (e.g. `pages/api/hello.ts`)
-- All pages must `import React from "react"` and export a default component
-- Server-side data fetching uses `getServerSideProps(context)`:
-  - `context.params` — dynamic route params
-  - Must return `{ props: { ... } }`
-
-## MCP Tools Available
-
-You have two Rex-specific tools — USE THEM:
-
-- **rex_check**: Build the project and get structured pass/fail with errors.
-  Call this after creating or editing any page file.
-- **rex_status**: See what pages exist and what routes they map to.
-  Call this before starting work to orient yourself.
-
-## Workflow
-
-1. Call `rex_status` to see current project state
-2. Create/edit page files
-3. Call `rex_check` to verify the build passes
-4. If check fails, fix the errors and check again
-
-## Example Page
-
-```tsx
-import React from "react";
-
-export default function AboutPage() {
-  return <div><h1>About</h1></div>;
-}
-```
-
-## Example with Data Fetching
-
-```tsx
-import React from "react";
-
-export default function UserPage({ name }: { name: string }) {
-  return <h1>Hello {name}</h1>;
-}
-
-export async function getServerSideProps(context: any) {
-  return { props: { name: context.params.slug } };
-}
-```
-
-## Example API Route
-
-```ts
-export default function handler(req: any, res: any) {
-  res.status(200).json({ message: "hello" });
-}
-```
-"""
+from .guides import (  # noqa: F401
+    NEXTJS_GUIDED,
+    REMIX_GUIDED,
+    REX_GUIDED,
+    REX_MCP,
+    REX_RAW,
+    TANSTACK_GUIDED,
+)
 
 # ---------------------------------------------------------------------------
 # Hooks (written as .claude/settings.json in the project)
@@ -256,7 +112,7 @@ def make_conditions() -> dict[str, SDKCondition]:
         "rex_mcp": SDKCondition(
             name="rex_mcp",
             starter="rex",
-            claude_md=_REX_MCP_CLAUDE_MD,
+            claude_md=REX_MCP,
             hooks=None,
             build_cmd=[REX_BIN, "build"],
             serve_cmd=[REX_BIN, "start"],
@@ -265,7 +121,7 @@ def make_conditions() -> dict[str, SDKCondition]:
         "rex_guided": SDKCondition(
             name="rex_guided",
             starter="rex",
-            claude_md=_REX_GUIDED_CLAUDE_MD,
+            claude_md=REX_GUIDED,
             hooks=_REX_BUILD_HOOK,
             build_cmd=[REX_BIN, "build"],
             serve_cmd=[REX_BIN, "start"],
@@ -273,31 +129,31 @@ def make_conditions() -> dict[str, SDKCondition]:
         "rex_raw": SDKCondition(
             name="rex_raw",
             starter="rex",
-            claude_md=_REX_RAW_CLAUDE_MD,
+            claude_md=REX_RAW,
             hooks=None,
             build_cmd=[REX_BIN, "build"],
             serve_cmd=[REX_BIN, "start"],
         ),
-        "nextjs_raw": SDKCondition(
-            name="nextjs_raw",
+        "nextjs_guided": SDKCondition(
+            name="nextjs_guided",
             starter="nextjs",
-            claude_md=_NEXTJS_CLAUDE_MD,
+            claude_md=NEXTJS_GUIDED,
             hooks=None,
             build_cmd=["npx", "next", "build"],
             serve_cmd=["npx", "next", "start"],
         ),
-        "tanstack_raw": SDKCondition(
-            name="tanstack_raw",
+        "tanstack_guided": SDKCondition(
+            name="tanstack_guided",
             starter="tanstack",
-            claude_md=_TANSTACK_CLAUDE_MD,
+            claude_md=TANSTACK_GUIDED,
             hooks=None,
             build_cmd=["npx", "vite", "build"],
             serve_cmd=["npx", "vite", "preview"],
         ),
-        "remix_raw": SDKCondition(
-            name="remix_raw",
+        "remix_guided": SDKCondition(
+            name="remix_guided",
             starter="remix",
-            claude_md=_REMIX_CLAUDE_MD,
+            claude_md=REMIX_GUIDED,
             hooks=None,
             build_cmd=["npx", "react-router", "build"],
             serve_cmd=["npx", "react-router-serve", "./build/server/index.js"],

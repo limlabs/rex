@@ -1,0 +1,260 @@
+[
+  {
+    "task_id": "t1-01",
+    "task_name": "Static page",
+    "tier": 1,
+    "condition": "rex_guided",
+    "model": "claude-haiku-4-5-20251001",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 143820,
+    "median_tool_calls": 14,
+    "median_wall_ms": 14751.842916999522,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /about -> 200": 1.0,
+      "ssr /about": 1.0,
+      "dom /about h1": 1.0,
+      "dom /about p": 1.0
+    }
+  },
+  {
+    "task_id": "t1-01",
+    "task_name": "Static page",
+    "tier": 1,
+    "condition": "nextjs_guided",
+    "model": "claude-haiku-4-5-20251001",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 190475,
+    "median_tool_calls": 14,
+    "median_wall_ms": 17559.634416000335,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /about -> 200": 1.0,
+      "ssr /about": 1.0,
+      "dom /about h1": 1.0,
+      "dom /about p": 1.0
+    }
+  },
+  {
+    "task_id": "t1-01",
+    "task_name": "Static page",
+    "tier": 1,
+    "condition": "tanstack_guided",
+    "model": "claude-haiku-4-5-20251001",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 111512,
+    "median_tool_calls": 30,
+    "median_wall_ms": 50976.408667000214,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /about -> 200": 1.0,
+      "ssr /about": 1.0,
+      "dom /about h1": 1.0,
+      "dom /about p": 1.0
+    }
+  },
+  {
+    "task_id": "t1-01",
+    "task_name": "Static page",
+    "tier": 1,
+    "condition": "remix_guided",
+    "model": "claude-haiku-4-5-20251001",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.0,
+    "median_tokens": 293235,
+    "median_tool_calls": 20,
+    "median_wall_ms": 18279.324082999665,
+    "checks": {
+      "build": 0.0
+    }
+  },
+  {
+    "task_id": "t1-02",
+    "task_name": "Dynamic route",
+    "tier": 1,
+    "condition": "rex_guided",
+    "model": "claude-haiku-4-5-20251001",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.25,
+    "median_tokens": 31525,
+    "median_tool_calls": 2,
+    "median_wall_ms": 14376.838041000155,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /blog/hello-world -> 200": 0.0,
+      "http GET /blog/another-post -> 200": 0.0,
+      "ssr /blog/hello-world": 0.0,
+      "ssr /blog/another-post": 0.0,
+      "dom /blog/hello-world h1": 0.0,
+      "dom /blog/hello-world p": 0.0
+    }
+  },
+  {
+    "task_id": "t1-02",
+    "task_name": "Dynamic route",
+    "tier": 1,
+    "condition": "nextjs_guided",
+    "model": "claude-haiku-4-5-20251001",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 1.0,
+    "avg_score": 1.0,
+    "median_tokens": 264199,
+    "median_tool_calls": 18,
+    "median_wall_ms": 22178.434915998878,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /blog/hello-world -> 200": 1.0,
+      "http GET /blog/another-post -> 200": 1.0,
+      "ssr /blog/hello-world": 1.0,
+      "ssr /blog/another-post": 1.0,
+      "dom /blog/hello-world h1": 1.0,
+      "dom /blog/hello-world p": 1.0
+    }
+  },
+  {
+    "task_id": "t1-02",
+    "task_name": "Dynamic route",
+    "tier": 1,
+    "condition": "tanstack_guided",
+    "model": "claude-haiku-4-5-20251001",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.25,
+    "median_tokens": 30698,
+    "median_tool_calls": 2,
+    "median_wall_ms": 12484.179790999406,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /blog/hello-world -> 200": 0.0,
+      "http GET /blog/another-post -> 200": 0.0,
+      "ssr /blog/hello-world": 0.0,
+      "ssr /blog/another-post": 0.0,
+      "dom /blog/hello-world h1": 0.0,
+      "dom /blog/hello-world p": 0.0
+    }
+  },
+  {
+    "task_id": "t1-02",
+    "task_name": "Dynamic route",
+    "tier": 1,
+    "condition": "remix_guided",
+    "model": "claude-haiku-4-5-20251001",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.0,
+    "median_tokens": 162063,
+    "median_tool_calls": 25,
+    "median_wall_ms": 49126.21062500148,
+    "checks": {
+      "build": 0.0
+    }
+  },
+  {
+    "task_id": "t1-03",
+    "task_name": "GSSP data fetching",
+    "tier": 1,
+    "condition": "rex_guided",
+    "model": "claude-haiku-4-5-20251001",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.2857142857142857,
+    "median_tokens": 30250,
+    "median_tool_calls": 2,
+    "median_wall_ms": 4957.97741700153,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /users -> 200": 0.0,
+      "ssr /users": 0.0,
+      "dom /users h1": 0.0,
+      "dom /users ul": 0.0,
+      "dom /users li": 0.0
+    }
+  },
+  {
+    "task_id": "t1-03",
+    "task_name": "GSSP data fetching",
+    "tier": 1,
+    "condition": "nextjs_guided",
+    "model": "claude-haiku-4-5-20251001",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.2857142857142857,
+    "median_tokens": 204948,
+    "median_tool_calls": 33,
+    "median_wall_ms": 72576.20674999998,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /users -> 200": 0.0,
+      "ssr /users": 0.0,
+      "dom /users h1": 0.0,
+      "dom /users ul": 0.0,
+      "dom /users li": 0.0
+    }
+  },
+  {
+    "task_id": "t1-03",
+    "task_name": "GSSP data fetching",
+    "tier": 1,
+    "condition": "tanstack_guided",
+    "model": "claude-haiku-4-5-20251001",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.42857142857142855,
+    "median_tokens": 220861,
+    "median_tool_calls": 18,
+    "median_wall_ms": 19964.930915999503,
+    "checks": {
+      "build": 1.0,
+      "serve": 1.0,
+      "http GET /users -> 200": 1.0,
+      "ssr /users": 0.0,
+      "dom /users h1": 0.0,
+      "dom /users ul": 0.0,
+      "dom /users li": 0.0
+    }
+  },
+  {
+    "task_id": "t1-03",
+    "task_name": "GSSP data fetching",
+    "tier": 1,
+    "condition": "remix_guided",
+    "model": "claude-haiku-4-5-20251001",
+    "runner": "sdk",
+    "runs": 1,
+    "pass_rate": 0.0,
+    "avg_score": 0.0,
+    "median_tokens": 160971,
+    "median_tool_calls": 19,
+    "median_wall_ms": 26788.76095799933,
+    "checks": {
+      "build": 0.0
+    }
+  }
+]
