@@ -125,8 +125,16 @@ def setup_workspace(condition: str) -> Path:
         src_init = WEB_BENCH_DIR / "src-init"
         shutil.copytree(src_init, tmp / "src", dirs_exist_ok=True)
 
-        # Copy package.json and config
-        shutil.copy(WEB_BENCH_DIR / "package.json", tmp / "package.json")
+        # Copy package.json, strip workspace: refs, add @playwright/test
+        pkg = json.loads((WEB_BENCH_DIR / "package.json").read_text())
+        # Remove workspace:* refs (npm can't resolve them — they're pnpm-only)
+        for section in ("dependencies", "devDependencies"):
+            if section in pkg:
+                pkg[section] = {
+                    k: v for k, v in pkg[section].items() if not str(v).startswith("workspace:")
+                }
+        pkg.setdefault("devDependencies", {})["@playwright/test"] = "^1.58.0"
+        (tmp / "package.json").write_text(json.dumps(pkg, indent=2))
         (tmp / "CLAUDE.md").write_text(NEXTJS_GUIDED)
 
     # Install deps
@@ -138,9 +146,17 @@ def setup_workspace(condition: str) -> Path:
             timeout=120,
         )
 
-    # Install Playwright for testing
+    # Install Playwright for testing — use --legacy-peer-deps to avoid conflicts
+    # with framework packages that may have strict peer deps
     subprocess.run(
-        ["npm", "install", "--no-audit", "--no-fund", "@playwright/test"],
+        [
+            "npm",
+            "install",
+            "--no-audit",
+            "--no-fund",
+            "--legacy-peer-deps",
+            "@playwright/test",
+        ],
         cwd=tmp,
         capture_output=True,
         timeout=60,
@@ -413,12 +429,37 @@ async def async_main() -> None:
                     flush=True,
                 )
 
-                # Start/restart Rex server after agent modifies files
+                # Start/restart server after agent modifies files
                 if condition.startswith("rex"):
                     if server:
                         server.terminate()
                         server.wait(timeout=5)
                     server = _start_rex_server(workdir, port)
+                elif condition.startswith("nextjs"):
+                    # For Next.js, restart dev server (next dev handles its own HMR
+                    # but we need a fresh start to pick up new files)
+                    if server:
+                        server.terminate()
+                        server.wait(timeout=5)
+                    server = subprocess.Popen(
+                        ["npx", "next", "dev", "--port", str(port)],
+                        cwd=workdir / "src",
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    )
+                    # Wait for server to start
+                    import requests as _req
+
+                    deadline = time.monotonic() + 60
+                    while time.monotonic() < deadline:
+                        try:
+                            _req.get(f"http://localhost:{port}/", timeout=1)
+                            break
+                        except Exception:
+                            pass
+                        if server.poll() is not None:
+                            break
+                        time.sleep(0.5)
 
                 # Run Playwright tests
                 test_result = run_playwright_tests(workdir, tid, condition, port=port)
