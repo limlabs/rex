@@ -1,3 +1,6 @@
-import { type RouteConfig, flatRoutes } from "@react-router/dev/routes";
+import type { RouteConfig } from "@react-router/dev/routes";
 
-export default flatRoutes() satisfies RouteConfig;
+// Routes are declared manually. The agent should add routes here
+// using the route() helper from @react-router/dev/routes.
+// Example: route("about", "routes/about.tsx")
+export default [] satisfies RouteConfig;

@@ -255,19 +255,28 @@ npx vite preview --port 3000 --host 127.0.0.1
 REMIX_GUIDED = """\
 # React Router v7 (Remix) Project — Framework Mode
 
-This project uses React Router v7 in framework mode with file-based routing.
+This project uses React Router v7 in framework mode.
+
+## IMPORTANT: Route Registration
+
+Routes must be registered in TWO places:
+1. Create the route file in `app/routes/`
+2. Add the route to `app/routes.ts`
+
+The `app/routes.ts` file controls which routes are active. Without adding
+a route there, the file in `app/routes/` will be ignored.
 
 ## Quick Reference
 
-- Routes go in `app/routes/` with flat file convention
+- Route files go in `app/routes/`
 - Index route: `app/routes/_index.tsx`
 - Named routes: `app/routes/about.tsx` -> `/about`
 - Dynamic segments: `app/routes/blog.$slug.tsx` -> `/blog/:slug`
-- Nested paths use dots: `app/routes/dashboard.settings.tsx` -> `/dashboard/settings`
 - Root layout (`app/root.tsx`) is already set up
 
-## Example Page
+## Example: Adding an About Page
 
+Step 1: Create the route file:
 ```tsx
 // app/routes/about.tsx
 export default function AboutPage() {
@@ -275,14 +284,23 @@ export default function AboutPage() {
 }
 ```
 
+Step 2: Register in app/routes.ts:
+```ts
+import { route, type RouteConfig } from "@react-router/dev/routes";
+
+export default [
+  route("about", "routes/about.tsx"),
+] satisfies RouteConfig;
+```
+
 ## Example with Data Loading
 
+Step 1: Create the route file:
 ```tsx
 // app/routes/blog.$slug.tsx
-import type { Route } from "./+types/blog.$slug";
 import { useLoaderData } from "react-router";
 
-export async function loader({ params }: Route.LoaderArgs) {
+export async function loader({ params }: { params: { slug: string } }) {
   return { title: params.slug, body: "Post content" };
 }
 
@@ -292,13 +310,13 @@ export default function BlogPost() {
 }
 ```
 
-## Example API-style Route (Resource Route)
+Step 2: Register in app/routes.ts:
+```ts
+import { route, type RouteConfig } from "@react-router/dev/routes";
 
-```tsx
-// app/routes/api.hello.tsx
-export async function loader() {
-  return Response.json({ message: "hello" });
-}
+export default [
+  route("blog/:slug", "routes/blog.$slug.tsx"),
+] satisfies RouteConfig;
 ```
 
 ## Build & Run

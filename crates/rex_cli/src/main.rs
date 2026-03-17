@@ -245,7 +245,14 @@ async fn main() -> Result<()> {
             let root_abs = std::fs::canonicalize(&root).unwrap_or(root.clone());
             load_dotenv(&root_abs);
             init_plain_tracing();
-            cmd_build::cmd_build(root).await
+            match cmd_build::cmd_build(root).await {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    // Print the error chain without backtrace for clean user output
+                    eprintln!("\n  \x1b[1;31merror:\x1b[0m {e:#}");
+                    std::process::exit(1);
+                }
+            }
         }
         #[cfg(feature = "build")]
         Commands::Export {
