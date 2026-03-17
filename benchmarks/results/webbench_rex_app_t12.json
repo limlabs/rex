@@ -1,0 +1,48 @@
+[
+  {
+    "task_id": "task-1",
+    "tokens": 88734,
+    "turns": 10,
+    "cost_usd": 0.09194699999999999,
+    "elapsed_ms": 147608.95200000232,
+    "condition": "rex_app",
+    "test": {
+      "task_id": "task-1",
+      "total_tests": 2,
+      "passed": 2,
+      "failed": 0,
+      "pass_rate": 1.0,
+      "raw": {
+        "startTime": "2026-03-17T14:48:09.865Z",
+        "duration": 1403.6970000000001,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    }
+  },
+  {
+    "task_id": "task-2",
+    "tokens": 84812,
+    "turns": 7,
+    "cost_usd": 0.1782543,
+    "elapsed_ms": 64651.53291599927,
+    "condition": "rex_app",
+    "test": {
+      "task_id": "task-2",
+      "total_tests": 4,
+      "passed": 4,
+      "failed": 0,
+      "pass_rate": 1.0,
+      "raw": {
+        "startTime": "2026-03-17T14:49:17.027Z",
+        "duration": 1057.5430000000001,
+        "expected": 4,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    }
+  }
+]

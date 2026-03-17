@@ -3,6 +3,73 @@ CLAUDE.md content for each condition. Extracted from sdk_runner.py to stay
 under the 700-line file limit.
 """
 
+REX_APP_GUIDED = """\
+# Rex Project (App Router)
+
+This is a Rex project using the App Router — similar conventions to Next.js App Router.
+
+## Quick Reference
+
+- Routes go in `app/` directory using file-based routing
+- Pages: `app/page.tsx` (index), `app/about/page.tsx`, `app/blog/[slug]/page.tsx`
+- Layouts: `app/layout.tsx` wraps all pages (required root layout)
+- Not found: `app/not-found.tsx` for 404 pages
+- API routes: `app/api/hello/route.ts` with GET/POST exports
+- Components are server components by default
+- Use `'use client'` directive for client components
+- CSS: import `.css` files directly in components
+
+## Example Root Layout
+
+```tsx
+// app/layout.tsx
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html>
+      <body>{children}</body>
+    </html>
+  );
+}
+```
+
+## Example Page
+
+```tsx
+// app/page.tsx
+export default function Home() {
+  return <h1>Welcome</h1>;
+}
+```
+
+## Example Dynamic Route
+
+```tsx
+// app/blog/[slug]/page.tsx
+export default async function BlogPost({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  return <h1>{slug}</h1>;
+}
+```
+
+## Example Not Found Page
+
+```tsx
+// app/not-found.tsx
+export default function NotFound() {
+  return <h1>Page not found</h1>;
+}
+```
+
+## Example API Route
+
+```ts
+// app/api/hello/route.ts
+export async function GET() {
+  return Response.json({ message: "hello" });
+}
+```
+"""
+
 REX_GUIDED = """\
 # Rex Project
 

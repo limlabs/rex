@@ -90,9 +90,10 @@ REX_PROMPT_REWRITES = {
 
 
 def get_prompt(task: dict, condition: str) -> str:
-    """Get the task prompt, optionally rewritten for Rex."""
+    """Get the task prompt, optionally rewritten for Rex Pages Router."""
     task_id = task["id"]
-    if condition.startswith("rex") and task_id in REX_PROMPT_REWRITES:
+    # Rex App Router and Next.js use the original prompts unchanged
+    if condition == "rex_guided" and task_id in REX_PROMPT_REWRITES:
         return REX_PROMPT_REWRITES[task_id]
     return task["description"]
 
@@ -106,8 +107,16 @@ def setup_workspace(condition: str) -> Path:
     """Create a workspace for the agent to work in."""
     tmp = Path(tempfile.mkdtemp(prefix=f"webbench_{condition}_"))
 
-    if condition.startswith("rex"):
-        # Rex starter — copy from our starters
+    if condition == "rex_app":
+        # Rex App Router — use app/ directory, same conventions as Next.js App Router
+        from ..guides import REX_APP_GUIDED
+
+        starters_dir = Path(__file__).parent.parent / "starters" / "rex-app"
+        shutil.copytree(starters_dir, tmp, dirs_exist_ok=True)
+        (tmp / "app").mkdir(exist_ok=True)
+        (tmp / "CLAUDE.md").write_text(REX_APP_GUIDED)
+    elif condition.startswith("rex"):
+        # Rex Pages Router
         starters_dir = Path(__file__).parent.parent / "starters" / "rex"
         shutil.copytree(starters_dir, tmp, dirs_exist_ok=True)
         (tmp / "pages").mkdir(exist_ok=True)

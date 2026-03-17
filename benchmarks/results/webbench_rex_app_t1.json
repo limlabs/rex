@@ -1,0 +1,25 @@
+[
+  {
+    "task_id": "task-1",
+    "tokens": 53981,
+    "turns": 7,
+    "cost_usd": 0.061668249999999994,
+    "elapsed_ms": 24401.19012500145,
+    "condition": "rex_app",
+    "test": {
+      "task_id": "task-1",
+      "total_tests": 2,
+      "passed": 2,
+      "failed": 0,
+      "pass_rate": 1.0,
+      "raw": {
+        "startTime": "2026-03-17T14:42:14.411Z",
+        "duration": 1014.751,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    }
+  }
+]
