@@ -38,7 +38,7 @@ pub mod rsc_stubs;
 pub(crate) mod static_asset;
 pub(crate) mod use_client_detect;
 
-pub use bundler::{build_bundles, resolve_modules_dirs, V8_POLYFILLS};
+pub use bundler::{build_bundles, build_bundles_with_id, resolve_modules_dirs, V8_POLYFILLS};
 pub use manifest::AssetManifest;
 pub use tailwind::{
     collect_all_css_import_paths, find_tailwind_bin, needs_tailwind, process_tailwind_css,

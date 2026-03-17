@@ -114,8 +114,14 @@ impl AppState {
                 let project_config =
                     ProjectConfig::load(&ctx.config.project_root).unwrap_or_default();
                 // Run build and ESM loading in parallel.
-                // build_bundles produces CSS/manifest; esm_load_modules loads V8.
-                let build_fut = rex_build::build_bundles(&ctx.config, &ctx.scan, &project_config);
+                // Both use the SAME build_id so client reference IDs match
+                // between the ESM stubs and the SSR bundle's manifest.
+                let build_fut = rex_build::build_bundles_with_id(
+                    &ctx.config,
+                    &ctx.scan,
+                    &project_config,
+                    Some(&ctx.build_id),
+                );
                 let esm_fut = crate::startup::esm_load_modules(
                     &ctx.config,
                     &ctx.scan,
@@ -123,6 +129,23 @@ impl AppState {
                     &state.isolate_pool,
                 );
                 let (build_result, esm_state) = tokio::try_join!(build_fut, esm_fut)?;
+
+                // Load the SSR bundle (flight-to-HTML pass) into all isolates.
+                // The SSR bundle provides __rex_rsc_flight_to_html for converting
+                // RSC flight data to server-rendered HTML.
+                if let Some(ssr_path) = &build_result.manifest.rsc_ssr_bundle {
+                    if let Ok(ssr_js) = std::fs::read_to_string(ssr_path) {
+                        tracing::debug!(
+                            path = %ssr_path,
+                            size = ssr_js.len(),
+                            "Loading SSR bundle into V8 isolates"
+                        );
+                        state
+                            .isolate_pool
+                            .eval_script_all(std::sync::Arc::new(ssr_js), "rsc-ssr-bundle.js")
+                            .await?;
+                    }
+                }
 
                 tracing::debug!(
                     build_id = %build_result.build_id,

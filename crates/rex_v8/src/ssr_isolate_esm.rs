@@ -177,4 +177,25 @@ impl SsrIsolate {
         tracing::debug!("ESM module invalidated and reloaded");
         Ok(())
     }
+
+    /// Evaluate a script (IIFE) in the V8 context and re-extract function handles.
+    ///
+    /// Used for loading the SSR bundle after ESM modules are loaded.
+    /// The SSR bundle provides `__rex_rsc_flight_to_html` and related functions.
+    pub fn eval_script(&mut self, script_js: &str, label: &str) -> Result<()> {
+        v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
+        v8_eval!(scope, script_js, label)
+            .with_context(|| format!("Failed to evaluate script: {label}"))?;
+
+        // Re-extract function handles (SSR bundle may add new ones)
+        let ctx = scope.get_current_context();
+        let global = ctx.global(scope);
+        // Only update RSC-specific handles that the SSR bundle sets
+        self.rsc_flight_fn = v8_get_optional_fn!(scope, global, "__rex_render_flight");
+        self.rsc_to_html_fn = v8_get_optional_fn!(scope, global, "__rex_render_rsc_to_html");
+
+        tracing::debug!(label, "Script evaluated in V8 context");
+        Ok(())
+    }
 }

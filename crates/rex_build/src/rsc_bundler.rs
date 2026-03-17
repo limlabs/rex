@@ -203,33 +203,37 @@ pub async fn build_rsc_bundles(
     )
     .await?;
 
-    // Skip server/SSR IIFE bundles in dev mode (ESM replaces them)
-    let (server_bundle_path, ssr_bundle_path) = if skip_server_iife {
-        (None, None)
+    // In ESM dev mode, skip the server flight IIFE (ESM replaces it).
+    // The SSR bundle is ALWAYS built — it provides __rex_rsc_flight_to_html
+    // for converting flight data to server-rendered HTML.
+    let server_bundle_path = if skip_server_iife {
+        None
     } else {
-        let server = build_rsc_server_bundle(
-            &ctx,
-            app_scan,
-            &graph,
-            &server_dir,
-            &stub_aliases,
-            &client_manifest,
-            &server_action_manifest,
-            &inline_action_targets,
+        Some(
+            build_rsc_server_bundle(
+                &ctx,
+                app_scan,
+                &graph,
+                &server_dir,
+                &stub_aliases,
+                &client_manifest,
+                &server_action_manifest,
+                &inline_action_targets,
+            )
+            .await?,
         )
-        .await?;
-
-        let ssr = build_rsc_ssr_bundle(
-            &ctx,
-            &graph,
-            &server_dir,
-            &client_manifest,
-            &server_action_manifest,
-        )
-        .await?;
-
-        (Some(server), Some(ssr))
     };
+
+    let ssr_bundle_path = Some(
+        build_rsc_ssr_bundle(
+            &ctx,
+            &graph,
+            &server_dir,
+            &client_manifest,
+            &server_action_manifest,
+        )
+        .await?,
+    );
 
     // Clean up stubs
     let _ = fs::remove_dir_all(&stubs_dir);

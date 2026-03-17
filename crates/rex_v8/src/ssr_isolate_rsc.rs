@@ -132,6 +132,7 @@ impl SsrIsolate {
 
             let finalized = {
                 v8::scope_with_context!(scope, &mut self.isolate, &self.context);
+
                 let result = v8_eval!(
                     scope,
                     "globalThis.__rex_finalize_rsc_to_html()",

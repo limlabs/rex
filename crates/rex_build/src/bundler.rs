@@ -56,13 +56,29 @@ pub struct BuildResult {
     pub manifest: AssetManifest,
 }
 
-/// Build both server and client bundles
+/// Build both server and client bundles.
+///
+/// If `explicit_build_id` is provided, uses that build ID (for ESM dev mode
+/// where the build ID must match between ESM modules and SSR bundle).
+/// Otherwise generates a fresh build ID.
 pub async fn build_bundles(
     config: &RexConfig,
     scan: &ScanResult,
     project_config: &ProjectConfig,
 ) -> Result<BuildResult> {
-    let build_id = generate_build_id();
+    build_bundles_with_id(config, scan, project_config, None).await
+}
+
+/// Build both server and client bundles with an explicit build ID.
+pub async fn build_bundles_with_id(
+    config: &RexConfig,
+    scan: &ScanResult,
+    project_config: &ProjectConfig,
+    explicit_build_id: Option<&str>,
+) -> Result<BuildResult> {
+    let build_id = explicit_build_id
+        .map(String::from)
+        .unwrap_or_else(generate_build_id);
     let server_dir = config.server_build_dir();
     let client_dir = config.client_build_dir();
 

@@ -144,6 +144,7 @@ function _buildElement(routeKey: string, propsJson: string): React.ReactElement 
 
     // Build nested layout tree: Layout1(Layout2(Page))
     let element = __rex_createElement(Page, pageProps);
+
     for (let i = layouts.length - 1; i >= 0; i--) {
         const layoutProps = {
             params: pageProps.params,

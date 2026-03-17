@@ -253,6 +253,44 @@ impl IsolatePool {
         Ok(())
     }
 
+    /// Evaluate a script (IIFE) in all isolates.
+    ///
+    /// Used for loading the SSR bundle after ESM modules are loaded.
+    pub async fn eval_script_all(
+        &self,
+        script_js: std::sync::Arc<String>,
+        label: &str,
+    ) -> Result<()> {
+        let mut handles = Vec::new();
+        let label_owned = label.to_string();
+
+        for i in 0..self.size {
+            let js = script_js.clone();
+            let lbl = label_owned.clone();
+            let (tx, rx) = tokio::sync::oneshot::channel();
+
+            let work: WorkItem = Box::new(move |isolate| {
+                let result = isolate.eval_script(&js, &lbl);
+                let _ = tx.send(result);
+            });
+
+            self.senders[i]
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("V8 isolate pool is shut down"))?
+                .send(work)
+                .map_err(|_| anyhow::anyhow!("V8 isolate thread has shut down"))?;
+
+            handles.push(rx);
+        }
+
+        for handle in handles {
+            handle.await??;
+        }
+
+        debug!(label, "Script evaluated in all V8 isolates");
+        Ok(())
+    }
+
     /// Invalidate ESM modules in all isolates (for HMR).
     pub async fn invalidate_esm_module_all(
         &self,
