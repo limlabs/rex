@@ -193,20 +193,20 @@ pub async fn build_rsc_bundles(
         }
     }
 
-    // In dev mode, skip client + server bundle builds entirely — ESM replaces
-    // the server/SSR IIFE, and client bundles are built in the background.
-    let (client_chunks, server_bundle_path, ssr_bundle_path) = if skip_server_iife {
-        (vec![], None, None)
+    // Build client bundles (always needed — browser requires them for hydration)
+    let client_chunks = build_rsc_client_bundles(
+        &ctx,
+        &graph,
+        &client_dir,
+        &mut client_manifest,
+        &server_action_modules,
+    )
+    .await?;
+
+    // Skip server/SSR IIFE bundles in dev mode (ESM replaces them)
+    let (server_bundle_path, ssr_bundle_path) = if skip_server_iife {
+        (None, None)
     } else {
-        // Build client bundles first so manifest is populated before server bundle
-        let chunks = build_rsc_client_bundles(
-            &ctx,
-            &graph,
-            &client_dir,
-            &mut client_manifest,
-            &server_action_modules,
-        )
-        .await?;
         let server = build_rsc_server_bundle(
             &ctx,
             app_scan,
@@ -228,7 +228,7 @@ pub async fn build_rsc_bundles(
         )
         .await?;
 
-        (chunks, Some(server), Some(ssr))
+        (Some(server), Some(ssr))
     };
 
     // Clean up stubs
