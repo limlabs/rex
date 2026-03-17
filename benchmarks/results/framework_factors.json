@@ -1,0 +1,177 @@
+{
+  "build_speed": [
+    {
+      "framework": "rex",
+      "pages": 0,
+      "build_ok": true,
+      "times_ms": [
+        38.85662500033504,
+        37.11524999926041,
+        34.65350000078615
+      ],
+      "median_ms": 37.11524999926041,
+      "min_ms": 34.65350000078615,
+      "max_ms": 38.85662500033504
+    },
+    {
+      "framework": "rex",
+      "pages": 1,
+      "build_ok": true,
+      "times_ms": [
+        495.38945800122747,
+        496.39708299946506,
+        496.61379199824296
+      ],
+      "median_ms": 496.39708299946506,
+      "min_ms": 495.38945800122747,
+      "max_ms": 496.61379199824296
+    },
+    {
+      "framework": "rex",
+      "pages": 3,
+      "build_ok": true,
+      "times_ms": [
+        505.8939170012309,
+        501.35395799952676,
+        502.24954199984495
+      ],
+      "median_ms": 502.24954199984495,
+      "min_ms": 501.35395799952676,
+      "max_ms": 505.8939170012309
+    },
+    {
+      "framework": "nextjs",
+      "pages": 0,
+      "build_ok": true,
+      "times_ms": [
+        2575.2710000015213,
+        1241.9691670002067,
+        1239.0293339994969
+      ],
+      "median_ms": 1241.9691670002067,
+      "min_ms": 1239.0293339994969,
+      "max_ms": 2575.2710000015213
+    },
+    {
+      "framework": "nextjs",
+      "pages": 1,
+      "build_ok": true,
+      "times_ms": [
+        2708.1025000006775,
+        1586.6340419997869,
+        1626.7599999991944
+      ],
+      "median_ms": 1626.7599999991944,
+      "min_ms": 1586.6340419997869,
+      "max_ms": 2708.1025000006775
+    },
+    {
+      "framework": "nextjs",
+      "pages": 3,
+      "build_ok": true,
+      "times_ms": [
+        2735.657708999497,
+        1620.965125001021,
+        1738.2620409989613
+      ],
+      "median_ms": 1738.2620409989613,
+      "min_ms": 1620.965125001021,
+      "max_ms": 2735.657708999497
+    },
+    {
+      "framework": "tanstack",
+      "pages": 0,
+      "build_ok": true,
+      "times_ms": [
+        1694.1129579990957,
+        1260.4037920009432,
+        1690.6551659994875
+      ],
+      "median_ms": 1690.6551659994875,
+      "min_ms": 1260.4037920009432,
+      "max_ms": 1694.1129579990957
+    },
+    {
+      "framework": "tanstack",
+      "pages": 1,
+      "build_ok": true,
+      "times_ms": [
+        1717.1615829993243,
+        1192.6793750008073,
+        1193.914292000045
+      ],
+      "median_ms": 1193.914292000045,
+      "min_ms": 1192.6793750008073,
+      "max_ms": 1717.1615829993243
+    },
+    {
+      "framework": "tanstack",
+      "pages": 3,
+      "build_ok": true,
+      "times_ms": [
+        2834.2787909987237,
+        1217.285291000735,
+        1202.4765419992036
+      ],
+      "median_ms": 1217.285291000735,
+      "min_ms": 1202.4765419992036,
+      "max_ms": 2834.2787909987237
+    },
+    {
+      "framework": "remix",
+      "pages": 0,
+      "build_ok": false,
+      "error": "Error: Route config file not found at \"app/routes.ts\".\n    at createConfigLoader (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_remix_adlo8srt/node_modules/@react-router/dev/dist/vite.js:626:11)\n    at config (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_remix_"
+    },
+    {
+      "framework": "remix",
+      "pages": 1,
+      "build_ok": false,
+      "error": "Error: Route config file not found at \"app/routes.ts\".\n    at createConfigLoader (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_remix_uwzb53by/node_modules/@react-router/dev/dist/vite.js:626:11)\n    at config (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_remix_"
+    },
+    {
+      "framework": "remix",
+      "pages": 3,
+      "build_ok": false,
+      "error": "Error: Route config file not found at \"app/routes.ts\".\n    at createConfigLoader (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_remix_qf_kl5jt/node_modules/@react-router/dev/dist/vite.js:626:11)\n    at config (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_remix_"
+    }
+  ],
+  "error_quality": [
+    {
+      "framework": "rex",
+      "exit_code": 1,
+      "error_length": 1328,
+      "error_text": "\u001b[38;2;46;204;113m        \u2584\u2588\u2588\u2588\u2588\u2584       \u001b[0m\n  \u001b[38;2;46;204;113m        \u2588 \u25e6 \u2588\u2580\u2588\u2584    \u001b[0m  \u001b[38;2;46;204;113mrex\u001b[0m \u001b[2m0.19.1\u001b[0m\n  \u001b[38;2;46;204;113m  \u2584\u2584\u2584\u2584\u2584\u2584\u2588\u2588\u2588\u2588\u2588\u2580\u2580     \u001b[0m\n  \u001b[38;2;46;204;113m    \u2580\u2580\u2580\u2580\u2588\u2588\u2588\u2588\u2588\u2588       \u001b[0m\n  \u001b[38;2;46;204;113m        \u2588\u2580 \u2588\u2580        \u001b[0m\n\n\u001b[2m2026-03-17T01:05:57.703386Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mrex_build::builtin_modules\u001b[0m\u001b[2m:\u001b[0m Extracting built-in react-server-dom-webpack to /private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_rex_any2kjoj/node_modules\n\u001b[2m2026-03-17T01:05:57.709237Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[1mbuild_client_bundles\u001b[0m\u001b[2m:\u001b[0m \u001b[2mrex_build::dce\u001b[0m\u001b[2m:\u001b[0m DCE: parse errors, skipping strip\n\nthread 'tokio-rt-worker' (507556) panicked at /Users/austin/.cargo/git/checkouts/rolldown-8b2c76fc50da01ed/df3188d/crates/rolldown/src/module_loader/module_task.rs:217:36:\nModuleLoader channel closed while sending module completion - main thread terminated unexpectedly: SendError { .. }\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nError: Server bundle failed:\n[PARSE_ERROR] Error: Expected `,` or `)` but found `}`\n   \u256d\u2500[ pages/broken.tsx:9:9 ]\n   \u2502\n 7 \u2502         {items.map((item: any) =>\n   \u2502                   \u252c  \n   \u2502                   \u2570\u2500\u2500 Opened here\n   \u2502 \n 9 \u2502         }\n   \u2502         \u252c  \n   \u2502         \u2570\u2500\u2500 `,` or `)` expected\n\u2500\u2500\u2500\u256f",
+      "mentions_filename": true,
+      "mentions_line_number": true,
+      "has_fix_suggestion": true
+    },
+    {
+      "framework": "nextjs",
+      "exit_code": 1,
+      "error_length": 461,
+      "error_text": "> Build error occurred\nError: Turbopack build failed with 1 errors:\n./pages/broken.tsx:8:9\nExpected '</', got '}'\n  \u001b[90m 6 |\u001b[0m         {items.map((item: any) =>\n  \u001b[90m 7 |\u001b[0m           <li key={item.id}>{item.name}</li>\n\u001b[31m\u001b[1m>\u001b[0m \u001b[90m 8 |\u001b[0m         }\n  \u001b[90m   |\u001b[0m         \u001b[31m\u001b[1m^\u001b[0m\n  \u001b[90m 9 |\u001b[0m       </ul>\n  \u001b[90m10 |\u001b[0m     </div>\n  \u001b[90m11 |\u001b[0m   );\n\nParsing ecmascript source code failed\n\n\n    at <unknown> (./pages/broken.tsx:8:9)",
+      "mentions_filename": true,
+      "mentions_line_number": true,
+      "has_fix_suggestion": true
+    },
+    {
+      "framework": "tanstack",
+      "exit_code": 1,
+      "error_length": 11984,
+      "error_text": "Error parsing code /broken import { createFileRoute } from '@tanstack/react-router'\nexport const Route = createFileRoute('/broken')({\n  component: () => {\n    const items = [{ id: 1, name: 'A' }]\n    return (\n      <div>\n        <h1>Items</h1>\n        <ul>\n          {items.map((item) =>\n            <li key={item.id}>{item.name}</li>\n          }\n        </ul>\n      </div>\n    )\n  }\n})\n SyntaxError: Unexpected token, expected \",\" (11:10)\n    at constructor (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_tanstack_l22nb6e2/node_modules/@babel/parser/lib/index.js:365:19)\n    at TypeScriptParserMixin.raise (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_tanstack_l22nb6e2/node_modules/@babel/parser/lib/index.js:6599:19)\n    at TypeScriptParserMixin.unexpected (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_tanstack_l22nb6e2/node_modules/@babel/parser/lib/index.js:6619:16)\n    at TypeScriptParserMixin.expect (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_tanstack_l22nb6e2/node_modules/@babel/parser/lib/index.js:6899:12)\n    at TypeScriptParserMixin.parseCallExpressionArguments (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_tanstack_l22nb6e2/node_modules/@babel/parser/lib/index.js:11243:14)\n    at TypeScriptParserMixin.parseCoverCallAndAsyncArrowHead (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_tanstack_l22nb6e2/node_modules/@babel/parser/lib/index.js:11186:29)\n    at TypeScriptParserMixin.parseSubscript (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_tanstack_l22nb6e2/node_modules/@babel/parser/lib/index.js:11120:19)\n    at TypeScriptParserMixin.parseSubscript (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_tanstack_l22nb6e2/node_modules/@babel/parser/lib/index.js:9272:18)\n    at TypeScriptParserMixin.parseSubscripts (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_tanstack_l22nb6e2/node_modules/@babel/parser/l",
+      "mentions_filename": true,
+      "mentions_line_number": true,
+      "has_fix_suggestion": true
+    },
+    {
+      "framework": "remix",
+      "exit_code": 1,
+      "error_length": 1332,
+      "error_text": "Error: Route config file not found at \"app/routes.ts\".\n    at createConfigLoader (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_remix_z3xm7m0l/node_modules/@react-router/dev/dist/vite.js:626:11)\n    at config (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_remix_z3xm7m0l/node_modules/@react-router/dev/dist/vite.js:3463:35)\n    at runConfigHook (file:///private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_remix_z3xm7m0l/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:49479:17)\n    at Module.resolveConfig (file:///private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_remix_z3xm7m0l/node_modules/vite/dist/node/chunks/dep-D4NMHUTW.js:48785:12)\n    at hasReactRouterRscPlugin (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_remix_z3xm7m0l/node_modules/@react-router/dev/dist/cli/index.js:1356:22)\n    at build (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_remix_z3xm7m0l/node_modules/@react-router/dev/dist/cli/index.js:1933:72)\n    at build2 (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_remix_z3xm7m0l/node_modules/@react-router/dev/dist/cli/index.js:2272:5)\n    at run2 (/private/var/folders/gv/fybjb5qn7gz6ddctkhxc8y2h0000gn/T/harness_remix_z3xm7m0l/node_modules/@react-router/dev/dist/cli/index.js:2577:7)",
+      "mentions_filename": false,
+      "mentions_line_number": true,
+      "has_fix_suggestion": false
+    }
+  ]
+}
