@@ -1,0 +1,71 @@
+[
+  {
+    "task_id": "task-1",
+    "tokens": 206256,
+    "turns": 10,
+    "cost_usd": 0.0544163,
+    "elapsed_ms": 16691.789083000913,
+    "condition": "rex_guided",
+    "test": {
+      "task_id": "task-1",
+      "total_tests": 0,
+      "passed": -2,
+      "failed": 2,
+      "pass_rate": 0,
+      "raw": {
+        "startTime": "2026-03-17T04:14:26.621Z",
+        "duration": 12006.233,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 2,
+        "flaky": 0
+      }
+    }
+  },
+  {
+    "task_id": "task-2",
+    "tokens": 300489,
+    "turns": 12,
+    "cost_usd": 0.0575108,
+    "elapsed_ms": 41661.59791700193,
+    "condition": "rex_guided",
+    "test": {
+      "task_id": "task-2",
+      "total_tests": 0,
+      "passed": -4,
+      "failed": 4,
+      "pass_rate": 0,
+      "raw": {
+        "startTime": "2026-03-17T04:15:20.931Z",
+        "duration": 61893.371,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 4,
+        "flaky": 0
+      }
+    }
+  },
+  {
+    "task_id": "task-3",
+    "tokens": 430244,
+    "turns": 19,
+    "cost_usd": 0.1540594,
+    "elapsed_ms": 66379.1719159999,
+    "condition": "rex_guided",
+    "test": {
+      "task_id": "task-3",
+      "total_tests": 2,
+      "passed": 0,
+      "failed": 2,
+      "pass_rate": 0.0,
+      "raw": {
+        "startTime": "2026-03-17T04:17:29.896Z",
+        "duration": 13214.011999999999,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 2,
+        "flaky": 0
+      }
+    }
+  }
+]

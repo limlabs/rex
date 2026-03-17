@@ -154,11 +154,20 @@ def setup_workspace(condition: str) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _write_rex_playwright_config(workdir: Path, port: int) -> None:
-    """Write a Playwright config that starts Rex dev server."""
+def _write_playwright_config(workdir: Path, port: int, server_cmd: str | None = None) -> None:
+    """Write a Playwright config. If server_cmd is None, expect an already-running server."""
+    web_server_block = ""
+    if server_cmd:
+        web_server_block = f"""
+  webServer: {{
+    command: `{server_cmd}`,
+    url: `http://localhost:{port}`,
+    reuseExistingServer: true,
+    timeout: 30000,
+  }},"""
+
     config = f"""\
 const {{ defineConfig, devices }} = require('@playwright/test');
-const PORT = {port};
 module.exports = defineConfig({{
   testDir: './test',
   timeout: 60000,
@@ -167,45 +176,23 @@ module.exports = defineConfig({{
   retries: 0,
   reporter: 'line',
   use: {{
-    baseURL: `http://localhost:${{PORT}}`,
+    baseURL: 'http://localhost:{port}',
     trace: 'off',
-  }},
-  webServer: {{
-    command: `{REX_BIN} dev --root . --port ${{PORT}}`,
-    url: `http://localhost:${{PORT}}`,
-    reuseExistingServer: false,
-    timeout: 30000,
-  }},
+  }},{web_server_block}
   projects: [{{ name: 'chromium', use: {{ ...devices['Desktop Chrome'] }} }}],
 }});
 """
     (workdir / "playwright.config.js").write_text(config)
 
 
-def run_playwright_tests(
-    workdir: Path,
-    task_id: str,
-    condition: str,
-    port: int = 3211,
-) -> dict:
-    """Run Web-Bench Playwright tests for a specific task."""
-    import socket
-
-    # Find a free port
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
-        port = s.getsockname()[1]
-
-    # Copy test files and libraries
+def _setup_test_libs(workdir: Path) -> None:
+    """Copy Playwright test specs and Web-Bench library utilities."""
     test_dir = workdir / "test"
     test_dir.mkdir(exist_ok=True)
 
-    # Copy all test specs up to and including this task (sequential dependency)
-    task_num = int(task_id.split("-")[1])
-    for i in range(1, task_num + 1):
-        spec = WEB_BENCH_DIR / f"test/task-{i}.spec.js"
-        if spec.exists():
-            shutil.copy(spec, test_dir / f"task-{i}.spec.js")
+    # Copy all test specs
+    for spec in sorted(WEB_BENCH_DIR.glob("test/task-*.spec.js")):
+        shutil.copy(spec, test_dir / spec.name)
 
     # Copy test utility libraries
     lib_dir = workdir / "node_modules" / "@web-bench"
@@ -217,13 +204,45 @@ def run_playwright_tests(
             LIBRARIES_DIR / "shop-test-util", lib_dir / "shop-test-util", dirs_exist_ok=True
         )
 
-    # Write appropriate Playwright config
-    if condition.startswith("rex"):
-        _write_rex_playwright_config(workdir, port)
-    else:
-        shutil.copy(WEB_BENCH_DIR / "playwright.config.js", workdir / "playwright.config.js")
 
-    # Set up environment
+def _start_rex_server(workdir: Path, port: int) -> subprocess.Popen:
+    """Start Rex dev server and wait for it to respond."""
+    proc = subprocess.Popen(
+        [REX_BIN, "dev", "--root", str(workdir), "--port", str(port)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    # Wait for server to start (poll until any response)
+    import requests
+
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        try:
+            requests.get(f"http://localhost:{port}/", timeout=1)
+            return proc  # Any response means server is up (even 404)
+        except (requests.ConnectionError, requests.Timeout):
+            pass
+        if proc.poll() is not None:
+            break
+        time.sleep(0.25)
+    return proc
+
+
+def run_playwright_tests(
+    workdir: Path,
+    task_id: str,
+    condition: str,
+    port: int = 0,
+    server_proc: subprocess.Popen | None = None,
+) -> dict:
+    """Run Web-Bench Playwright tests for a specific task.
+
+    If server_proc is provided, the server is already running.
+    Otherwise, Playwright's webServer config starts it.
+    """
+    # Write Playwright config (no webServer — we manage the server ourselves)
+    _write_playwright_config(workdir, port, server_cmd=None)
+
     src_dir = "." if condition.startswith("rex") else "src"
     env = {
         **os.environ,
@@ -231,7 +250,6 @@ def run_playwright_tests(
         "EVAL_PROJECT_PORT": str(port),
     }
 
-    # Run only the current task's tests
     playwright_cmd = [
         "npx",
         "playwright",
@@ -252,15 +270,20 @@ def run_playwright_tests(
     # Parse results
     try:
         results = json.loads(proc.stdout)
-        total = results.get("stats", {}).get("expected", 0)
-        passed = total - results.get("stats", {}).get("unexpected", 0)
+        stats = results.get("stats", {})
+        # Playwright JSON: expected=passed, unexpected=failed, skipped, flaky
+        passed = stats.get("expected", 0)
+        failed = stats.get("unexpected", 0)
+        skipped = stats.get("skipped", 0)
+        flaky = stats.get("flaky", 0)
+        total = passed + failed + skipped + flaky
         return {
             "task_id": task_id,
             "total_tests": total,
             "passed": passed,
-            "failed": total - passed,
+            "failed": failed,
             "pass_rate": passed / total if total > 0 else 0,
-            "raw": results.get("stats", {}),
+            "raw": stats,
         }
     except (json.JSONDecodeError, KeyError):
         return {
@@ -365,7 +388,16 @@ async def async_main() -> None:
     for condition in args.condition:
         print(f"{bold(condition)}")
         workdir = setup_workspace(condition)
+        _setup_test_libs(workdir)
 
+        # Find a free port and start the server once for all tasks
+        import socket
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("", 0))
+            port = s.getsockname()[1]
+
+        server = None
         try:
             for task in tasks:
                 tid = task["id"]
@@ -381,8 +413,15 @@ async def async_main() -> None:
                     flush=True,
                 )
 
+                # Start/restart Rex server after agent modifies files
+                if condition.startswith("rex"):
+                    if server:
+                        server.terminate()
+                        server.wait(timeout=5)
+                    server = _start_rex_server(workdir, port)
+
                 # Run Playwright tests
-                test_result = run_playwright_tests(workdir, tid, condition)
+                test_result = run_playwright_tests(workdir, tid, condition, port=port)
                 if test_result["total_tests"] > 0:
                     pct = test_result["pass_rate"]
                     status = green(f"{pct:.0%}") if pct == 1 else red(f"{pct:.0%}")
@@ -400,6 +439,12 @@ async def async_main() -> None:
                 )
 
         finally:
+            if server:
+                server.terminate()
+                try:
+                    server.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    server.kill()
             shutil.rmtree(workdir, ignore_errors=True)
 
         print()
