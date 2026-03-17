@@ -161,6 +161,16 @@ impl Rex {
             )
             .await?;
 
+            // Start initialization in a background task so it's never cancelled
+            // by dropped HTTP connections. `ensure_initialized()` in page_handler
+            // waits for this task via the OnceCell.
+            let init_state = rex.state();
+            tokio::spawn(async move {
+                if let Err(e) = init_state.ensure_initialized().await {
+                    tracing::error!("Background initialization failed: {e:#}");
+                }
+            });
+
             return Ok(rex);
         }
 

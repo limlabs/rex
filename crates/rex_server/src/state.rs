@@ -68,6 +68,7 @@ pub struct EsmState {
 }
 
 /// Context for lazy initialization on first request (dev mode only).
+#[derive(Clone)]
 pub struct LazyInitContext {
     pub config: RexConfig,
     pub scan: ScanResult,
@@ -98,13 +99,16 @@ impl AppState {
         let state = Arc::clone(self);
         self.lazy_init
             .get_or_try_init(|| async {
+                // Clone the context values instead of consuming them. The OnceCell
+                // init can be cancelled (e.g., HTTP health check drops connection),
+                // and we need the context to survive for retry.
                 let ctx = {
-                    let mut guard = state
+                    let guard = state
                         .lazy_init_ctx
                         .lock()
                         .map_err(|e| anyhow::anyhow!("lazy_init_ctx lock poisoned: {e}"))?;
-                    match guard.take() {
-                        Some(ctx) => ctx,
+                    match guard.as_ref() {
+                        Some(ctx) => ctx.clone(),
                         None => return Ok::<(), anyhow::Error>(()), // already consumed
                     }
                 };
@@ -153,7 +157,11 @@ impl AppState {
                 );
 
                 // Update HotState with real manifest
-                if let Ok(mut guard) = state.hot.write() {
+                {
+                    let mut guard = state
+                        .hot
+                        .write()
+                        .map_err(|e| anyhow::anyhow!("HotState write lock poisoned: {e}"))?;
                     let mut hot = (**guard).clone();
                     hot.manifest = build_result.manifest;
                     hot.build_id = build_result.build_id.clone();

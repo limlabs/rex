@@ -138,6 +138,15 @@ pub async fn mcp_handler(
     _headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    // Lazy init: ensure build + ESM loading is complete (dev mode only)
+    if let Err(e) = state.ensure_initialized().await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Initialization failed: {e}"),
+        )
+            .into_response();
+    }
+
     // Check if MCP tools are available
     let hot = match state.hot.read() {
         Ok(guard) => Arc::clone(&guard),
