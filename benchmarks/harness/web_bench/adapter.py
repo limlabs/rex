@@ -122,12 +122,9 @@ def setup_workspace(condition: str) -> Path:
         (tmp / "pages").mkdir(exist_ok=True)
         (tmp / "CLAUDE.md").write_text(REX_GUIDED)
 
-        # Symlink rex binary
-        rex_bin = Path(REX_BIN)
-        if rex_bin.exists():
-            link = tmp / "rex"
-            if not link.exists():
-                link.symlink_to(rex_bin.resolve())
+        # Note: do NOT symlink rex binary into workspace — it triggers
+        # Claude Code's process detection and kills the session (exit 144).
+        # The CLAUDE.md and _start_rex_server use REX_BIN absolute path instead.
 
     elif condition.startswith("nextjs"):
         # Next.js starter from Web-Bench's src-init

@@ -1,0 +1,30 @@
+[
+  {
+    "task_id": "task-1",
+    "tokens": 53892,
+    "turns": 7,
+    "tool_calls": 12,
+    "cost_usd": 0.063026,
+    "elapsed_ms": 18696.24545800616,
+    "api_ms": 16309,
+    "overhead_ms": 2387.2454580061603,
+    "condition": "rex_app",
+    "server_restart_ms": 537.5623329964583,
+    "test_ms": 1830.775292000908,
+    "test": {
+      "task_id": "task-1",
+      "total_tests": 2,
+      "passed": 2,
+      "failed": 0,
+      "pass_rate": 1.0,
+      "raw": {
+        "startTime": "2026-03-18T02:07:30.100Z",
+        "duration": 1029.7350000000001,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    }
+  }
+]

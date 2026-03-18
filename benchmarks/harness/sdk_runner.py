@@ -239,19 +239,9 @@ def setup_workdir(condition: SDKCondition) -> Path:
     # Ensure pages/ or routes/ dir exists
     (tmp / "pages").mkdir(exist_ok=True)
 
-    # Symlink rex binary into the project so `rex` is available in Bash
-    rex_bin_path = Path(REX_BIN)
-    if rex_bin_path.exists():
-        link = tmp / "rex"
-        if not link.exists():
-            link.symlink_to(rex_bin_path.resolve())
-
-    # Write CLAUDE.md — include rex binary location
-    claude_md = condition.claude_md.replace(
-        "The rex binary is available",
-        f"The rex binary is at ./rex (or {REX_BIN}). It is also available",
-    )
-    (tmp / "CLAUDE.md").write_text(claude_md)
+    # Note: do NOT symlink rex binary into workspace — triggers Claude Code
+    # nesting detection (exit 144). Use absolute path in CLAUDE.md instead.
+    (tmp / "CLAUDE.md").write_text(condition.claude_md)
 
     # Write hooks config
     if condition.hooks:
