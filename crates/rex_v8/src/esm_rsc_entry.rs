@@ -126,6 +126,7 @@ pub fn generate_rsc_esm_entry(
 /// `globalThis.__rex_pages`. SSR runtime is appended inline.
 pub fn generate_pages_esm_entry(
     page_sources: &[(String, std::path::PathBuf)],
+    api_sources: &[(String, std::path::PathBuf)],
     ssr_runtime_js: &str,
 ) -> String {
     let mut entry = String::new();
@@ -147,6 +148,18 @@ pub fn generate_pages_esm_entry(
         entry.push_str(&format!(
             "globalThis.__rex_pages['{module_name}'] = __page{i};\n"
         ));
+    }
+
+    // Import and register API routes
+    if !api_sources.is_empty() {
+        entry.push_str("\nglobalThis.__rex_api_handlers = {};\n");
+        for (i, (module_name, abs_path)) in api_sources.iter().enumerate() {
+            let api_path = abs_path.to_string_lossy().replace('\\', "/");
+            entry.push_str(&format!("import * as __api{i} from '{api_path}';\n"));
+            entry.push_str(&format!(
+                "globalThis.__rex_api_handlers['{module_name}'] = __api{i};\n"
+            ));
+        }
     }
 
     // SSR runtime
@@ -302,7 +315,7 @@ mod tests {
             ("about".to_string(), PathBuf::from("/pages/about.tsx")),
         ];
 
-        let entry = generate_pages_esm_entry(&pages, "// ssr runtime");
+        let entry = generate_pages_esm_entry(&pages, &[], "// ssr runtime");
 
         assert!(entry.contains("import * as __page0 from '/pages/index.tsx'"));
         assert!(entry.contains("import * as __page1 from '/pages/about.tsx'"));
@@ -313,7 +326,7 @@ mod tests {
     #[test]
     fn pages_esm_entry_empty_pages() {
         let pages: Vec<(String, PathBuf)> = vec![];
-        let entry = generate_pages_esm_entry(&pages, "// ssr");
+        let entry = generate_pages_esm_entry(&pages, &[], "// ssr");
 
         assert!(entry.contains("globalThis.__rex_pages = {};"));
         assert!(!entry.contains("import * as __page"));

@@ -80,6 +80,9 @@ pub async fn esm_load_modules(
     for route in &scan.routes {
         entry_paths.push(route.abs_path.clone());
     }
+    for route in &scan.api_routes {
+        entry_paths.push(route.abs_path.clone());
+    }
     if let Some(app_scan) = &scan.app_scan {
         for route in &app_scan.routes {
             entry_paths.push(route.page_path.clone());
@@ -162,7 +165,12 @@ pub async fn esm_load_modules(
             .iter()
             .map(|r| (r.module_name(), r.abs_path.clone()))
             .collect();
-        rex_v8::esm_rsc_entry::generate_pages_esm_entry(&page_sources, SSR_RUNTIME)
+        let api_sources: Vec<(String, std::path::PathBuf)> = scan
+            .api_routes
+            .iter()
+            .map(|r| (r.module_name(), r.abs_path.clone()))
+            .collect();
+        rex_v8::esm_rsc_entry::generate_pages_esm_entry(&page_sources, &api_sources, SSR_RUNTIME)
     };
 
     // Add rex/* and next/* stub modules for framework imports.
