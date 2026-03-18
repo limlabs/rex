@@ -83,6 +83,9 @@ pub async fn esm_load_modules(
     for route in &scan.api_routes {
         entry_paths.push(route.abs_path.clone());
     }
+    for tool in &scan.mcp_tools {
+        entry_paths.push(tool.abs_path.clone());
+    }
     if let Some(app_scan) = &scan.app_scan {
         for route in &app_scan.routes {
             entry_paths.push(route.page_path.clone());
@@ -181,7 +184,24 @@ pub async fn esm_load_modules(
             .iter()
             .map(|r| (r.module_name(), r.abs_path.clone()))
             .collect();
-        rex_v8::esm_rsc_entry::generate_pages_esm_entry(&page_sources, &api_sources, SSR_RUNTIME)
+        let mcp_sources: Vec<(String, std::path::PathBuf)> = scan
+            .mcp_tools
+            .iter()
+            .map(|t| (t.name.clone(), t.abs_path.clone()))
+            .collect();
+        let mcp_runtime_js = if mcp_sources.is_empty() {
+            String::new()
+        } else {
+            let mcp_ts = include_str!("../../../runtime/server/mcp-runtime.ts");
+            esm_transform::transform_to_esm(mcp_ts, "mcp-runtime.ts")?
+        };
+        rex_v8::esm_rsc_entry::generate_pages_esm_entry(
+            &page_sources,
+            &api_sources,
+            &mcp_sources,
+            SSR_RUNTIME,
+            &mcp_runtime_js,
+        )
     };
 
     // Add rex/* and next/* stub modules for framework imports.

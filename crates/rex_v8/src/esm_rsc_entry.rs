@@ -127,7 +127,9 @@ pub fn generate_rsc_esm_entry(
 pub fn generate_pages_esm_entry(
     page_sources: &[(String, std::path::PathBuf)],
     api_sources: &[(String, std::path::PathBuf)],
+    mcp_sources: &[(String, std::path::PathBuf)],
     ssr_runtime_js: &str,
+    mcp_runtime_js: &str,
 ) -> String {
     let mut entry = String::new();
 
@@ -160,6 +162,21 @@ pub fn generate_pages_esm_entry(
                 "globalThis.__rex_api_handlers['{module_name}'] = __api{i};\n"
             ));
         }
+    }
+
+    // Import and register MCP tools
+    if !mcp_sources.is_empty() {
+        entry.push_str("\nglobalThis.__rex_mcp_tools = {};\n");
+        for (i, (tool_name, abs_path)) in mcp_sources.iter().enumerate() {
+            let tool_path = abs_path.to_string_lossy().replace('\\', "/");
+            entry.push_str(&format!("import * as __mcp{i} from '{tool_path}';\n"));
+            entry.push_str(&format!(
+                "globalThis.__rex_mcp_tools['{tool_name}'] = __mcp{i};\n"
+            ));
+        }
+        // MCP runtime (defines __rex_list_mcp_tools, __rex_call_mcp_tool)
+        entry.push_str("\n// --- MCP Runtime ---\n");
+        entry.push_str(mcp_runtime_js);
     }
 
     // SSR runtime
@@ -315,7 +332,7 @@ mod tests {
             ("about".to_string(), PathBuf::from("/pages/about.tsx")),
         ];
 
-        let entry = generate_pages_esm_entry(&pages, &[], "// ssr runtime");
+        let entry = generate_pages_esm_entry(&pages, &[], &[], "// ssr runtime", "");
 
         assert!(entry.contains("import * as __page0 from '/pages/index.tsx'"));
         assert!(entry.contains("import * as __page1 from '/pages/about.tsx'"));
@@ -326,7 +343,7 @@ mod tests {
     #[test]
     fn pages_esm_entry_empty_pages() {
         let pages: Vec<(String, PathBuf)> = vec![];
-        let entry = generate_pages_esm_entry(&pages, &[], "// ssr");
+        let entry = generate_pages_esm_entry(&pages, &[], &[], "// ssr", "");
 
         assert!(entry.contains("globalThis.__rex_pages = {};"));
         assert!(!entry.contains("import * as __page"));
