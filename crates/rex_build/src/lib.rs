@@ -19,7 +19,7 @@ pub(crate) mod css_collect;
 pub(crate) mod css_modules;
 pub(crate) mod font;
 pub(crate) mod font_google;
-pub(crate) mod mdx;
+pub mod mdx;
 pub(crate) mod page_exports;
 pub mod server_bundle;
 pub mod tailwind;

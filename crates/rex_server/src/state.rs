@@ -117,22 +117,41 @@ impl AppState {
 
                 let project_config =
                     ProjectConfig::load(&ctx.config.project_root).unwrap_or_default();
-                // Run build and ESM loading in parallel.
-                // Both use the SAME build_id so client reference IDs match
-                // between the ESM stubs and the SSR bundle's manifest.
-                let build_fut = rex_build::build_bundles_with_id(
+
+                // Build first: produces CSS, client bundles, manifest, and processes MDX.
+                // build_bundles cleans .rex/build/ dirs, so ESM loading must happen AFTER.
+                let build_result = rex_build::build_bundles_with_id(
                     &ctx.config,
                     &ctx.scan,
                     &project_config,
                     Some(&ctx.build_id),
-                );
-                let esm_fut = crate::startup::esm_load_modules(
+                )
+                .await?;
+
+                // Process MDX paths for ESM loading: replace .mdx page paths with
+                // their compiled .jsx equivalents (build_bundles already compiled them).
+                let esm_scan = if let Some(app_scan) = &ctx.scan.app_scan {
+                    let processed = rex_build::mdx::process_mdx_app_pages(
+                        app_scan,
+                        &ctx.config.server_build_dir(),
+                        &ctx.config.project_root,
+                    )?;
+                    let mut scan = ctx.scan.clone();
+                    scan.app_scan = Some(processed);
+                    scan
+                } else {
+                    ctx.scan.clone()
+                };
+
+                // ESM loading uses the MDX-processed scan so page paths point
+                // to compiled .jsx files instead of raw .mdx.
+                let esm_state = crate::startup::esm_load_modules(
                     &ctx.config,
-                    &ctx.scan,
+                    &esm_scan,
                     &ctx.build_id,
                     &state.isolate_pool,
-                );
-                let (build_result, esm_state) = tokio::try_join!(build_fut, esm_fut)?;
+                )
+                .await?;
 
                 // Load the SSR bundle (flight-to-HTML pass) into all isolates.
                 // The SSR bundle provides __rex_rsc_flight_to_html for converting

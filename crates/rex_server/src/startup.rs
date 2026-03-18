@@ -74,7 +74,8 @@ pub async fn esm_load_modules(
     // Build known specifiers set (deps handled by rolldown, skip in import graph)
     let known_specifiers = esm_transform::dep_specifiers(has_app);
 
-    // Collect entry paths for import graph walking
+    // Collect entry paths for import graph walking.
+    // MDX files should already be resolved to compiled .jsx by the caller.
     let mut entry_paths: Vec<std::path::PathBuf> = Vec::new();
     for route in &scan.routes {
         entry_paths.push(route.abs_path.clone());

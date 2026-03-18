@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 const ASSET_EXTENSIONS: &[&str] = &[
     "png", "jpg", "jpeg", "gif", "webp", "ico", "avif", "bmp", "tiff", "svg", "css", "scss",
     "sass", "less", "woff", "woff2", "ttf", "eot", "otf", "mp3", "mp4", "wav", "ogg", "webm",
-    "pdf", "json", "mdx",
+    "pdf", "json",
 ];
 
 /// Information about a bare specifier import (node_modules dependency).
