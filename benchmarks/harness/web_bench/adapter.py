@@ -352,12 +352,18 @@ async def run_agent_on_task(
     tokens = 0
     turns = 0
     cost = 0.0
+    tool_calls = 0
+    duration_api_ms = 0
 
     try:
         async for message in query(prompt=prompt, options=options):
+            # Count tool call turns
+            if type(message).__name__ == "AssistantMessage":
+                tool_calls += 1
             if isinstance(message, ResultMessage):
                 cost = message.total_cost_usd or 0.0
                 turns = getattr(message, "num_turns", 0) or 0
+                duration_api_ms = getattr(message, "duration_api_ms", 0) or 0
                 usage = message.usage or {}
                 tokens = (
                     usage.get("input_tokens", 0)
@@ -374,8 +380,11 @@ async def run_agent_on_task(
         "task_id": task["id"],
         "tokens": tokens,
         "turns": turns,
+        "tool_calls": tool_calls,
         "cost_usd": cost,
         "elapsed_ms": elapsed_ms,
+        "api_ms": duration_api_ms,
+        "overhead_ms": elapsed_ms - duration_api_ms,
     }
 
 
@@ -431,14 +440,20 @@ async def async_main() -> None:
 
                 # Run agent
                 agent_result = await run_agent_on_task(task, condition, workdir, args.model)
+                api_s = agent_result["api_ms"] / 1000
+                overhead_s = agent_result["overhead_ms"] / 1000
                 tok_str = f"{agent_result['tokens'] // 1000}k"
                 print(
-                    dim(f"agent: {tok_str} tok, {agent_result['elapsed_ms']/1000:.0f}s"),
+                    dim(
+                        f"agent: {tok_str} tok, {agent_result['turns']}t, "
+                        f"api:{api_s:.0f}s, overhead:{overhead_s:.0f}s"
+                    ),
                     end="  ",
                     flush=True,
                 )
 
                 # Start/restart server after agent modifies files
+                server_start_t = time.monotonic()
                 if condition.startswith("rex"):
                     if server:
                         server.terminate()
@@ -470,12 +485,20 @@ async def async_main() -> None:
                             break
                         time.sleep(0.5)
 
+                server_ms = (time.monotonic() - server_start_t) * 1000
+                print(dim(f"srv:{server_ms/1000:.1f}s"), end="  ", flush=True)
+
                 # Run Playwright tests
+                test_start_t = time.monotonic()
                 test_result = run_playwright_tests(workdir, tid, condition, port=port)
+                test_ms = (time.monotonic() - test_start_t) * 1000
                 if test_result["total_tests"] > 0:
                     pct = test_result["pass_rate"]
                     status = green(f"{pct:.0%}") if pct == 1 else red(f"{pct:.0%}")
-                    print(f"{status} ({test_result['passed']}/{test_result['total_tests']})")
+                    print(
+                        f"{status} ({test_result['passed']}/{test_result['total_tests']})"
+                        f" {dim(f'test:{test_ms/1000:.1f}s')}"
+                    )
                 else:
                     err = test_result.get("error", "no tests ran")[:100]
                     print(f"{red('ERR')} {dim(err)}")
@@ -484,6 +507,8 @@ async def async_main() -> None:
                     {
                         **agent_result,
                         "condition": condition,
+                        "server_restart_ms": server_ms,
+                        "test_ms": test_ms,
                         "test": test_result,
                     }
                 )

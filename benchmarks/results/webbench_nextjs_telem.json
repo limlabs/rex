@@ -1,0 +1,58 @@
+[
+  {
+    "task_id": "task-1",
+    "tokens": 54174,
+    "turns": 7,
+    "tool_calls": 13,
+    "cost_usd": 0.06776475,
+    "elapsed_ms": 21606.45191599906,
+    "api_ms": 19074,
+    "overhead_ms": 2532.4519159990596,
+    "condition": "nextjs_guided",
+    "server_restart_ms": 4502.384208004514,
+    "test_ms": 2975.2812910010107,
+    "test": {
+      "task_id": "task-1",
+      "total_tests": 2,
+      "passed": 2,
+      "failed": 0,
+      "pass_rate": 1.0,
+      "raw": {
+        "startTime": "2026-03-18T01:52:56.191Z",
+        "duration": 1892.7730000000001,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    }
+  },
+  {
+    "task_id": "task-2",
+    "tokens": 58473,
+    "turns": 5,
+    "tool_calls": 23,
+    "cost_usd": 0.1448913,
+    "elapsed_ms": 58690.58816699544,
+    "api_ms": 56107,
+    "overhead_ms": 2583.5881669954397,
+    "condition": "nextjs_guided",
+    "server_restart_ms": 2612.539208996168,
+    "test_ms": 2698.7274999992223,
+    "test": {
+      "task_id": "task-2",
+      "total_tests": 4,
+      "passed": 4,
+      "failed": 0,
+      "pass_rate": 1.0,
+      "raw": {
+        "startTime": "2026-03-18T01:54:00.130Z",
+        "duration": 1957.222,
+        "expected": 4,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    }
+  }
+]
