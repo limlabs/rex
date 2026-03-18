@@ -8,11 +8,22 @@ REX_APP_GUIDED = """\
 
 This is a Rex project using the App Router — similar conventions to Next.js App Router.
 
+## IMPORTANT: Root Layout Required
+
+You MUST create `app/layout.tsx` before any pages will render. Without it,
+all pages return empty responses. If it doesn't exist yet, create it first:
+
+```tsx
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return <html><body>{children}</body></html>;
+}
+```
+
 ## Quick Reference
 
 - Routes go in `app/` directory using file-based routing
 - Pages: `app/page.tsx` (index), `app/about/page.tsx`, `app/blog/[slug]/page.tsx`
-- Layouts: `app/layout.tsx` wraps all pages (required root layout)
+- Layouts: `app/layout.tsx` wraps all pages (REQUIRED — must exist)
 - Not found: `app/not-found.tsx` for 404 pages
 - API routes: `app/api/hello/route.ts` with GET/POST exports
 - Components are server components by default

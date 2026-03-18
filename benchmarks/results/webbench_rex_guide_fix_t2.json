@@ -1,0 +1,58 @@
+[
+  {
+    "task_id": "task-1",
+    "tokens": 53550,
+    "turns": 7,
+    "tool_calls": 12,
+    "cost_usd": 0.06486175,
+    "elapsed_ms": 21543.025625003793,
+    "api_ms": 19064,
+    "overhead_ms": 2479.025625003793,
+    "condition": "rex_app",
+    "server_restart_ms": 264.52841599530075,
+    "test_ms": 12202.444750000723,
+    "test": {
+      "task_id": "task-1",
+      "total_tests": 2,
+      "passed": 0,
+      "failed": 2,
+      "pass_rate": 0.0,
+      "raw": {
+        "startTime": "2026-03-18T03:59:47.961Z",
+        "duration": 11388.795999999998,
+        "expected": 0,
+        "skipped": 0,
+        "unexpected": 2,
+        "flaky": 0
+      }
+    }
+  },
+  {
+    "task_id": "task-2",
+    "tokens": 32567,
+    "turns": 4,
+    "tool_calls": 20,
+    "cost_usd": 0.15702305,
+    "elapsed_ms": 49116.05808299646,
+    "api_ms": 46407,
+    "overhead_ms": 2709.05808299646,
+    "condition": "rex_app",
+    "server_restart_ms": 514.515458002279,
+    "test_ms": 2375.0991670021904,
+    "test": {
+      "task_id": "task-2",
+      "total_tests": 4,
+      "passed": 4,
+      "failed": 0,
+      "pass_rate": 1.0,
+      "raw": {
+        "startTime": "2026-03-18T04:00:49.829Z",
+        "duration": 1537.295,
+        "expected": 4,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    }
+  }
+]
