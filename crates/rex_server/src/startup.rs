@@ -151,14 +151,25 @@ pub async fn esm_load_modules(
             esm_transform::transform_to_esm(metadata_runtime_ts, "metadata.ts")?;
         let flight_runtime_js = esm_transform::transform_to_esm(flight_runtime_ts, "flight.ts")?;
 
-        rex_v8::esm_rsc_entry::generate_rsc_esm_entry(
+        let mut entry = rex_v8::esm_rsc_entry::generate_rsc_esm_entry(
             app_scan,
             &config.project_root,
             &webpack_config,
             "", // server_actions_js — wired separately when manifest available
             &flight_runtime_js,
             &metadata_runtime_js,
-        )
+        );
+
+        // Append app-route handler runtime if app has API routes
+        if !app_scan.api_routes.is_empty() {
+            let app_route_runtime_ts = include_str!("../../../runtime/server/app-route-runtime.ts");
+            let app_route_runtime_js =
+                esm_transform::transform_to_esm(app_route_runtime_ts, "app-route-runtime.ts")?;
+            entry.push_str("\n// --- App Route Runtime ---\n");
+            entry.push_str(&app_route_runtime_js);
+        }
+
+        entry
     } else {
         let page_sources: Vec<(String, std::path::PathBuf)> = scan
             .routes
@@ -209,6 +220,20 @@ pub async fn esm_load_modules(
             all_dep_modules.push(EsmSourceModule {
                 specifier: specifier.to_string(),
                 source: stub_js,
+            });
+        }
+    }
+
+    // Add rex/actions stub from runtime/server/actions.ts
+    {
+        let actions_path = runtime_dir.join("actions.ts");
+        if actions_path.exists() {
+            let actions_ts = std::fs::read_to_string(&actions_path).unwrap_or_default();
+            let actions_js = esm_transform::transform_to_esm(&actions_ts, "actions.ts")
+                .unwrap_or_else(|_| rex_stub.to_string());
+            all_dep_modules.push(EsmSourceModule {
+                specifier: "rex/actions".to_string(),
+                source: actions_js,
             });
         }
     }
