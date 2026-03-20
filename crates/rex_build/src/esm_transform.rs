@@ -208,21 +208,38 @@ fn collect_source_modules_inner(
             continue;
         }
 
-        let source = std::fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read {}", path.display()))?;
+        // The specifier is always the original path (V8 resolves imports by path).
+        let specifier = path.to_string_lossy().to_string();
 
-        let filename = path.to_string_lossy().to_string();
+        // MDX files need compilation before OXC transform.
+        // Compile MDX → JSX, absolutize relative imports, then treat as JSX.
+        let (source, oxc_filename) = if is_mdx_file(&path) {
+            let raw = std::fs::read_to_string(&path)
+                .with_context(|| format!("Failed to read {}", path.display()))?;
+            let options = crate::mdx::mdx_options_for_project(project_root);
+            let compiled = rex_mdx::compile_mdx_with_options(&raw, &options)
+                .with_context(|| format!("Failed to compile MDX: {}", path.display()))?;
+            let source_dir = path.parent().unwrap_or(Path::new("."));
+            let compiled = crate::css_modules::absolutize_relative_imports(&compiled, source_dir);
+            // Use a .jsx filename so OXC knows to parse JSX syntax
+            let jsx_name = path.with_extension("jsx").to_string_lossy().to_string();
+            (compiled, jsx_name)
+        } else {
+            let raw = std::fs::read_to_string(&path)
+                .with_context(|| format!("Failed to read {}", path.display()))?;
+            (raw, specifier.clone())
+        };
 
         // Check for "use client" directive — generate stub and stop walking imports
         if let Some(bid) = build_id {
-            let source_type = source_type_from_filename(&filename);
+            let source_type = source_type_from_filename(&oxc_filename);
             if crate::rsc_graph::has_use_client_directive(&source, source_type) {
                 let rel_path = path
                     .strip_prefix(project_root)
                     .unwrap_or(&path)
                     .to_string_lossy()
                     .to_string();
-                let exports = extract_export_names(&source, &filename);
+                let exports = extract_export_names(&source, &oxc_filename);
                 let ref_ids: Vec<String> = exports
                     .iter()
                     .map(|e| crate::client_manifest::client_reference_id(&rel_path, e, bid))
@@ -240,7 +257,7 @@ fn collect_source_modules_inner(
                 });
                 let stub = crate::rsc_stubs::generate_client_stub(&rel_path, &exports, bid);
                 source_modules.push(EsmSourceModule {
-                    specifier: filename,
+                    specifier,
                     source: stub,
                 });
                 continue; // Don't follow imports from client boundary modules
@@ -253,22 +270,22 @@ fn collect_source_modules_inner(
 
         // Build import resolution map (original specifier → absolute path)
         let mut import_map: HashMap<String, String> = HashMap::new();
-        for (specifier, resolved_path) in &local_imports {
+        for (imp_specifier, resolved_path) in &local_imports {
             import_map.insert(
-                specifier.clone(),
+                imp_specifier.clone(),
                 resolved_path.to_string_lossy().to_string(),
             );
         }
 
         // Track bare specifier imports for extra dep IIFE
-        for (specifier, named, has_default) in &bare_imports {
-            if known_dep_specifiers.contains(specifier.as_str()) {
+        for (imp_specifier, named, has_default) in &bare_imports {
+            if known_dep_specifiers.contains(imp_specifier.as_str()) {
                 continue;
             }
             let entry = dep_imports
-                .entry(specifier.clone())
+                .entry(imp_specifier.clone())
                 .or_insert_with(|| DepImport {
-                    specifier: specifier.clone(),
+                    specifier: imp_specifier.clone(),
                     named_exports: HashSet::new(),
                     has_default: false,
                 });
@@ -277,13 +294,13 @@ fn collect_source_modules_inner(
         }
 
         // Transform source (strip TS + JSX)
-        let transformed = transform_to_esm(&source, &filename)?;
+        let transformed = transform_to_esm(&source, &oxc_filename)?;
 
         // Rewrite import specifiers to absolute paths
         let rewritten = rewrite_imports_to_absolute(&transformed, &import_map);
 
         source_modules.push(EsmSourceModule {
-            specifier: filename,
+            specifier,
             source: rewritten,
         });
 
@@ -296,26 +313,7 @@ fn collect_source_modules_inner(
         }
     }
 
-    // Register bare specifier deps as stub modules so V8 can resolve them.
-    // These are node_modules imports not covered by pre-bundled deps (react, etc.).
-    // Stubs use no-op functions (not undefined) so they don't crash when called.
-    for dep in dep_imports.values() {
-        let mut stub = String::new();
-        let noop = "function(){return null}";
-        if dep.has_default {
-            stub.push_str(&format!("export default {noop};\n"));
-        }
-        for name in &dep.named_exports {
-            stub.push_str(&format!("export var {name} = {noop};\n"));
-        }
-        if stub.is_empty() {
-            stub.push_str(&format!("export default {noop};\n"));
-        }
-        source_modules.push(EsmSourceModule {
-            specifier: dep.specifier.clone(),
-            source: stub,
-        });
-    }
+    // Extra deps are bundled by the caller (startup.rs) via rolldown, not stubbed here.
 
     Ok(CollectedModules {
         source_modules,
@@ -340,6 +338,14 @@ pub fn dep_specifiers(has_app: bool) -> HashSet<String> {
     if has_app {
         set.insert("react-server-dom-webpack/server".to_string());
         set.insert("react-server-dom-webpack/client".to_string());
+    }
+
+    // Node.js built-in polyfills and framework stubs are registered as dep modules.
+    // The import graph walker should skip these — they're already handled.
+    if let Ok(runtime_dir) = crate::build_utils::runtime_server_dir() {
+        for (specifier, _) in crate::build_utils::node_polyfill_aliases(&runtime_dir) {
+            set.insert(specifier);
+        }
     }
 
     set
@@ -413,15 +419,19 @@ fn extract_and_resolve_imports(
             continue;
         }
 
-        // Bare specifiers (not starting with . or /) are node_modules deps.
-        // Don't resolve them through node_modules — register as bare imports
-        // and create stub modules. Only resolve relative/absolute imports locally.
-        if !specifier.starts_with('.') && !specifier.starts_with('/') {
-            bare_imports.push((specifier.to_string(), named, has_default));
-        } else if let Some(resolved) =
-            crate::rsc_graph::resolve_import(file_path, specifier, project_root)
-        {
+        if specifier.starts_with('.') || specifier.starts_with('/') {
+            // Relative/absolute import — resolve to local file
+            if let Some(resolved) =
+                crate::rsc_graph::resolve_import(file_path, specifier, project_root)
+            {
+                local_imports.push((specifier.to_string(), resolved));
+            }
+        } else if let Some(resolved) = resolve_tsconfig_alias(specifier, project_root) {
+            // Bare specifier matching a tsconfig path alias (e.g. @/components/*)
             local_imports.push((specifier.to_string(), resolved));
+        } else {
+            // True bare npm specifier — register as dep stub
+            bare_imports.push((specifier.to_string(), named, has_default));
         }
     }
 
@@ -491,6 +501,31 @@ fn is_asset_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|ext| ASSET_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+}
+
+fn is_mdx_file(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()) == Some("mdx")
+}
+
+/// Resolve a bare specifier through tsconfig path aliases only.
+/// Returns None if the specifier doesn't match any alias.
+fn resolve_tsconfig_alias(specifier: &str, project_root: &Path) -> Option<PathBuf> {
+    let mut aliases: Vec<_> = crate::build_utils::tsconfig_path_aliases(project_root)
+        .into_iter()
+        .collect();
+    aliases.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    for (prefix, targets) in &aliases {
+        if specifier.starts_with(prefix.as_str()) {
+            if let Some(Some(target)) = targets.first() {
+                let rest = &specifier[prefix.len()..];
+                let candidate = PathBuf::from(format!("{target}{rest}"));
+                if let Some(resolved) = crate::rsc_graph::try_resolve_path(&candidate) {
+                    return Some(resolved);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Extract export names from a source file (used for client reference stubs).

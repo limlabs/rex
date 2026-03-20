@@ -21,7 +21,7 @@ pub(crate) struct MdxProcessing {
 }
 
 /// Build `MdxOptions` by scanning the project root for `mdx-components.*`.
-fn mdx_options_for_project(project_root: &Path) -> MdxOptions {
+pub(crate) fn mdx_options_for_project(project_root: &Path) -> MdxOptions {
     MdxOptions {
         mdx_components_path: find_mdx_components(project_root),
     }

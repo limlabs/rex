@@ -204,9 +204,80 @@ pub async fn esm_load_modules(
         )
     };
 
-    // Add rex/* and next/* stub modules for framework imports.
-    // These are server-side stubs that return null components or no-op functions.
+    // Bundle ALL extra deps in a single rolldown build so cross-dep imports
+    // resolve correctly. Each dep becomes a separate entry point; rolldown handles
+    // shared chunks and proper import resolution between them.
+    let module_dirs = rex_build::resolve_modules_dirs(config)?;
+    let mut extra_dep_modules = Vec::new();
+    let extra_polyfills = String::new();
+    if !collected.extra_dep_imports.is_empty() {
+        // Build a single entry that re-exports all deps under their specifier names.
+        // Each dep gets its own entry to preserve its specifier as the module name.
+        let mut combined_entry = String::new();
+        for dep in &collected.extra_dep_imports {
+            let safe_name = dep.specifier.replace(['/', '-', '.', '@'], "_");
+            combined_entry.push_str(&format!(
+                "import * as {safe_name} from '{}';\nglobalThis.__rex_dep_{safe_name} = {safe_name};\n",
+                dep.specifier
+            ));
+        }
+        match rex_build::extra_dep_bundle::build_dep_esm_with_chunks(
+            config,
+            &combined_entry,
+            "__all_extra_deps",
+            &["default", "import", "module"],
+            &module_dirs,
+        )
+        .await
+        {
+            Ok(chunks) => {
+                for (specifier, source) in chunks {
+                    debug!(
+                        specifier = %specifier,
+                        size = source.len(),
+                        "Extra dep chunk loaded"
+                    );
+                    extra_dep_modules.push(EsmSourceModule { specifier, source });
+                }
+                // Create ESM wrappers that import the combined module (to force
+                // evaluation) then re-export from globalThis slots
+                for dep in &collected.extra_dep_imports {
+                    let safe_name = dep.specifier.replace(['/', '-', '.', '@'], "_");
+                    let mut wrapper = String::new();
+                    // Import combined module to ensure it's evaluated before we read globals
+                    wrapper.push_str("import '__all_extra_deps';\n");
+                    wrapper.push_str(&format!(
+                        "var __d = globalThis.__rex_dep_{safe_name} || {{}};\n"
+                    ));
+                    wrapper.push_str("export default __d.default || __d;\n");
+                    for name in &dep.named_exports {
+                        wrapper.push_str(&format!("export var {name} = __d.{name};\n"));
+                    }
+                    extra_dep_modules.push(EsmSourceModule {
+                        specifier: dep.specifier.clone(),
+                        source: wrapper,
+                    });
+                }
+            }
+            Err(e) => {
+                debug!(
+                    error = %e,
+                    "Failed to bundle extra deps — using stubs"
+                );
+                for dep in &collected.extra_dep_imports {
+                    let proxy_stub = "export default new Proxy(function(){return null},{get:function(_,p){if(p==='then')return undefined;return function(){return null}}});\n";
+                    extra_dep_modules.push(EsmSourceModule {
+                        specifier: dep.specifier.clone(),
+                        source: proxy_stub.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    // Add rex/* stub modules for framework imports.
     let mut all_dep_modules = dep_modules;
+    all_dep_modules.extend(extra_dep_modules);
     let rex_stub = "export default function() { return null; }; export var Html = function() { return null; }; export var Head = function() { return null; }; export var Main = function() { return null; }; export var NextScript = function() { return null; };";
     for specifier in &["rex/head", "rex/link", "rex/image", "rex/document"] {
         all_dep_modules.push(EsmSourceModule {
@@ -215,32 +286,28 @@ pub async fn esm_load_modules(
         });
     }
 
-    // Add next/* compatibility stubs from runtime/server/ directory.
-    // OXC-transform TypeScript stubs to valid JS for V8.
+    // Register all Node.js built-in polyfills and next/* stubs as ESM modules.
+    // In the IIFE path, rolldown resolves these via aliases. In the ESM path,
+    // we OXC-transform the TypeScript polyfill files and register them directly.
     let runtime_dir = rex_build::build_utils::runtime_server_dir()?;
-    let next_stubs: &[(&str, &str)] = &[
-        ("next/link", "next-link.ts"),
-        ("next/image", "next-image.ts"),
-        ("next/head", "head.ts"),
-        ("next/navigation", "next-navigation.ts"),
-        ("next/headers", "next-headers.ts"),
-        ("next/cache", "next-cache.ts"),
-        ("next/server", "next-server.ts"),
-        ("next/font/google", "next-font.ts"),
-        ("next/font/local", "next-font.ts"),
-        ("next/dynamic", "next-dynamic.ts"),
-        ("next/router", "next-router.ts"),
-    ];
-    for (specifier, filename) in next_stubs {
-        let stub_path = runtime_dir.join(filename);
-        if stub_path.exists() {
-            let stub_ts = std::fs::read_to_string(&stub_path).unwrap_or_default();
-            let stub_js = esm_transform::transform_to_esm(&stub_ts, filename)
-                .unwrap_or_else(|_| "export default function() { return null; };".to_string());
-            all_dep_modules.push(EsmSourceModule {
-                specifier: specifier.to_string(),
-                source: stub_js,
-            });
+    let polyfill_aliases = rex_build::build_utils::node_polyfill_aliases(&runtime_dir);
+    for (specifier, targets) in &polyfill_aliases {
+        if let Some(Some(target_path)) = targets.first() {
+            let target = std::path::Path::new(target_path);
+            if target.exists() {
+                let ts_source = std::fs::read_to_string(target).unwrap_or_default();
+                let filename = target
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                let js = esm_transform::transform_to_esm(&ts_source, &filename)
+                    .unwrap_or_else(|_| "export default {};".to_string());
+                all_dep_modules.push(EsmSourceModule {
+                    specifier: specifier.clone(),
+                    source: js,
+                });
+            }
         }
     }
 
@@ -258,8 +325,14 @@ pub async fn esm_load_modules(
         }
     }
 
-    // Load ESM modules into all isolates
-    let polyfills_arc = Arc::new(dep_bundles.polyfills);
+    // Load ESM modules into all isolates.
+    // Append extra dep IIFE (if any) to polyfills — evaluated as script before ESM.
+    let mut all_polyfills = dep_bundles.polyfills;
+    if !extra_polyfills.is_empty() {
+        all_polyfills.push('\n');
+        all_polyfills.push_str(&extra_polyfills);
+    }
+    let polyfills_arc = Arc::new(all_polyfills);
     let dep_modules_arc = Arc::new(all_dep_modules.clone());
     let source_modules_arc = Arc::new(collected.source_modules.clone());
     let entry_spec_arc = Arc::new(entry_specifier.clone());

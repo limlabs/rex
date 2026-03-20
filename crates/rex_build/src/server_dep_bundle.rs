@@ -396,7 +396,11 @@ async fn build_server_deps_iife(
 }
 
 /// Internal: build a single dep as a self-contained ESM module using rolldown.
-async fn build_dep_esm(
+/// Bundle a bare specifier dependency as a self-contained ESM module via rolldown.
+///
+/// Used for both pre-known deps (react-dom/server) and extra deps discovered
+/// during import graph walking (payload, clsx, etc.).
+pub async fn build_dep_esm(
     config: &RexConfig,
     entry_source: &str,
     name: &str,
@@ -527,3 +531,5 @@ async fn build_dep_esm(
     debug!(name, size = content.len(), "Dep ESM module built");
     Ok(content)
 }
+
+// Extra dep bundling functions are in `extra_dep_bundle.rs`.
