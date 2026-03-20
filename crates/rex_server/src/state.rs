@@ -65,6 +65,8 @@ pub struct EsmState {
     pub source_modules: Vec<rex_v8::EsmSourceModule>,
     pub entry_specifier: String,
     pub entry_source: String,
+    /// Alias mappings: (bare_specifier, path_specifier) for extra dep modules.
+    pub dep_aliases: Arc<Vec<(String, String)>>,
 }
 
 /// Context for lazy initialization on first request (dev mode only).

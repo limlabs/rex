@@ -4,12 +4,16 @@
 //! (e.g. payload, clsx, @payloadcms/*) that aren't covered by the pre-bundled
 //! React deps in `server_dep_bundle`.
 //!
-//! Uses rolldown to produce self-contained ESM or IIFE bundles with proper
-//! Node.js polyfill aliases and heavy package stubbing.
+//! Uses rolldown multi-entry bundling to produce native ESM modules. Each dep
+//! is a separate entry point; rolldown code-splits shared code into chunks.
+//! All outputs (entries + chunks) are loaded directly as V8 ESM modules,
+//! preserving class hierarchies and live bindings.
 
 use crate::build_utils::{node_polyfill_aliases, runtime_server_dir};
+use crate::esm_transform::DepImport;
 use anyhow::Result;
 use rex_core::RexConfig;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::debug;
 
@@ -82,6 +86,9 @@ fn build_config(config: &RexConfig) -> Result<DepBundleConfig> {
             "node_modules/@aws-sdk/".to_string(),
             "node_modules/@smithy/".to_string(),
             "node_modules/pg-native/".to_string(),
+            "node_modules/pg/".to_string(),
+            "node_modules/pg-pool/".to_string(),
+            "node_modules/pg-cloudflare/".to_string(),
             "node_modules/@node-rs/".to_string(),
             "node_modules/undici/".to_string(),
         ]));
@@ -94,42 +101,102 @@ fn build_config(config: &RexConfig) -> Result<DepBundleConfig> {
     })
 }
 
-/// Bundle extra deps as ESM, returning ALL chunks (entry + code-split) as
-/// `(specifier, source)` pairs. The entry gets the dep's specifier; chunks
-/// get relative specifiers (e.g., `./chunk-abc.js`) so V8 can resolve them.
+/// Result of multi-entry dep bundling.
+pub struct ExtraDepBundleResult {
+    /// All ESM modules: (specifier, source). Specifiers use `/_rex_deps/` prefix.
+    pub modules: Vec<(String, String)>,
+    /// Alias mappings: (bare_specifier, path_specifier). The bare specifier
+    /// (e.g., "payload") should resolve to the same V8 module as the path
+    /// specifier (e.g., "/_rex_deps/payload.js").
+    pub aliases: Vec<(String, String)>,
+}
+
+/// Bundle all extra deps as native ESM using rolldown multi-entry bundling.
 ///
-/// No polyfill banner is included — these modules are loaded into an existing
-/// V8 context that already has polyfills evaluated.
-pub async fn build_dep_esm_with_chunks(
+/// Each dep becomes its own entry point. Rolldown code-splits shared code into
+/// chunks. All modules use `/_rex_deps/` path-based specifiers so relative
+/// imports between chunks resolve correctly. Entry modules also get bare-specifier
+/// aliases (e.g., "payload" → "/_rex_deps/payload.js").
+pub async fn build_extra_deps_multi_entry(
     config: &RexConfig,
-    entry_source: &str,
-    name: &str,
-    condition_names: &[&str],
+    deps: &[DepImport],
     module_dirs: &[String],
-) -> Result<Vec<(String, String)>> {
-    let sanitized_name = name.replace(['/', '-', '.', '@'], "_");
+    externals: &[String],
+) -> Result<ExtraDepBundleResult> {
     let output_dir = config
         .server_build_dir()
         .join("_dep_bundles")
-        .join(&sanitized_name);
+        .join("_extra");
     std::fs::create_dir_all(&output_dir)?;
 
-    let entry_path = output_dir.join(format!("{sanitized_name}-entry.js"));
-    std::fs::write(&entry_path, entry_source)?;
+    // Write a virtual entry file per dep that re-exports everything.
+    let mut inputs = Vec::new();
+    let mut entry_name_to_specifier: HashMap<String, String> = HashMap::new();
+
+    for dep in deps {
+        let safe_name = dep.specifier.replace(['/', '-', '.', '@'], "_");
+        let mut entry_source = String::new();
+
+        // Re-export pattern: import then re-export to preserve all bindings
+        if dep.has_default && dep.named_exports.is_empty() {
+            entry_source.push_str(&format!("export {{ default }} from '{}';\n", dep.specifier));
+        } else if dep.has_default && !dep.named_exports.is_empty() {
+            entry_source.push_str(&format!("export {{ default }} from '{}';\n", dep.specifier));
+            let names: Vec<&String> = dep.named_exports.iter().collect();
+            entry_source.push_str(&format!(
+                "export {{ {} }} from '{}';\n",
+                names
+                    .iter()
+                    .map(|n| n.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                dep.specifier
+            ));
+        } else if !dep.named_exports.is_empty() {
+            let names: Vec<&String> = dep.named_exports.iter().collect();
+            entry_source.push_str(&format!(
+                "export {{ {} }} from '{}';\n",
+                names
+                    .iter()
+                    .map(|n| n.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                dep.specifier
+            ));
+        } else {
+            // No specific imports known — re-export everything
+            entry_source.push_str(&format!("export * from '{}';\n", dep.specifier));
+            entry_source.push_str(&format!("export {{ default }} from '{}';\n", dep.specifier));
+        }
+
+        let entry_path = output_dir.join(format!("{safe_name}-entry.js"));
+        std::fs::write(&entry_path, &entry_source)?;
+
+        inputs.push(rolldown::InputItem {
+            name: Some(safe_name.clone()),
+            import: entry_path.to_string_lossy().to_string(),
+        });
+        entry_name_to_specifier.insert(safe_name, dep.specifier.clone());
+    }
 
     let bc = build_config(config)?;
 
+    // Mark pre-bundled deps as external so rolldown doesn't re-bundle them.
+    // They're already loaded as separate V8 ESM modules (React, etc.).
+    let external = if externals.is_empty() {
+        None
+    } else {
+        Some(rolldown_common::IsExternal::from(externals.to_vec()))
+    };
+
     let options = rolldown::BundlerOptions {
-        input: Some(vec![rolldown::InputItem {
-            name: Some(sanitized_name.clone()),
-            import: entry_path.to_string_lossy().to_string(),
-        }]),
+        input: Some(inputs),
         cwd: Some(config.project_root.clone()),
         format: Some(rolldown::OutputFormat::Esm),
         dir: Some(output_dir.to_string_lossy().to_string()),
-        entry_filenames: Some(format!("{sanitized_name}.js").into()),
         platform: Some(rolldown::Platform::Browser),
         module_types: Some(bc.module_types),
+        external,
         define: Some(
             [(
                 "process.env.NODE_ENV".to_string(),
@@ -143,7 +210,12 @@ pub async fn build_dep_esm_with_chunks(
         treeshake: crate::rsc_build_config::react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(bc.aliases),
-            condition_names: Some(condition_names.iter().map(|s| s.to_string()).collect()),
+            condition_names: Some(
+                ["default", "import", "module"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            ),
             extensions: Some(vec![
                 ".tsx".to_string(),
                 ".ts".to_string(),
@@ -157,46 +229,64 @@ pub async fn build_dep_esm_with_chunks(
     };
 
     let mut bundler = rolldown::Bundler::with_plugins(options, bc.plugins)
-        .map_err(|e| anyhow::anyhow!("Failed to create dep bundler: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("Failed to create multi-entry dep bundler: {e}"))?;
 
     if let Err(e) = bundler.write().await {
         if !crate::diagnostics::is_all_missing_exports(&e) {
             return Err(anyhow::anyhow!(
-                "Dep bundle ({name}) failed:\n{}",
+                "Multi-entry dep bundle failed:\n{}",
                 crate::diagnostics::format_build_diagnostics(&e)
             ));
         }
     }
 
-    // Collect all produced .js files: entry gets the dep specifier,
-    // chunks get their filename as specifier (for relative import resolution).
-    let mut results = Vec::new();
-    let entry_file = format!("{sanitized_name}.js");
-    if let Ok(entries) = std::fs::read_dir(&output_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("js") && path != entry_path {
-                let filename = path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-                let content = std::fs::read_to_string(&path)?;
-                let specifier = if filename == entry_file {
-                    name.to_string()
-                } else {
-                    format!("./{filename}")
-                };
+    // Collect all .js files from output directory.
+    // ALL modules use `/_rex_deps/` path-based specifiers.
+    // Entry modules also get alias mappings from bare specifier → path specifier.
+    let mut modules = Vec::new();
+    let mut aliases = Vec::new();
+    let entry_files: HashMap<String, String> = entry_name_to_specifier
+        .iter()
+        .map(|(safe, spec)| (format!("{safe}.js"), spec.clone()))
+        .collect();
+
+    if let Ok(dir_entries) = std::fs::read_dir(&output_dir) {
+        for dir_entry in dir_entries.flatten() {
+            let path = dir_entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("js") {
+                continue;
+            }
+            let filename = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            if filename.ends_with("-entry.js") {
+                continue;
+            }
+
+            let content = std::fs::read_to_string(&path)?;
+            let path_specifier = format!("/_rex_deps/{filename}");
+
+            debug!(
+                specifier = %path_specifier,
+                size = content.len(),
+                "Extra dep module"
+            );
+            modules.push((path_specifier.clone(), content));
+
+            // Record alias for entry files: bare specifier → path specifier
+            if let Some(dep_specifier) = entry_files.get(&filename) {
                 debug!(
-                    specifier = %specifier,
-                    size = content.len(),
-                    "Dep chunk"
+                    bare = %dep_specifier,
+                    path = %path_specifier,
+                    "Extra dep alias"
                 );
-                results.push((specifier, content));
+                aliases.push((dep_specifier.clone(), path_specifier));
             }
         }
     }
 
     let _ = std::fs::remove_dir_all(&output_dir);
-    Ok(results)
+    Ok(ExtraDepBundleResult { modules, aliases })
 }

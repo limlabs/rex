@@ -39,6 +39,7 @@ impl SsrIsolate {
         source_modules: &[EsmSourceModule],
         entry_specifier: &str,
         entry_source: &str,
+        dep_aliases: &[(String, String)],
     ) -> Result<()> {
         let mut registry = EsmModuleRegistry::new();
 
@@ -55,6 +56,13 @@ impl SsrIsolate {
             registry
                 .compile_module(scope, &module.specifier, &module.source)
                 .with_context(|| format!("Failed to compile dep module: {}", module.specifier))?;
+        }
+
+        // 2b. Register aliases: bare specifiers → path-based specifiers.
+        // This shares the same compiled V8 module instance, so relative
+        // imports between chunks resolve correctly via the path-based key.
+        for (alias, target) in dep_aliases {
+            registry.alias_module(alias, target);
         }
 
         // 3. Compile source modules (OXC-transformed user files)
@@ -118,6 +126,7 @@ impl SsrIsolate {
         source_modules: &[EsmSourceModule],
         entry_specifier: &str,
         entry_source: &str,
+        dep_aliases: &[(String, String)],
     ) -> Result<()> {
         let mut registry = EsmModuleRegistry::new();
 
@@ -131,6 +140,11 @@ impl SsrIsolate {
             registry
                 .compile_module(scope, &module.specifier, &module.source)
                 .with_context(|| format!("Failed to recompile dep module: {}", module.specifier))?;
+        }
+
+        // Register aliases
+        for (alias, target) in dep_aliases {
+            registry.alias_module(alias, target);
         }
 
         // Recompile source modules (including the changed one)

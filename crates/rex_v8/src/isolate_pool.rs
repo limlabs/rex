@@ -220,6 +220,7 @@ impl IsolatePool {
         source_modules: std::sync::Arc<Vec<crate::ssr_isolate_esm::EsmSourceModule>>,
         entry_specifier: std::sync::Arc<String>,
         entry_source: std::sync::Arc<String>,
+        dep_aliases: std::sync::Arc<Vec<(String, String)>>,
     ) -> Result<()> {
         let mut handles = Vec::new();
 
@@ -229,10 +230,12 @@ impl IsolatePool {
             let sources = source_modules.clone();
             let spec = entry_specifier.clone();
             let src = entry_source.clone();
+            let aliases = dep_aliases.clone();
             let (tx, rx) = tokio::sync::oneshot::channel();
 
             let work: WorkItem = Box::new(move |isolate| {
-                let result = isolate.load_esm_modules(&polyfills, &deps, &sources, &spec, &src);
+                let result =
+                    isolate.load_esm_modules(&polyfills, &deps, &sources, &spec, &src, &aliases);
                 let _ = tx.send(result);
             });
 
@@ -298,6 +301,7 @@ impl IsolatePool {
         source_modules: std::sync::Arc<Vec<crate::ssr_isolate_esm::EsmSourceModule>>,
         entry_specifier: std::sync::Arc<String>,
         entry_source: std::sync::Arc<String>,
+        dep_aliases: std::sync::Arc<Vec<(String, String)>>,
     ) -> Result<()> {
         let mut handles = Vec::new();
 
@@ -306,10 +310,11 @@ impl IsolatePool {
             let sources = source_modules.clone();
             let spec = entry_specifier.clone();
             let src = entry_source.clone();
+            let aliases = dep_aliases.clone();
             let (tx, rx) = tokio::sync::oneshot::channel();
 
             let work: WorkItem = Box::new(move |isolate| {
-                let result = isolate.invalidate_esm_module(&deps, &sources, &spec, &src);
+                let result = isolate.invalidate_esm_module(&deps, &sources, &spec, &src, &aliases);
                 let _ = tx.send(result);
             });
 

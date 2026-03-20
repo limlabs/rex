@@ -239,9 +239,32 @@ impl EsmModuleRegistry {
                     if let Ok(promise) = v8::Local::<v8::Promise>::try_from(val) {
                         match promise.state() {
                             v8::PromiseState::Rejected => {
-                                let exception = promise.result(tc).to_rust_string_lossy(tc);
+                                let rejection = promise.result(tc);
+                                let mut exception = rejection.to_rust_string_lossy(tc);
+                                // Try to extract stack trace and source location
+                                if let Ok(err_obj) = v8::Local::<v8::Object>::try_from(rejection) {
+                                    if let Some(stack_key) = v8::String::new(tc, "stack") {
+                                        if let Some(stack) = err_obj.get(tc, stack_key.into()) {
+                                            let stack_str = stack.to_rust_string_lossy(tc);
+                                            if !stack_str.is_empty() && stack_str != "undefined" {
+                                                exception = stack_str;
+                                            }
+                                        }
+                                    }
+                                }
+                                // Also try V8's message API for source location
+                                let msg = v8::Exception::create_message(tc, rejection);
+                                let resource = msg
+                                    .get_script_resource_name(tc)
+                                    .map(|v| v.to_rust_string_lossy(tc))
+                                    .unwrap_or_default();
+                                let line = msg.get_line_number(tc).unwrap_or(0);
+                                let source_line = msg
+                                    .get_source_line(tc)
+                                    .map(|v| v.to_rust_string_lossy(tc))
+                                    .unwrap_or_default();
                                 return Err(anyhow::anyhow!(
-                                    "Module evaluation rejected for {specifier}: {exception}"
+                                    "Module evaluation rejected for {specifier}: {exception}\n  at {resource}:{line}\n  > {source_line}"
                                 ));
                             }
                             v8::PromiseState::Pending => {
@@ -312,6 +335,41 @@ impl EsmModuleRegistry {
     pub fn contains(&self, specifier: &str) -> bool {
         MODULE_MAP.with(|map| map.borrow().contains_key(specifier))
     }
+
+    /// Register an alias so that `alias_specifier` resolves to the same
+    /// compiled module as `target_specifier`. This shares a single V8 module
+    /// instance between two specifiers — no wrapper, no re-execution.
+    pub fn alias_module(&self, alias_specifier: &str, target_specifier: &str) -> bool {
+        MODULE_MAP.with(|map| {
+            let map = map.borrow();
+            if let Some(module) = map.get(target_specifier) {
+                let cloned = module.clone();
+                drop(map);
+                MODULE_MAP.with(|m| {
+                    m.borrow_mut().insert(alias_specifier.to_string(), cloned);
+                });
+                true
+            } else {
+                false
+            }
+        })
+    }
+}
+
+/// Normalize a path by removing `.` and `..` components without touching the filesystem.
+/// Unlike `canonicalize()`, this works for virtual paths (e.g., `/_rex_deps/./chunk.js`).
+fn normalize_path(path: &std::path::Path) -> std::path::PathBuf {
+    let mut components = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {} // skip "."
+            std::path::Component::ParentDir => {
+                components.pop();
+            }
+            other => components.push(other),
+        }
+    }
+    components.iter().collect()
 }
 
 /// V8 resolve callback: look up modules from the thread-local registry.
@@ -354,7 +412,7 @@ fn resolve_callback<'s>(
 
         if let Some(ref_path) = referrer_path {
             let ref_dir = std::path::Path::new(&ref_path).parent()?;
-            let candidate = ref_dir.join(&spec_str);
+            let candidate = normalize_path(&ref_dir.join(&spec_str));
 
             // Try exact path, then with extensions
             let extensions = ["", ".tsx", ".ts", ".jsx", ".js"];

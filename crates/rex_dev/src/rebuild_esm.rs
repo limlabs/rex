@@ -82,6 +82,16 @@ pub async fn try_esm_fast_path(state: &Arc<AppState>, changed_path: &Path) -> Re
     let entry_spec_arc = Arc::new(entry_specifier);
     let entry_src_arc = Arc::new(entry_source);
 
+    // Use stored dep aliases from initial ESM startup
+    let aliases_arc = if let Some(esm_lock) = &state.esm {
+        if let Ok(esm) = esm_lock.read() {
+            esm.dep_aliases.clone()
+        } else {
+            Arc::new(Vec::new())
+        }
+    } else {
+        Arc::new(Vec::new())
+    };
     state
         .isolate_pool
         .invalidate_esm_module_all(
@@ -89,6 +99,7 @@ pub async fn try_esm_fast_path(state: &Arc<AppState>, changed_path: &Path) -> Re
             source_modules_arc,
             entry_spec_arc,
             entry_src_arc,
+            aliases_arc,
         )
         .await?;
 

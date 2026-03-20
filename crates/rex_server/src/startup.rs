@@ -204,71 +204,54 @@ pub async fn esm_load_modules(
         )
     };
 
-    // Bundle ALL extra deps in a single rolldown build so cross-dep imports
-    // resolve correctly. Each dep becomes a separate entry point; rolldown handles
-    // shared chunks and proper import resolution between them.
+    // Bundle extra deps as native ESM using rolldown multi-entry bundling.
+    // Each dep is a separate entry point; rolldown code-splits shared code into
+    // chunks. All outputs are loaded directly as V8 ESM modules — no globalThis
+    // intermediary, preserving class hierarchies and live bindings.
     let module_dirs = rex_build::resolve_modules_dirs(config)?;
     let mut extra_dep_modules = Vec::new();
-    let extra_polyfills = String::new();
+    let mut dep_aliases: Vec<(String, String)> = Vec::new();
     if !collected.extra_dep_imports.is_empty() {
-        // Build a single entry that re-exports all deps under their specifier names.
-        // Each dep gets its own entry to preserve its specifier as the module name.
-        let mut combined_entry = String::new();
-        for dep in &collected.extra_dep_imports {
-            let safe_name = dep.specifier.replace(['/', '-', '.', '@'], "_");
-            combined_entry.push_str(&format!(
-                "import * as {safe_name} from '{}';\nglobalThis.__rex_dep_{safe_name} = {safe_name};\n",
-                dep.specifier
-            ));
+        // Only externalize the pre-bundled React deps — NOT node polyfills,
+        // which should be resolved by rolldown's alias system.
+        let mut externals = vec![
+            "react".to_string(),
+            "react/jsx-runtime".to_string(),
+            "react/jsx-dev-runtime".to_string(),
+            "react-dom/server".to_string(),
+        ];
+        if has_app {
+            externals.push("react-server-dom-webpack/server".to_string());
+            externals.push("react-server-dom-webpack/client".to_string());
         }
-        match rex_build::extra_dep_bundle::build_dep_esm_with_chunks(
+        match rex_build::extra_dep_bundle::build_extra_deps_multi_entry(
             config,
-            &combined_entry,
-            "__all_extra_deps",
-            &["default", "import", "module"],
+            &collected.extra_dep_imports,
             &module_dirs,
+            &externals,
         )
         .await
         {
-            Ok(chunks) => {
-                for (specifier, source) in chunks {
+            Ok(result) => {
+                for (specifier, source) in result.modules {
                     debug!(
                         specifier = %specifier,
                         size = source.len(),
-                        "Extra dep chunk loaded"
+                        "Extra dep module loaded"
                     );
                     extra_dep_modules.push(EsmSourceModule { specifier, source });
                 }
-                // Create ESM wrappers that import the combined module (to force
-                // evaluation) then re-export from globalThis slots
-                for dep in &collected.extra_dep_imports {
-                    let safe_name = dep.specifier.replace(['/', '-', '.', '@'], "_");
-                    let mut wrapper = String::new();
-                    // Import combined module to ensure it's evaluated before we read globals
-                    wrapper.push_str("import '__all_extra_deps';\n");
-                    wrapper.push_str(&format!(
-                        "var __d = globalThis.__rex_dep_{safe_name} || {{}};\n"
-                    ));
-                    wrapper.push_str("export default __d.default || __d;\n");
-                    for name in &dep.named_exports {
-                        wrapper.push_str(&format!("export var {name} = __d.{name};\n"));
-                    }
-                    extra_dep_modules.push(EsmSourceModule {
-                        specifier: dep.specifier.clone(),
-                        source: wrapper,
-                    });
-                }
+                dep_aliases = result.aliases;
             }
             Err(e) => {
-                debug!(
+                tracing::warn!(
                     error = %e,
-                    "Failed to bundle extra deps — using stubs"
+                    "Failed to bundle extra deps — using empty stubs"
                 );
                 for dep in &collected.extra_dep_imports {
-                    let proxy_stub = "export default new Proxy(function(){return null},{get:function(_,p){if(p==='then')return undefined;return function(){return null}}});\n";
                     extra_dep_modules.push(EsmSourceModule {
                         specifier: dep.specifier.clone(),
-                        source: proxy_stub.to_string(),
+                        source: "export default {};".to_string(),
                     });
                 }
             }
@@ -326,24 +309,20 @@ pub async fn esm_load_modules(
     }
 
     // Load ESM modules into all isolates.
-    // Append extra dep IIFE (if any) to polyfills — evaluated as script before ESM.
-    let mut all_polyfills = dep_bundles.polyfills;
-    if !extra_polyfills.is_empty() {
-        all_polyfills.push('\n');
-        all_polyfills.push_str(&extra_polyfills);
-    }
-    let polyfills_arc = Arc::new(all_polyfills);
+    let polyfills_arc = Arc::new(dep_bundles.polyfills);
     let dep_modules_arc = Arc::new(all_dep_modules.clone());
     let source_modules_arc = Arc::new(collected.source_modules.clone());
     let entry_spec_arc = Arc::new(entry_specifier.clone());
     let entry_src_arc = Arc::new(entry_source.clone());
 
+    let aliases_arc = Arc::new(dep_aliases);
     pool.load_esm_modules_all(
         polyfills_arc,
         dep_modules_arc.clone(),
         source_modules_arc,
         entry_spec_arc,
         entry_src_arc,
+        aliases_arc.clone(),
     )
     .await?;
 
@@ -354,5 +333,6 @@ pub async fn esm_load_modules(
         source_modules: collected.source_modules,
         entry_specifier,
         entry_source,
+        dep_aliases: aliases_arc,
     })
 }
