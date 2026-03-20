@@ -212,14 +212,13 @@ pub async fn esm_load_modules(
     let mut extra_dep_modules = Vec::new();
     let mut dep_aliases: Vec<(String, String)> = Vec::new();
     if !collected.extra_dep_imports.is_empty() {
-        // Only externalize the pre-bundled React deps — NOT node polyfills,
-        // which should be resolved by rolldown's alias system.
-        let mut externals = vec![
-            "react".to_string(),
-            "react/jsx-runtime".to_string(),
-            "react/jsx-dev-runtime".to_string(),
-            "react-dom/server".to_string(),
-        ];
+        // Externalize RSC-specific packages only. React itself is NOT externalized
+        // because the pre-bundled React uses `react-server` conditions (missing
+        // createContext, useState, etc.), while extra deps need the full React API
+        // with standard conditions. Rolldown bundles a standard-conditions React
+        // into the extra deps — this is the correct dual-instance architecture
+        // (server React for RSC rendering, standard React for SSR/UI deps).
+        let mut externals: Vec<String> = Vec::new();
         if has_app {
             externals.push("react-server-dom-webpack/server".to_string());
             externals.push("react-server-dom-webpack/client".to_string());
