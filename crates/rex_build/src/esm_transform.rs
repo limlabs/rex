@@ -189,10 +189,10 @@ fn collect_source_modules_inner(
         if is_asset_file(&path) {
             let source = if is_image_asset(&path) {
                 let rel = path.strip_prefix(project_root).unwrap_or(&path);
-                format!(
-                    "export default {{ src: \"/{}\" }};",
-                    rel.to_string_lossy().replace('\\', "/")
-                )
+                let rel_str = rel.to_string_lossy().replace('\\', "/");
+                // Files in public/ are served at / (strip the public/ prefix)
+                let url = rel_str.strip_prefix("public/").unwrap_or(&rel_str);
+                format!("export default {{ src: \"/{}\" }};", url)
             } else {
                 "export default {};".to_string()
             };
