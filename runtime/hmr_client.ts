@@ -15,6 +15,7 @@
   } | null = null;
   let tscErrors: RexTscDiagnostic[] = [];
   let activeEscListener: ((e: KeyboardEvent) => void) | null = null;
+  let pendingReload = false;
 
   function connect(): void {
     ws = new WebSocket(url);
@@ -44,8 +45,7 @@
           break;
 
         case "full-reload":
-          console.log("[Rex HMR] Full reload");
-          window.location.reload();
+          scheduleReload();
           break;
 
         case "error":
@@ -448,8 +448,7 @@
       Object.keys(newManifest.app_routes).length > 0 &&
       !newManifest.pages
     ) {
-      console.log("[Rex HMR] App router update, reloading");
-      window.location.reload();
+      scheduleReload();
       return;
     }
 
@@ -540,6 +539,26 @@
         window.location.reload();
       });
   }
+
+  // Defer reload for background tabs — only reload when the tab becomes visible.
+  // This prevents unnecessary reloads of unrelated pages in other tabs.
+  function scheduleReload(): void {
+    if (document.visibilityState === "visible") {
+      console.log("[Rex HMR] Reloading");
+      window.location.reload();
+    } else {
+      console.log("[Rex HMR] Tab hidden, deferring reload");
+      pendingReload = true;
+    }
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible" && pendingReload) {
+      pendingReload = false;
+      console.log("[Rex HMR] Tab visible, applying deferred reload");
+      window.location.reload();
+    }
+  });
 
   connect();
 })();
