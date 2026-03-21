@@ -507,3 +507,86 @@ fn simple_hash(s: &str) -> String {
     s.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
+
+/// Dynamic `import()` callback for V8.
+///
+/// Called when JavaScript code uses `import('specifier')`. Looks up the module
+/// in the thread-local registry, instantiates it if needed, and returns a
+/// promise that resolves with the module's namespace object.
+pub fn dynamic_import_callback<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    _host_defined_options: v8::Local<'s, v8::Data>,
+    resource_name: v8::Local<'s, v8::Value>,
+    specifier: v8::Local<'s, v8::String>,
+    _import_attributes: v8::Local<'s, v8::FixedArray>,
+) -> Option<v8::Local<'s, v8::Promise>> {
+    let spec_str = specifier.to_rust_string_lossy(scope);
+    let referrer_str = resource_name.to_rust_string_lossy(scope);
+
+    // Resolve specifier (same logic as the static resolve callback)
+    let resolved = if spec_str.starts_with('.') {
+        // Relative import — resolve against referrer
+        let ref_dir = std::path::Path::new(&referrer_str).parent()?;
+        let candidate = normalize_path(&ref_dir.join(&spec_str));
+        candidate.to_string_lossy().to_string()
+    } else {
+        spec_str.clone()
+    };
+
+    let resolver = v8::PromiseResolver::new(scope)?;
+    let promise = resolver.get_promise(scope);
+
+    // Look up in module registry
+    let module = MODULE_MAP.with(|map| {
+        map.borrow()
+            .get(&resolved)
+            .map(|g| v8::Local::new(scope, g))
+    });
+
+    let module = match module {
+        Some(m) => m,
+        None => {
+            let msg = v8::String::new(
+                scope,
+                &format!("Cannot find module '{spec_str}' (resolved: {resolved})"),
+            )?;
+            let err = v8::Exception::error(scope, msg);
+            resolver.reject(scope, err);
+            return Some(promise);
+        }
+    };
+
+    // Instantiate if needed
+    if module.get_status() == v8::ModuleStatus::Uninstantiated {
+        let ok = module.instantiate_module(scope, resolve_callback);
+        if ok != Some(true) {
+            let msg = v8::String::new(
+                scope,
+                &format!("Failed to instantiate dynamically imported module: {resolved}"),
+            )?;
+            let err = v8::Exception::error(scope, msg);
+            resolver.reject(scope, err);
+            return Some(promise);
+        }
+    }
+
+    // Evaluate if needed
+    if module.get_status() == v8::ModuleStatus::Instantiated {
+        let result = module.evaluate(scope);
+        if let Some(val) = result {
+            if let Ok(p) = v8::Local::<v8::Promise>::try_from(val) {
+                if p.state() == v8::PromiseState::Rejected {
+                    let reason = p.result(scope);
+                    resolver.reject(scope, reason);
+                    return Some(promise);
+                }
+                scope.perform_microtask_checkpoint();
+            }
+        }
+    }
+
+    // Get namespace and resolve
+    let namespace = module.get_module_namespace();
+    resolver.resolve(scope, namespace);
+    Some(promise)
+}
