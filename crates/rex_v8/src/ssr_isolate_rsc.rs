@@ -254,7 +254,19 @@ impl SsrIsolate {
                 break;
             }
 
-            // No timers fired and no new fetch requests — converged.
+            // Run one more microtask checkpoint — the previous checkpoint
+            // may have resolved promises that schedule MessageChannel
+            // callbacks (used by React's scheduler), which in our polyfill
+            // become microtasks. Without this second pass, the scheduler
+            // callback fires but its follow-up work is deferred to the
+            // next resolve_rsc_async iteration, adding unnecessary latency.
+            self.isolate.perform_microtask_checkpoint();
+            let timer_fired2 = crate::fetch::drain_js_timers(&mut self.isolate, &self.context);
+            if timer_fired2 {
+                continue;
+            }
+
+            // Converged — no more timers, no new fetch, microtasks drained.
             break;
         }
     }

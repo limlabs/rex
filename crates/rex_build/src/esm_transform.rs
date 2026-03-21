@@ -37,6 +37,17 @@ pub struct ClientBoundary {
     pub ref_ids: Vec<String>,
 }
 
+/// An extracted inline server action from a source file.
+#[derive(Debug, Clone)]
+pub struct ExtractedServerAction {
+    /// Relative path of the source file (from project root).
+    pub rel_path: String,
+    /// Generated function name (e.g., `__rex_action_0`).
+    pub action_name: String,
+    /// Stable action ID (SHA-256 based).
+    pub action_id: String,
+}
+
 /// Result of collecting source modules from an import graph walk.
 pub struct CollectedModules {
     /// Source modules (local files), OXC-transformed to valid ESM JS.
@@ -47,6 +58,9 @@ pub struct CollectedModules {
     /// Client boundaries discovered during the walk (only populated when
     /// `collect_source_modules_with_stubs` is used).
     pub client_boundaries: Vec<ClientBoundary>,
+    /// Inline server actions extracted from source files (only populated for
+    /// app router with build_id).
+    pub extracted_actions: Vec<ExtractedServerAction>,
 }
 
 /// Transform a source file for HMR: strip TS/JSX and rewrite relative imports
@@ -72,18 +86,11 @@ pub fn transform_and_rewrite_imports(
         );
     }
 
-    // Transform (strip TS + JSX)
     let transformed = transform_to_esm(source, &filename)?;
-
-    // Rewrite import specifiers to absolute paths
     Ok(rewrite_imports_to_absolute(&transformed, &import_map))
 }
 
-/// Transform a TypeScript/TSX source file to valid ESM JavaScript.
-///
-/// - Strips TypeScript types (interfaces, type annotations, enums, etc.)
-/// - Transforms JSX to createElement/jsx-runtime calls
-/// - Preserves import/export statements as valid ESM
+/// Transform TypeScript/TSX to valid ESM JavaScript (strip types, transform JSX).
 pub fn transform_to_esm(source: &str, filename: &str) -> Result<String> {
     let allocator = oxc_allocator::Allocator::default();
     let source_type = source_type_from_filename(filename);
@@ -105,17 +112,8 @@ pub fn transform_to_esm(source: &str, filename: &str) -> Result<String> {
 }
 
 /// Collect all source modules by walking the import graph from entry files.
-///
-/// - Resolves relative imports to absolute paths
-/// - Transforms each discovered source file with OXC
-/// - Rewrites import specifiers in generated code to use absolute paths
-/// - Collects bare specifier imports for dep IIFE generation
-/// - Skips asset imports (CSS, images, etc.)
-/// - If `build_id` is provided, replaces `"use client"` modules with client
-///   reference stubs and stops walking their imports
-///
-/// `known_dep_specifiers` lists deps already handled by the dep IIFE (e.g., "react").
-/// These are not included in the returned `extra_dep_imports`.
+/// Resolves relative imports, OXC-transforms sources, rewrites specifiers to
+/// absolute paths, and collects bare-specifier deps for extra bundling.
 pub fn collect_source_modules(
     entries: &[PathBuf],
     project_root: &Path,
@@ -124,8 +122,7 @@ pub fn collect_source_modules(
     collect_source_modules_inner(entries, project_root, known_dep_specifiers, None)
 }
 
-/// Like `collect_source_modules` but generates client reference stubs for
-/// `"use client"` modules (needed for app router RSC rendering).
+/// Like `collect_source_modules` but generates client reference stubs for `"use client"` modules.
 pub fn collect_source_modules_with_stubs(
     entries: &[PathBuf],
     project_root: &Path,
@@ -144,6 +141,7 @@ fn collect_source_modules_inner(
     let mut source_modules = Vec::new();
     let mut dep_imports: HashMap<String, DepImport> = HashMap::new();
     let mut client_boundaries: Vec<ClientBoundary> = Vec::new();
+    let mut extracted_actions: Vec<ExtractedServerAction> = Vec::new();
     let mut visited: HashSet<PathBuf> = HashSet::new();
     let mut queue: VecDeque<PathBuf> = VecDeque::new();
 
@@ -213,7 +211,7 @@ fn collect_source_modules_inner(
 
         // MDX files need compilation before OXC transform.
         // Compile MDX → JSX, absolutize relative imports, then treat as JSX.
-        let (source, oxc_filename) = if is_mdx_file(&path) {
+        let (mut source, oxc_filename) = if is_mdx_file(&path) {
             let raw = std::fs::read_to_string(&path)
                 .with_context(|| format!("Failed to read {}", path.display()))?;
             let options = crate::mdx::mdx_options_for_project(project_root);
@@ -293,8 +291,19 @@ fn collect_source_modules_inner(
             entry.has_default |= has_default;
         }
 
-        // Transform source (strip TS + JSX)
-        let transformed = transform_to_esm(&source, &oxc_filename)?;
+        // Extract inline server actions before OXC transform, append $$typeof after.
+        let action_suffix = extract_server_actions_if_needed(
+            &mut source,
+            &path,
+            project_root,
+            build_id,
+            &mut extracted_actions,
+        );
+
+        let mut transformed = transform_to_esm(&source, &oxc_filename)?;
+        if !action_suffix.is_empty() {
+            transformed.push_str(&action_suffix);
+        }
 
         // Rewrite import specifiers to absolute paths
         let rewritten = rewrite_imports_to_absolute(&transformed, &import_map);
@@ -319,7 +328,47 @@ fn collect_source_modules_inner(
         source_modules,
         extra_dep_imports: dep_imports.into_values().collect(),
         client_boundaries,
+        extracted_actions,
     })
+}
+
+/// Extract inline server actions from source if present, returning JS to append.
+fn extract_server_actions_if_needed(
+    source: &mut String,
+    path: &Path,
+    project_root: &Path,
+    build_id: Option<&str>,
+    extracted_actions: &mut Vec<ExtractedServerAction>,
+) -> String {
+    let bid = match build_id {
+        Some(b) if source.contains("use server") => b,
+        _ => return String::new(),
+    };
+    let rel_path = path
+        .strip_prefix(project_root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string();
+    let result = match crate::server_action_extract::extract_inline_server_actions(source, path) {
+        Some(r) => r,
+        None => return String::new(),
+    };
+    *source = result.source;
+    let mut suffix = String::new();
+    for action in &result.actions {
+        let id = crate::server_action_manifest::server_action_id(&rel_path, &action.name, bid);
+        suffix.push_str(&format!(
+            "\n{n}.$$typeof = Symbol.for(\"react.server.reference\");\n{n}.$$id = \"{id}\";\n{n}.$$bound = null;\n",
+            n = action.name,
+        ));
+        extracted_actions.push(ExtractedServerAction {
+            rel_path: rel_path.clone(),
+            action_name: action.name.clone(),
+            action_id: id,
+        });
+    }
+    tracing::debug!(path = %rel_path, count = result.actions.len(), "ESM: extracted inline server actions");
+    suffix
 }
 
 /// Specifiers that are pre-bundled as dep ESM modules.

@@ -155,6 +155,18 @@ function _buildElement(routeKey: string, propsJson: string): React.ReactElement 
     return element;
 }
 
+function _setStreamError(err: unknown, prefix: string): void {
+    _streamDone = true;
+    _flightString = '0:{"error":' + JSON.stringify(_safeErrorString(err)) + '}\n';
+    if (_wantHtml && !_htmlDone) {
+        _htmlResult = JSON.stringify({
+            body: '<div style="color:red">' + prefix + _safeErrorString(err).replace(/</g, '&lt;') + '</div>',
+            head: '', flight: _flightString
+        });
+        _htmlDone = true;
+    }
+}
+
 function _assembleChunks(): string {
     const decoder = new TextDecoder();
     const parts: string[] = [];
@@ -177,26 +189,31 @@ function _startReading(reader: ReadableStreamDefaultReader<Uint8Array>): void {
         while (loop) {
             loop = false;
             reader.read().then(function(result: ReadableStreamReadResult<Uint8Array>) {
-                if (result.done) {
-                    _streamDone = true;
-                    _flightString = _assembleChunks();
-                    // Store raw bytes on globalThis for SSR pass (avoids UTF-8 round-trip
-                    // that corrupts binary flight chunks like TypedArrays)
-                    globalThis.__rex_flight_raw_chunks = _rawChunks;
-                    if (_wantHtml) {
-                        _startHtmlPass();
-                    }
-                } else {
-                    _chunks.push(result.value);
-                    // Keep a copy of raw bytes for the SSR pass
-                    if (result.value instanceof Uint8Array) {
-                        _rawChunks.push(result.value);
-                    }
-                    if (sync) {
-                        loop = true; // continue the while loop instead of recursing
+                try {
+                    if (result.done) {
+                        _streamDone = true;
+                        _flightString = _assembleChunks();
+                        // Store raw bytes on globalThis for SSR pass (avoids UTF-8 round-trip
+                        // that corrupts binary flight chunks like TypedArrays)
+                        globalThis.__rex_flight_raw_chunks = _rawChunks;
+                        if (_wantHtml) {
+                            _startHtmlPass();
+                        }
                     } else {
-                        drain(); // truly async — safe to recurse
+                        _chunks.push(result.value);
+                        // Keep a copy of raw bytes for the SSR pass
+                        if (result.value instanceof Uint8Array) {
+                            _rawChunks.push(result.value);
+                        }
+                        if (sync) {
+                            loop = true; // continue the while loop instead of recursing
+                        } else {
+                            drain(); // truly async — safe to recurse
+                        }
                     }
+                } catch (e) {
+                    // Prevent silent failures that leave _streamDone = false forever.
+                    _setStreamError(e, 'RSC Read Error: ');
                 }
             }, function(err: unknown) {
                 _streamDone = true;
@@ -218,17 +235,7 @@ function _startReading(reader: ReadableStreamDefaultReader<Uint8Array>): void {
                     }
                     return;
                 }
-                // Encode error as flight data
-                _flightString = '0:{"error":' + JSON.stringify(_safeErrorString(err)) + '}\n';
-                if (_wantHtml && !_htmlDone) {
-                    const errMsg = _safeErrorString(err);
-                    _htmlResult = JSON.stringify({
-                        body: '<div style="color:red">RSC Stream Error: ' + errMsg.replace(/</g, '&lt;') + '</div>',
-                        head: '',
-                        flight: _flightString
-                    });
-                    _htmlDone = true;
-                }
+                _setStreamError(err, 'RSC Stream Error: ');
             });
         }
         sync = false;
@@ -335,27 +342,15 @@ globalThis.__rex_render_rsc_to_html = function(routeKey: string, propsJson: stri
         _startReading(stream.getReader());
     } catch (e) {
         if (_isNotFound(e)) {
-            _streamDone = true;
-            _flightString = '';
-            _htmlResult = '__REX_NOT_FOUND__';
-            _htmlDone = true;
+            _streamDone = true; _flightString = '';
+            _htmlResult = '__REX_NOT_FOUND__'; _htmlDone = true;
         } else {
             const redir = _isRedirect(e);
             if (redir) {
-                _streamDone = true;
-                _flightString = '';
-                _htmlResult = '__REX_REDIRECT__:' + redir.status + ':' + redir.url;
-                _htmlDone = true;
+                _streamDone = true; _flightString = '';
+                _htmlResult = '__REX_REDIRECT__:' + redir.status + ':' + redir.url; _htmlDone = true;
             } else {
-                const errMsg = _safeErrorString(e);
-                _streamDone = true;
-                _flightString = '0:{"error":' + JSON.stringify(errMsg) + '}\n';
-                _htmlResult = JSON.stringify({
-                    body: '<div style="color:red">RSC Error: ' + errMsg.replace(/</g, '&lt;') + '</div>',
-                    head: '',
-                    flight: _flightString
-                });
-                _htmlDone = true;
+                _setStreamError(e, 'RSC Error: ');
             }
         }
     }

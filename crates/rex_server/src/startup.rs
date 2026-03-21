@@ -154,11 +154,35 @@ pub async fn esm_load_modules(
             esm_transform::transform_to_esm(metadata_runtime_ts, "metadata.ts")?;
         let flight_runtime_js = esm_transform::transform_to_esm(flight_runtime_ts, "flight.ts")?;
 
+        // Generate server action dispatch table from extracted inline actions.
+        // Each extracted action is already hoisted in its source file; we just need
+        // to register the action ID → function mapping for server-side dispatch.
+        let server_actions_js = if collected.extracted_actions.is_empty() {
+            String::new()
+        } else {
+            let mut js = String::from(
+                "globalThis.__rex_server_actions = globalThis.__rex_server_actions || {};\n",
+            );
+            for action in &collected.extracted_actions {
+                // The action function is already exported from its source module.
+                // We reference it by name from the module scope — the ESM entry
+                // imports all page/layout modules, so these names are accessible
+                // via the module's namespace on globalThis.__rex_app_pages or similar.
+                // For now, just register a placeholder; actual dispatch is wired in
+                // the RSC entry when modules are imported.
+                js.push_str(&format!(
+                    "// action: {} → {}\n",
+                    action.action_name, action.action_id,
+                ));
+            }
+            js
+        };
+
         let mut entry = rex_v8::esm_rsc_entry::generate_rsc_esm_entry(
             app_scan,
             &config.project_root,
             &webpack_config,
-            "", // server_actions_js — wired separately when manifest available
+            &server_actions_js,
             &flight_runtime_js,
             &metadata_runtime_js,
         );
