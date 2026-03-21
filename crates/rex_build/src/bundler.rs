@@ -350,8 +350,11 @@ pub async fn build_bundles_with_id(
     let _ = fs::remove_dir_all(&fonts_dir);
     let mdx_dir = client_dir.join("_mdx");
     let _ = fs::remove_dir_all(&mdx_dir);
-    let server_mdx_dir = server_dir.join("_mdx");
-    let _ = fs::remove_dir_all(&server_mdx_dir);
+    // In dev mode, ESM module loader needs compiled MDX .jsx files after the build
+    if !config.dev {
+        let server_mdx_dir = server_dir.join("_mdx");
+        let _ = fs::remove_dir_all(&server_mdx_dir);
+    }
 
     Ok(BuildResult {
         build_id,
