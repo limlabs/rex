@@ -132,18 +132,8 @@ impl AppState {
                 let project_config =
                     ProjectConfig::load(&ctx.config.project_root).unwrap_or_default();
 
-                // Build first: produces CSS, client bundles, manifest, and processes MDX.
-                // build_bundles cleans .rex/build/ dirs, so ESM loading must happen AFTER.
-                let build_result = rex_build::build_bundles_with_id(
-                    &ctx.config,
-                    &ctx.scan,
-                    &project_config,
-                    Some(&ctx.build_id),
-                )
-                .await?;
-
                 // Process MDX paths for ESM loading: replace .mdx page paths with
-                // their compiled .jsx equivalents (build_bundles already compiled them).
+                // their compiled .jsx equivalents. Must happen before ESM collection.
                 let esm_scan = if let Some(app_scan) = &ctx.scan.app_scan {
                     let processed = rex_build::mdx::process_mdx_app_pages(
                         app_scan,
@@ -157,8 +147,28 @@ impl AppState {
                     ctx.scan.clone()
                 };
 
+                // ESM collection runs FIRST: walk the import graph to discover all
+                // client boundaries and server actions, computing canonical IDs.
+                // These pre-computed IDs are then passed to the IIFE build so both
+                // systems use identical reference IDs.
+                let precomputed_ids =
+                    crate::startup::esm_collect_ids(&ctx.config, &esm_scan, &ctx.build_id)?;
+
+                // Build bundles: produces CSS, client bundles, SSR bundle, manifest.
+                // Uses ESM's pre-computed IDs to ensure ID consistency.
+                let build_result = rex_build::build_bundles_with_id(
+                    &ctx.config,
+                    &ctx.scan,
+                    &project_config,
+                    Some(&ctx.build_id),
+                    precomputed_ids.as_ref(),
+                )
+                .await?;
+
                 // ESM loading uses the MDX-processed scan so page paths point
                 // to compiled .jsx files instead of raw .mdx.
+                // The IIFE build's client_manifest is passed for chunk URLs only —
+                // ESM uses its own pre-computed ref IDs (authoritative).
                 let esm_state = crate::startup::esm_load_modules(
                     &ctx.config,
                     &esm_scan,

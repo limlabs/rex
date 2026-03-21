@@ -8,6 +8,11 @@ use rex_v8::EsmSourceModule;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
+use crate::esm_parse_helpers::{
+    extract_and_resolve_imports, extract_export_names, has_module_level_use_server,
+    source_type_from_filename,
+};
+
 /// File extensions that are non-code assets — skip during module collection.
 const ASSET_EXTENSIONS: &[&str] = &[
     "png", "jpg", "jpeg", "gif", "webp", "ico", "avif", "bmp", "tiff", "svg", "css", "scss",
@@ -45,6 +50,14 @@ pub struct ExtractedServerAction {
     pub action_id: String,
 }
 
+/// A module-level "use server" module with its exports.
+#[derive(Debug, Clone)]
+pub struct ServerActionModule {
+    pub abs_path: String,
+    pub rel_path: String,
+    pub exports: Vec<String>,
+}
+
 /// Result of collecting source modules from an import graph walk.
 pub struct CollectedModules {
     /// Source modules (local files), OXC-transformed to valid ESM JS.
@@ -55,6 +68,8 @@ pub struct CollectedModules {
     pub client_boundaries: Vec<ClientBoundary>,
     /// Inline server actions extracted from source files (app router only).
     pub extracted_actions: Vec<ExtractedServerAction>,
+    /// Module-level "use server" modules (app router only).
+    pub server_action_modules: Vec<ServerActionModule>,
 }
 
 /// Transform a source file for HMR: strip TS/JSX and rewrite relative imports to absolute paths.
@@ -132,6 +147,7 @@ fn collect_source_modules_inner(
     let mut dep_imports: HashMap<String, DepImport> = HashMap::new();
     let mut client_boundaries: Vec<ClientBoundary> = Vec::new();
     let mut extracted_actions: Vec<ExtractedServerAction> = Vec::new();
+    let mut server_action_modules: Vec<ServerActionModule> = Vec::new();
     let mut visited: HashSet<PathBuf> = HashSet::new();
     let mut queue: VecDeque<PathBuf> = VecDeque::new();
 
@@ -171,7 +187,8 @@ fn collect_source_modules_inner(
                             exports: exports.clone(),
                             ref_ids,
                         });
-                        let stub = crate::rsc_stubs::generate_client_stub(&rel_path, &exports, bid);
+                        let stub =
+                            crate::rsc_stubs::generate_client_stub(&rel_path, &exports, bid, None);
                         source_modules.push(EsmSourceModule {
                             specifier: filename,
                             source: stub,
@@ -249,12 +266,49 @@ fn collect_source_modules_inner(
                     exports: exports.clone(),
                     ref_ids: ref_ids.clone(),
                 });
-                let stub = crate::rsc_stubs::generate_client_stub(&rel_path, &exports, bid);
+                let stub = crate::rsc_stubs::generate_client_stub(&rel_path, &exports, bid, None);
                 source_modules.push(EsmSourceModule {
                     specifier,
                     source: stub,
                 });
-                continue; // Don't follow imports from client boundary modules
+                // Still queue imports from client modules — they may import
+                // "use server" action modules that need to be discovered.
+                let (client_local_imports, _) =
+                    extract_and_resolve_imports(&source, &path, project_root, known_dep_specifiers);
+                for (spec, import_path) in &client_local_imports {
+                    tracing::info!(
+                        spec = %spec,
+                        resolved = %import_path.display(),
+                        already_visited = visited.contains(import_path),
+                        "ESM: client module import"
+                    );
+                }
+                for (_spec, import_path) in client_local_imports {
+                    if !visited.contains(&import_path) {
+                        visited.insert(import_path.clone());
+                        queue.push_back(import_path);
+                    }
+                }
+                continue;
+            }
+
+            // Detect module-level "use server" — register exports for dispatch table
+            if has_module_level_use_server(&source) {
+                tracing::info!(path = %oxc_filename, "ESM: detected module-level use server");
+                let canon_path = path.canonicalize().unwrap_or_else(|_| path.clone());
+                let rel_path = canon_path
+                    .strip_prefix(&canonical_root)
+                    .unwrap_or(&canon_path)
+                    .to_string_lossy()
+                    .to_string();
+                let exports = extract_export_names(&source, &oxc_filename);
+                if !exports.is_empty() {
+                    server_action_modules.push(ServerActionModule {
+                        abs_path: canon_path.to_string_lossy().to_string(),
+                        rel_path,
+                        exports,
+                    });
+                }
             }
         }
 
@@ -322,6 +376,7 @@ fn collect_source_modules_inner(
         extra_dep_imports: dep_imports.into_values().collect(),
         client_boundaries,
         extracted_actions,
+        server_action_modules,
     })
 }
 
@@ -395,91 +450,6 @@ pub fn dep_specifiers(has_app: bool) -> HashSet<String> {
 
 // --- Internal helpers ---
 
-/// A resolved local import: (original_specifier, resolved_absolute_path).
-type LocalImport = (String, PathBuf);
-/// A bare specifier import: (specifier, named_exports, has_default).
-type BareImport = (String, Vec<String>, bool);
-
-/// Extract imports from a source file, resolving local ones to absolute paths.
-#[allow(clippy::type_complexity)]
-fn extract_and_resolve_imports(
-    source: &str,
-    file_path: &Path,
-    project_root: &Path,
-    known_specifiers: &HashSet<String>,
-) -> (Vec<LocalImport>, Vec<BareImport>) {
-    let allocator = oxc_allocator::Allocator::default();
-    let source_type = source_type_from_filename(&file_path.to_string_lossy());
-    let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
-
-    let mut local_imports = Vec::new();
-    let mut bare_imports: Vec<(String, Vec<String>, bool)> = Vec::new();
-
-    for stmt in &parsed.program.body {
-        let (specifier, named, has_default) = match stmt {
-            oxc_ast::ast::Statement::ImportDeclaration(import) => {
-                let spec = import.source.value.as_str();
-                let mut named = Vec::new();
-                let mut has_default = false;
-                if let Some(specifiers) = &import.specifiers {
-                    for s in specifiers {
-                        match s {
-                            oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(s) => {
-                                named.push(s.imported.name().to_string());
-                            }
-                            oxc_ast::ast::ImportDeclarationSpecifier::ImportDefaultSpecifier(_) => {
-                                has_default = true;
-                            }
-                            oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(
-                                _,
-                            ) => {
-                                has_default = true;
-                            }
-                        }
-                    }
-                }
-                (spec, named, has_default)
-            }
-            oxc_ast::ast::Statement::ExportNamedDeclaration(export) => {
-                if let Some(source) = &export.source {
-                    (source.value.as_str(), Vec::new(), false)
-                } else {
-                    continue;
-                }
-            }
-            oxc_ast::ast::Statement::ExportAllDeclaration(export) => {
-                (export.source.value.as_str(), Vec::new(), true)
-            }
-            _ => continue,
-        };
-
-        // Skip specifiers handled by pre-registered modules (rex/*, next/*, react, etc.)
-        if known_specifiers.contains(specifier)
-            || specifier.starts_with("rex/")
-            || specifier.starts_with("next/")
-        {
-            continue;
-        }
-
-        if specifier.starts_with('.') || specifier.starts_with('/') {
-            // Relative/absolute import — resolve to local file
-            if let Some(resolved) =
-                crate::rsc_graph::resolve_import(file_path, specifier, project_root)
-            {
-                local_imports.push((specifier.to_string(), resolved));
-            }
-        } else if let Some(resolved) = resolve_tsconfig_alias(specifier, project_root) {
-            // Bare specifier matching a tsconfig path alias (e.g. @/components/*)
-            local_imports.push((specifier.to_string(), resolved));
-        } else {
-            // True bare npm specifier — register as dep stub
-            bare_imports.push((specifier.to_string(), named, has_default));
-        }
-    }
-
-    (local_imports, bare_imports)
-}
-
 /// Rewrite import specifiers in generated JS to use absolute paths.
 ///
 /// Parses the generated code, finds import source spans, and does
@@ -527,18 +497,6 @@ fn rewrite_imports_to_absolute(js: &str, import_map: &HashMap<String, String>) -
     result
 }
 
-fn source_type_from_filename(filename: &str) -> oxc_span::SourceType {
-    if filename.ends_with(".tsx") {
-        oxc_span::SourceType::tsx()
-    } else if filename.ends_with(".ts") {
-        oxc_span::SourceType::ts()
-    } else if filename.ends_with(".jsx") {
-        oxc_span::SourceType::jsx()
-    } else {
-        oxc_span::SourceType::mjs()
-    }
-}
-
 fn is_asset_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
@@ -556,80 +514,6 @@ fn is_image_asset(path: &Path) -> bool {
 
 fn is_mdx_file(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()) == Some("mdx")
-}
-
-/// Resolve a bare specifier through tsconfig path aliases only.
-/// Returns None if the specifier doesn't match any alias.
-fn resolve_tsconfig_alias(specifier: &str, project_root: &Path) -> Option<PathBuf> {
-    let mut aliases: Vec<_> = crate::build_utils::tsconfig_path_aliases(project_root)
-        .into_iter()
-        .collect();
-    aliases.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
-    for (prefix, targets) in &aliases {
-        if specifier.starts_with(prefix.as_str()) {
-            if let Some(Some(target)) = targets.first() {
-                let rest = &specifier[prefix.len()..];
-                let candidate = PathBuf::from(format!("{target}{rest}"));
-                if let Some(resolved) = crate::rsc_graph::try_resolve_path(&candidate) {
-                    return Some(resolved);
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Extract export names from a source file (used for client reference stubs).
-fn extract_export_names(source: &str, filename: &str) -> Vec<String> {
-    let allocator = oxc_allocator::Allocator::default();
-    let source_type = source_type_from_filename(filename);
-    let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
-    let mut exports = Vec::new();
-
-    for stmt in &parsed.program.body {
-        match stmt {
-            oxc_ast::ast::Statement::ExportDefaultDeclaration(_) => {
-                exports.push("default".to_string());
-            }
-            oxc_ast::ast::Statement::ExportNamedDeclaration(export) => {
-                if let Some(decl) = &export.declaration {
-                    match decl {
-                        oxc_ast::ast::Declaration::FunctionDeclaration(f) => {
-                            if let Some(id) = &f.id {
-                                exports.push(id.name.to_string());
-                            }
-                        }
-                        oxc_ast::ast::Declaration::VariableDeclaration(v) => {
-                            for decl in &v.declarations {
-                                if let oxc_ast::ast::BindingPattern::BindingIdentifier(ref id) =
-                                    decl.id
-                                {
-                                    exports.push(id.name.to_string());
-                                }
-                            }
-                        }
-                        oxc_ast::ast::Declaration::ClassDeclaration(c) => {
-                            if let Some(id) = &c.id {
-                                exports.push(id.name.to_string());
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                for specifier in &export.specifiers {
-                    exports.push(specifier.exported.name().to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // Default to "default" if no exports found (common for components)
-    if exports.is_empty() {
-        exports.push("default".to_string());
-    }
-
-    exports
 }
 
 #[cfg(test)]

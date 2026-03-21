@@ -1,7 +1,7 @@
 use crate::hmr::HmrBroadcast;
 use crate::watcher::{FileEvent, FileEventKind};
 use anyhow::Result;
-use rex_build::build_bundles;
+use rex_build::build_bundles_with_id;
 use rex_core::RexConfig;
 use rex_router::{scan_project, RouteTrie, ScanResult};
 use rex_server::handlers;
@@ -212,7 +212,38 @@ pub async fn handle_file_event(
                 guard.project_config.clone()
             };
 
-            let build_result = build_bundles(config, &scan, &project_config).await?;
+            // Generate build_id early so ESM collection and IIFE build share the same ID.
+            let build_id = rex_build::build_utils::generate_build_id();
+
+            // ESM collection: walk import graph to pre-compute RSC reference IDs.
+            // The IIFE build then uses these IDs for consistency.
+            let esm_scan = if let Some(app_scan) = &scan.app_scan {
+                match rex_build::mdx::process_mdx_app_pages(
+                    app_scan,
+                    &config.server_build_dir(),
+                    &config.project_root,
+                ) {
+                    Ok(processed) => {
+                        let mut s = scan.clone();
+                        s.app_scan = Some(processed);
+                        s
+                    }
+                    Err(_) => scan.clone(),
+                }
+            } else {
+                scan.clone()
+            };
+            let precomputed_ids =
+                rex_server::startup::esm_collect_ids(config, &esm_scan, &build_id)?;
+
+            let build_result = build_bundles_with_id(
+                config,
+                &scan,
+                &project_config,
+                Some(&build_id),
+                precomputed_ids.as_ref(),
+            )
+            .await?;
             let t_bundle = t0.elapsed();
 
             info!(
@@ -375,7 +406,35 @@ pub async fn handle_file_event(
                 guard.project_config.clone()
             };
 
-            let build_result = build_bundles(config, &scan, &project_config).await?;
+            // Generate build_id early for ESM/IIFE consistency.
+            let build_id = rex_build::build_utils::generate_build_id();
+            let esm_scan_removed = if let Some(app_scan) = &scan.app_scan {
+                match rex_build::mdx::process_mdx_app_pages(
+                    app_scan,
+                    &config.server_build_dir(),
+                    &config.project_root,
+                ) {
+                    Ok(processed) => {
+                        let mut s = scan.clone();
+                        s.app_scan = Some(processed);
+                        s
+                    }
+                    Err(_) => scan.clone(),
+                }
+            } else {
+                scan.clone()
+            };
+            let precomputed_ids =
+                rex_server::startup::esm_collect_ids(config, &esm_scan_removed, &build_id)?;
+
+            let build_result = build_bundles_with_id(
+                config,
+                &scan,
+                &project_config,
+                Some(&build_id),
+                precomputed_ids.as_ref(),
+            )
+            .await?;
 
             // Snapshot old state for project_config
             let old_hot = {

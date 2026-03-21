@@ -66,15 +66,19 @@ pub async fn build_bundles(
     scan: &ScanResult,
     project_config: &ProjectConfig,
 ) -> Result<BuildResult> {
-    build_bundles_with_id(config, scan, project_config, None).await
+    build_bundles_with_id(config, scan, project_config, None, None).await
 }
 
 /// Build both server and client bundles with an explicit build ID.
+///
+/// When `precomputed_ids` is provided, the RSC bundle builder uses these
+/// pre-computed IDs (from the ESM module walk) instead of computing its own.
 pub async fn build_bundles_with_id(
     config: &RexConfig,
     scan: &ScanResult,
     project_config: &ProjectConfig,
     explicit_build_id: Option<&str>,
+    precomputed_ids: Option<&crate::precomputed_ids::PrecomputedIds>,
 ) -> Result<BuildResult> {
     let build_id = explicit_build_id
         .map(String::from)
@@ -227,8 +231,12 @@ pub async fn build_bundles_with_id(
         }
 
         let rsc_result = crate::rsc_bundler::build_rsc_bundles(
-            config, app_scan, &build_id, &define,
+            config,
+            app_scan,
+            &build_id,
+            &define,
             config.dev, // skip server/SSR IIFE in dev (ESM replaces them)
+            precomputed_ids,
         )
         .await?;
 
@@ -282,6 +290,9 @@ pub async fn build_bundles_with_id(
             manifest
                 .server_actions
                 .insert(action_id.clone(), entry.export_name.clone());
+            manifest
+                .server_action_modules
+                .insert(action_id.clone(), entry.module_path.clone());
         }
 
         // Collect CSS imports from app/ layout and page files into global_css.

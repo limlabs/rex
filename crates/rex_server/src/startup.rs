@@ -42,16 +42,82 @@ pub async fn esm_startup(
     Ok((pool, esm_state))
 }
 
+/// Walk the ESM import graph and pre-compute RSC reference IDs.
+///
+/// This is a lightweight operation (~10-50ms) that does OXC parsing and BFS
+/// graph walk — no rolldown bundling or V8 involvement. The result is used
+/// to ensure the IIFE build (client bundles, SSR bundle) uses the same IDs
+/// as the ESM module loader.
+///
+/// Returns `None` for pages-only projects (no app router).
+pub fn esm_collect_ids(
+    config: &RexConfig,
+    scan: &ScanResult,
+    build_id: &str,
+) -> Result<Option<rex_build::precomputed_ids::PrecomputedIds>> {
+    use rex_build::esm_transform;
+
+    if scan.app_scan.is_none() {
+        return Ok(None);
+    }
+
+    let known_specifiers = esm_transform::dep_specifiers(true);
+
+    // Collect entry paths (same logic as in esm_load_modules)
+    let mut entry_paths: Vec<std::path::PathBuf> = Vec::new();
+    for route in &scan.routes {
+        entry_paths.push(route.abs_path.clone());
+    }
+    for route in &scan.api_routes {
+        entry_paths.push(route.abs_path.clone());
+    }
+    for tool in &scan.mcp_tools {
+        entry_paths.push(tool.abs_path.clone());
+    }
+    if let Some(app_scan) = &scan.app_scan {
+        for route in &app_scan.routes {
+            entry_paths.push(route.page_path.clone());
+            entry_paths.extend(route.layout_chain.iter().cloned());
+        }
+        for api_route in &app_scan.api_routes {
+            entry_paths.push(api_route.handler_path.clone());
+        }
+    }
+
+    debug!(
+        entries = entry_paths.len(),
+        "ESM collect IDs: walking import graph"
+    );
+
+    let collected = esm_transform::collect_source_modules_with_stubs(
+        &entry_paths,
+        &config.project_root,
+        &known_specifiers,
+        build_id,
+    )?;
+
+    debug!(
+        client_boundaries = collected.client_boundaries.len(),
+        server_actions = collected.server_action_modules.len(),
+        extracted_actions = collected.extracted_actions.len(),
+        "ESM collect IDs: pre-computed"
+    );
+
+    Ok(Some(
+        rex_build::precomputed_ids::PrecomputedIds::from_collected(&collected, build_id),
+    ))
+}
+
 /// Load ESM modules into an existing isolate pool.
 ///
-/// `client_manifest` should be provided for app-router projects — it's the
-/// manifest from the IIFE build, ensuring ref IDs match the SSR bundle.
+/// `client_manifest` is used only for chunk URLs (not ref IDs) — the ESM path
+/// computes its own ref IDs, which are authoritative.
 pub async fn esm_load_modules(
     config: &RexConfig,
     scan: &ScanResult,
     build_id: &str,
     pool: &IsolatePool,
-    client_manifest: Option<&rex_core::client_manifest::ClientReferenceManifest>,
+    _client_manifest: Option<&rex_core::client_manifest::ClientReferenceManifest>,
 ) -> Result<EsmState> {
     use rex_build::esm_transform;
     use rex_build::server_bundle::SSR_RUNTIME;
@@ -125,34 +191,26 @@ pub async fn esm_load_modules(
     // Generate entry source
     let entry_specifier = "rex://entry".to_string();
     let entry_source = if let Some(app_scan) = &scan.app_scan {
-        // Use the IIFE build's client manifest for the webpack bundler config.
-        // This ensures ref IDs match the SSR bundle's __rex_webpack_ssr_manifest,
-        // which also comes from the IIFE build. Without this, path canonicalization
-        // differences cause mismatched IDs and "module not found" errors in SSR.
-        let webpack_config = if let Some(manifest) = client_manifest {
-            let config = manifest.to_server_webpack_config();
-            let keys: Vec<&String> = config
-                .as_object()
-                .map(|o| o.keys().collect())
-                .unwrap_or_default();
-            debug!(
-                count = keys.len(),
-                sample = ?keys.iter().take(3).collect::<Vec<_>>(),
-                "ESM: using IIFE client manifest for webpack bundler config"
-            );
-            serde_json::to_string(&config).unwrap_or_default()
-        } else {
-            // Fallback: compute from ESM-discovered boundaries (no IIFE build available)
-            let mut config = serde_json::Map::new();
+        // ESM is the authority for ref IDs. Build webpack config from ESM-discovered
+        // boundaries. Chunks are empty because:
+        // - Server: modules are already loaded as ESM in V8
+        // - SSR: modules are bundled in the SSR IIFE
+        // - Client: hydration entry pre-loads from __REX_RSC_MODULE_MAP__
+        let webpack_config = {
+            let mut wpc = serde_json::Map::new();
             for boundary in &collected.client_boundaries {
                 for (export, ref_id) in boundary.exports.iter().zip(boundary.ref_ids.iter()) {
-                    config.insert(
+                    wpc.insert(
                         ref_id.clone(),
                         serde_json::json!({ "id": ref_id, "name": export, "chunks": [] }),
                     );
                 }
             }
-            serde_json::to_string(&serde_json::Value::Object(config)).unwrap_or_default()
+            debug!(
+                count = wpc.len(),
+                "ESM: built webpack config from ESM boundaries"
+            );
+            serde_json::to_string(&serde_json::Value::Object(wpc)).unwrap_or_default()
         };
 
         // OXC-transform TypeScript runtimes to valid JS for V8
@@ -162,27 +220,73 @@ pub async fn esm_load_modules(
             esm_transform::transform_to_esm(metadata_runtime_ts, "metadata.ts")?;
         let flight_runtime_js = esm_transform::transform_to_esm(flight_runtime_ts, "flight.ts")?;
 
-        // Generate server action dispatch table from extracted inline actions.
-        // Each extracted action is already hoisted in its source file; we just need
-        // to register the action ID → function mapping for server-side dispatch.
-        let server_actions_js = if collected.extracted_actions.is_empty() {
+        // Generate server action dispatch table from ESM-discovered "use server"
+        // modules and inline extracted actions.
+        let canonical_root = config
+            .project_root
+            .canonicalize()
+            .unwrap_or_else(|_| config.project_root.clone());
+        let has_actions =
+            !collected.extracted_actions.is_empty() || !collected.server_action_modules.is_empty();
+        let server_actions_js = if !has_actions {
             String::new()
         } else {
-            let mut js = String::from(
+            let mut js = String::new();
+            js.push_str("import { decodeReply, decodeAction, registerServerReference } from 'react-server-dom-webpack/server';\n");
+            js.push_str("globalThis.__rex_decodeReply = decodeReply;\n");
+            js.push_str("globalThis.__rex_decodeAction = decodeAction;\n");
+            js.push_str(
                 "globalThis.__rex_server_actions = globalThis.__rex_server_actions || {};\n",
             );
-            for action in &collected.extracted_actions {
-                // The action function is already exported from its source module.
-                // We reference it by name from the module scope — the ESM entry
-                // imports all page/layout modules, so these names are accessible
-                // via the module's namespace on globalThis.__rex_app_pages or similar.
-                // For now, just register a placeholder; actual dispatch is wired in
-                // the RSC entry when modules are imported.
+
+            // Module-level "use server" files
+            for module in &collected.server_action_modules {
+                debug!(
+                    abs_path = %module.abs_path,
+                    rel_path = %module.rel_path,
+                    exports = ?module.exports,
+                    "ESM: registering server action module"
+                );
+            }
+            for (i, module) in collected.server_action_modules.iter().enumerate() {
+                let import_var = format!("__sam_{i}");
                 js.push_str(&format!(
-                    "// action: {} → {}\n",
-                    action.action_name, action.action_id,
+                    "import * as {import_var} from '{}';\n",
+                    module.abs_path,
+                ));
+                for export in &module.exports {
+                    let action_id = rex_build::server_action_manifest::server_action_id(
+                        &module.rel_path,
+                        export,
+                        build_id,
+                    );
+                    js.push_str(&format!(
+                        "registerServerReference({import_var}.{export}, \"{action_id}\", \"{export}\");\n"
+                    ));
+                    js.push_str(&format!(
+                        "globalThis.__rex_server_actions[\"{action_id}\"] = {import_var}.{export};\n"
+                    ));
+                }
+            }
+
+            // Inline extracted actions
+            for (i, action) in collected.extracted_actions.iter().enumerate() {
+                let abs_path = canonical_root.join(&action.rel_path);
+                let abs_str = abs_path.to_string_lossy().replace('\\', "/");
+                let import_var = format!("__sa_{i}");
+                js.push_str(&format!(
+                    "import {{ {} as {import_var} }} from '{abs_str}';\n",
+                    action.action_name,
+                ));
+                js.push_str(&format!(
+                    "globalThis.__rex_server_actions[\"{}\"] = {import_var};\n",
+                    action.action_id,
                 ));
             }
+
+            js.push_str(
+                "globalThis.__rex_server_action_manifest = globalThis.__rex_server_actions;\n",
+            );
             js
         };
 

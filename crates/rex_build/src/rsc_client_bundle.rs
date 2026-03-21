@@ -4,7 +4,7 @@
 //! Each client boundary module becomes a separate entry. Shared dependencies
 //! (React) become shared chunks via manual code splitting.
 
-use crate::client_manifest::{client_reference_id, ClientReferenceManifest};
+use crate::client_manifest::ClientReferenceManifest;
 use crate::rsc_build_config::{
     build_rex_aliases, react_treeshake_options, sanitize_filename, RscBuildContext,
 };
@@ -84,7 +84,12 @@ pub async fn build_rsc_client_bundles(
                 .to_string_lossy()
                 .replace('\\', "/");
 
-            let stub_source = generate_server_action_stub(&rel_path, &module.exports, ctx.build_id);
+            let stub_source = generate_server_action_stub(
+                &rel_path,
+                &module.exports,
+                ctx.build_id,
+                ctx.precomputed_ids,
+            );
             let stub_name = sanitize_filename(&rel_path);
             let stub_path = sa_stubs_dir.join(format!("{stub_name}.js"));
             fs::write(&stub_path, &stub_source)?;
@@ -237,7 +242,7 @@ fn collect_output_chunks(
                         if let Some((rel_path, exports)) = boundary_lookup.get(&name) {
                             let chunk_url = format!("/_rex/static/rsc/{filename}");
                             for export in *exports {
-                                let ref_id = client_reference_id(rel_path, export, ctx.build_id);
+                                let ref_id = ctx.resolve_client_ref_id(rel_path, export);
                                 client_manifest.add(&ref_id, chunk_url.clone(), export.clone());
                             }
                         }
