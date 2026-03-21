@@ -255,54 +255,110 @@ pub async fn handle_file_event(
                 None
             };
 
-            // Update hot state atomically with new Arc
-            let manifest_json =
-                HotState::compute_manifest_json(&build_result.build_id, &build_result.manifest);
-            let mut hot_guard = state
-                .hot
-                .write()
-                .map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
-            *hot_guard = Arc::new(HotState {
-                has_middleware: scan.middleware.is_some(),
-                middleware_matchers: build_result.manifest.middleware_matchers.clone(),
-                manifest: build_result.manifest,
-                build_id: build_result.build_id,
-                manifest_json,
-                document_descriptor,
-                has_mcp_tools: !scan.mcp_tools.is_empty(),
-                // Dev mode: no pre-rendering (always dynamic for fast iteration)
-                prerendered: std::collections::HashMap::new(),
-                prerendered_app: std::collections::HashMap::new(),
-                // Rebuild pages router tries when scan was refreshed (new page added)
-                route_trie: if scan_skipped {
-                    old_hot.route_trie.clone()
+            // Update hot state atomically with new Arc.
+            // Scoped block ensures write guard is dropped before async ESM reload.
+            let (new_build_id, new_client_manifest, new_ssr_bundle_path) = {
+                let manifest_json =
+                    HotState::compute_manifest_json(&build_result.build_id, &build_result.manifest);
+                let new_build_id = build_result.build_id.clone();
+                let new_client_manifest = build_result.manifest.client_reference_manifest.clone();
+                let new_ssr_bundle_path = build_result.manifest.rsc_ssr_bundle.clone();
+                let mut hot_guard = state
+                    .hot
+                    .write()
+                    .map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
+                *hot_guard = Arc::new(HotState {
+                    has_middleware: scan.middleware.is_some(),
+                    middleware_matchers: build_result.manifest.middleware_matchers.clone(),
+                    manifest: build_result.manifest,
+                    build_id: build_result.build_id,
+                    manifest_json,
+                    document_descriptor,
+                    has_mcp_tools: !scan.mcp_tools.is_empty(),
+                    // Dev mode: no pre-rendering (always dynamic for fast iteration)
+                    prerendered: std::collections::HashMap::new(),
+                    prerendered_app: std::collections::HashMap::new(),
+                    // Rebuild pages router tries when scan was refreshed (new page added)
+                    route_trie: if scan_skipped {
+                        old_hot.route_trie.clone()
+                    } else {
+                        RouteTrie::from_routes(&scan.routes)
+                    },
+                    api_route_trie: if scan_skipped {
+                        old_hot.api_route_trie.clone()
+                    } else {
+                        RouteTrie::from_routes(&scan.api_routes)
+                    },
+                    has_custom_404: if scan_skipped {
+                        old_hot.has_custom_404
+                    } else {
+                        scan.not_found.is_some()
+                    },
+                    has_custom_error: if scan_skipped {
+                        old_hot.has_custom_error
+                    } else {
+                        scan.error.is_some()
+                    },
+                    has_custom_document: if scan_skipped {
+                        old_hot.has_custom_document
+                    } else {
+                        scan.document.is_some()
+                    },
+                    project_config: old_hot.project_config.clone(),
+                    app_route_trie,
+                    app_api_route_trie,
+                });
+
+                (new_build_id, new_client_manifest, new_ssr_bundle_path)
+            }; // hot_guard dropped here
+
+            // In ESM mode, a full rebuild changes the build_id (new client chunks).
+            // The ESM modules must be reloaded so __rex_webpack_bundler_config uses
+            // the new ref IDs matching the new SSR bundle and client module map.
+            if state.esm.is_some() {
+                let esm_scan = if let Some(app_scan) = &scan.app_scan {
+                    match rex_build::mdx::process_mdx_app_pages(
+                        app_scan,
+                        &config.server_build_dir(),
+                        &config.project_root,
+                    ) {
+                        Ok(processed) => {
+                            let mut s = scan.clone();
+                            s.app_scan = Some(processed);
+                            s
+                        }
+                        Err(_) => scan.clone(),
+                    }
                 } else {
-                    RouteTrie::from_routes(&scan.routes)
-                },
-                api_route_trie: if scan_skipped {
-                    old_hot.api_route_trie.clone()
-                } else {
-                    RouteTrie::from_routes(&scan.api_routes)
-                },
-                has_custom_404: if scan_skipped {
-                    old_hot.has_custom_404
-                } else {
-                    scan.not_found.is_some()
-                },
-                has_custom_error: if scan_skipped {
-                    old_hot.has_custom_error
-                } else {
-                    scan.error.is_some()
-                },
-                has_custom_document: if scan_skipped {
-                    old_hot.has_custom_document
-                } else {
-                    scan.document.is_some()
-                },
-                project_config: old_hot.project_config.clone(),
-                app_route_trie,
-                app_api_route_trie,
-            });
+                    scan.clone()
+                };
+
+                let esm_state = rex_server::startup::esm_load_modules(
+                    config,
+                    &esm_scan,
+                    &new_build_id,
+                    &state.isolate_pool,
+                    new_client_manifest.as_ref(),
+                )
+                .await?;
+
+                // Reload SSR bundle into V8
+                if let Some(ssr_path) = &new_ssr_bundle_path {
+                    if let Ok(ssr_js) = std::fs::read_to_string(ssr_path) {
+                        state
+                            .isolate_pool
+                            .eval_script_all(Arc::new(ssr_js), "rsc-ssr-bundle.js")
+                            .await?;
+                    }
+                }
+
+                if let Some(esm_lock) = &state.esm {
+                    if let Ok(mut guard) = esm_lock.write() {
+                        *guard = esm_state;
+                    }
+                }
+                debug!("ESM modules reloaded after full rebuild");
+            }
 
             // Notify HMR clients with the new manifest
             let rel_path = event
