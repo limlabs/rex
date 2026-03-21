@@ -2,7 +2,6 @@ use crate::hmr::HmrBroadcast;
 use crate::watcher::{FileEvent, FileEventKind};
 use anyhow::Result;
 use rex_build::build_bundles;
-use rex_build::bundler::BuildResult;
 use rex_core::RexConfig;
 use rex_router::{scan_project, RouteTrie, ScanResult};
 use rex_server::handlers;
@@ -77,20 +76,57 @@ fn scan_contains_path(scan: &ScanResult, path: &Path) -> bool {
     false
 }
 
-/// Read the server bundle from disk, appending RSC bundles if present.
-fn read_server_bundle(build_result: &BuildResult) -> Result<Arc<String>> {
-    let mut bundle_js = std::fs::read_to_string(&build_result.server_bundle_path)?;
-    if let Some(rsc_path) = &build_result.manifest.rsc_server_bundle {
-        let rsc_bundle = std::fs::read_to_string(rsc_path)?;
-        bundle_js.push_str("\n;\n");
-        bundle_js.push_str(&rsc_bundle);
+/// Reload ESM modules and SSR bundle after a full rebuild.
+async fn reload_esm_modules(
+    state: &Arc<AppState>,
+    config: &RexConfig,
+    scan: &ScanResult,
+    build_id: &str,
+    client_manifest: Option<&rex_core::client_manifest::ClientReferenceManifest>,
+    ssr_bundle_path: &Option<String>,
+) -> Result<()> {
+    let esm_scan = if let Some(app_scan) = &scan.app_scan {
+        match rex_build::mdx::process_mdx_app_pages(
+            app_scan,
+            &config.server_build_dir(),
+            &config.project_root,
+        ) {
+            Ok(processed) => {
+                let mut s = scan.clone();
+                s.app_scan = Some(processed);
+                s
+            }
+            Err(_) => scan.clone(),
+        }
+    } else {
+        scan.clone()
+    };
+
+    let esm_state = rex_server::startup::esm_load_modules(
+        config,
+        &esm_scan,
+        build_id,
+        &state.isolate_pool,
+        client_manifest,
+    )
+    .await?;
+
+    if let Some(ssr_path) = ssr_bundle_path {
+        if let Ok(ssr_js) = std::fs::read_to_string(ssr_path) {
+            state
+                .isolate_pool
+                .eval_script_all(Arc::new(ssr_js), "rsc-ssr-bundle.js")
+                .await?;
+        }
     }
-    if let Some(ssr_path) = &build_result.manifest.rsc_ssr_bundle {
-        let ssr_bundle = std::fs::read_to_string(ssr_path)?;
-        bundle_js.push_str("\n;\n");
-        bundle_js.push_str(&ssr_bundle);
+
+    if let Some(esm_lock) = &state.esm {
+        if let Ok(mut guard) = esm_lock.write() {
+            *guard = esm_state;
+        }
     }
-    Ok(Arc::new(bundle_js))
+    debug!("ESM modules reloaded after rebuild");
+    Ok(())
 }
 
 /// Handle a file change event: rebuild, reload isolates, update state, notify HMR clients
@@ -179,12 +215,6 @@ pub async fn handle_file_event(
             let build_result = build_bundles(config, &scan, &project_config).await?;
             let t_bundle = t0.elapsed();
 
-            let bundle_arc = read_server_bundle(&build_result)?;
-
-            // Lazy reload: mark isolates stale instead of synchronous reload_all
-            state.isolate_pool.mark_stale(bundle_arc);
-            let t_reload = t0.elapsed();
-
             info!(
                 scan_ms = if scan_skipped {
                     0
@@ -192,9 +222,7 @@ pub async fn handle_file_event(
                     t_scan.as_millis() as u64
                 },
                 bundle_ms = (t_bundle - t_scan).as_millis(),
-                v8_reload = "lazy",
-                v8_mark_ms = (t_reload - t_bundle).as_millis(),
-                total_ms = t_reload.as_millis(),
+                total_ms = t_bundle.as_millis(),
                 scan_skipped,
                 "Rebuild complete"
             );
@@ -312,53 +340,16 @@ pub async fn handle_file_event(
                 (new_build_id, new_client_manifest, new_ssr_bundle_path)
             }; // hot_guard dropped here
 
-            // In ESM mode, a full rebuild changes the build_id (new client chunks).
-            // The ESM modules must be reloaded so __rex_webpack_bundler_config uses
-            // the new ref IDs matching the new SSR bundle and client module map.
-            if state.esm.is_some() {
-                let esm_scan = if let Some(app_scan) = &scan.app_scan {
-                    match rex_build::mdx::process_mdx_app_pages(
-                        app_scan,
-                        &config.server_build_dir(),
-                        &config.project_root,
-                    ) {
-                        Ok(processed) => {
-                            let mut s = scan.clone();
-                            s.app_scan = Some(processed);
-                            s
-                        }
-                        Err(_) => scan.clone(),
-                    }
-                } else {
-                    scan.clone()
-                };
-
-                let esm_state = rex_server::startup::esm_load_modules(
-                    config,
-                    &esm_scan,
-                    &new_build_id,
-                    &state.isolate_pool,
-                    new_client_manifest.as_ref(),
-                )
-                .await?;
-
-                // Reload SSR bundle into V8
-                if let Some(ssr_path) = &new_ssr_bundle_path {
-                    if let Ok(ssr_js) = std::fs::read_to_string(ssr_path) {
-                        state
-                            .isolate_pool
-                            .eval_script_all(Arc::new(ssr_js), "rsc-ssr-bundle.js")
-                            .await?;
-                    }
-                }
-
-                if let Some(esm_lock) = &state.esm {
-                    if let Ok(mut guard) = esm_lock.write() {
-                        *guard = esm_state;
-                    }
-                }
-                debug!("ESM modules reloaded after full rebuild");
-            }
+            // Reload ESM modules with new build's manifest and SSR bundle.
+            reload_esm_modules(
+                state,
+                config,
+                &scan,
+                &new_build_id,
+                new_client_manifest.as_ref(),
+                &new_ssr_bundle_path,
+            )
+            .await?;
 
             // Notify HMR clients with the new manifest
             let rel_path = event
@@ -385,10 +376,6 @@ pub async fn handle_file_event(
             };
 
             let build_result = build_bundles(config, &scan, &project_config).await?;
-
-            let bundle_arc = read_server_bundle(&build_result)?;
-
-            state.isolate_pool.reload_all(bundle_arc).await?;
 
             // Snapshot old state for project_config
             let old_hot = {
@@ -424,35 +411,48 @@ pub async fn handle_file_event(
             let manifest_json =
                 HotState::compute_manifest_json(&build_result.build_id, &build_result.manifest);
 
-            // Update all hot state atomically with new Arc
-            let mut hot_guard = state
-                .hot
-                .write()
-                .map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
-            *hot_guard = Arc::new(HotState {
-                route_trie: RouteTrie::from_routes(&scan.routes),
-                api_route_trie: RouteTrie::from_routes(&scan.api_routes),
-                has_middleware: scan.middleware.is_some(),
-                middleware_matchers: build_result.manifest.middleware_matchers.clone(),
-                manifest: build_result.manifest,
-                build_id: build_result.build_id,
-                has_custom_404: scan.not_found.is_some(),
-                has_custom_error: scan.error.is_some(),
-                has_custom_document,
-                project_config: old_hot.project_config.clone(),
-                manifest_json,
-                document_descriptor,
-                app_route_trie,
-                app_api_route_trie,
-                has_mcp_tools: !scan.mcp_tools.is_empty(),
-                // Dev mode: no pre-rendering
-                prerendered: std::collections::HashMap::new(),
-                prerendered_app: std::collections::HashMap::new(),
-            });
+            let (new_build_id, new_client_manifest, new_ssr_bundle_path) = {
+                let mut hot_guard = state
+                    .hot
+                    .write()
+                    .map_err(|e| anyhow::anyhow!("HotState lock poisoned: {e}"))?;
+                let bid = build_result.build_id.clone();
+                let cm = build_result.manifest.client_reference_manifest.clone();
+                let ssr = build_result.manifest.rsc_ssr_bundle.clone();
+                *hot_guard = Arc::new(HotState {
+                    route_trie: RouteTrie::from_routes(&scan.routes),
+                    api_route_trie: RouteTrie::from_routes(&scan.api_routes),
+                    has_middleware: scan.middleware.is_some(),
+                    middleware_matchers: build_result.manifest.middleware_matchers.clone(),
+                    manifest: build_result.manifest,
+                    build_id: build_result.build_id,
+                    has_custom_404: scan.not_found.is_some(),
+                    has_custom_error: scan.error.is_some(),
+                    has_custom_document,
+                    project_config: old_hot.project_config.clone(),
+                    manifest_json,
+                    document_descriptor,
+                    app_route_trie,
+                    app_api_route_trie,
+                    has_mcp_tools: !scan.mcp_tools.is_empty(),
+                    prerendered: std::collections::HashMap::new(),
+                    prerendered_app: std::collections::HashMap::new(),
+                });
+                (bid, cm, ssr)
+            };
 
-            // Signal full reload to clients
+            // Reload ESM modules with new build
+            reload_esm_modules(
+                state,
+                config,
+                &scan,
+                &new_build_id,
+                new_client_manifest.as_ref(),
+                &new_ssr_bundle_path,
+            )
+            .await?;
+
             hmr.send_full_reload();
-
             debug!("Full rebuild complete (route added/removed)");
         }
     }
@@ -616,44 +616,5 @@ mod tests {
         assert!(scan_contains_path(&scan, Path::new("/app/layout.tsx")));
         // Unknown path
         assert!(!scan_contains_path(&scan, Path::new("/app/unknown.tsx")));
-    }
-
-    #[test]
-    fn read_server_bundle_reads_basic_bundle() {
-        use rex_core::AssetManifest;
-        let dir = tempfile::tempdir().unwrap();
-        let bundle_path = dir.path().join("server-bundle.js");
-        std::fs::write(&bundle_path, "var x = 1;").unwrap();
-        let build_result = BuildResult {
-            build_id: "test".into(),
-            manifest: AssetManifest::new("test".into()),
-            server_bundle_path: bundle_path,
-        };
-        let result = read_server_bundle(&build_result).unwrap();
-        assert_eq!(&*result, "var x = 1;");
-    }
-
-    #[test]
-    fn read_server_bundle_appends_rsc_bundles() {
-        use rex_core::AssetManifest;
-        let dir = tempfile::tempdir().unwrap();
-        let bundle_path = dir.path().join("server-bundle.js");
-        let rsc_path = dir.path().join("rsc-server.js");
-        let ssr_path = dir.path().join("rsc-ssr.js");
-        std::fs::write(&bundle_path, "var x = 1;").unwrap();
-        std::fs::write(&rsc_path, "var rsc = 2;").unwrap();
-        std::fs::write(&ssr_path, "var ssr = 3;").unwrap();
-        let mut manifest = AssetManifest::new("test".into());
-        manifest.rsc_server_bundle = Some(rsc_path.to_string_lossy().into());
-        manifest.rsc_ssr_bundle = Some(ssr_path.to_string_lossy().into());
-        let build_result = BuildResult {
-            build_id: "test".into(),
-            manifest,
-            server_bundle_path: bundle_path,
-        };
-        let result = read_server_bundle(&build_result).unwrap();
-        assert!(result.contains("var x = 1;"));
-        assert!(result.contains("var rsc = 2;"));
-        assert!(result.contains("var ssr = 3;"));
     }
 }
