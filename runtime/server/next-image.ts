@@ -4,12 +4,23 @@ import { createElement, type ReactElement } from "react";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+function resolveUrl(src: string, w: number, q: number): string {
+    if (!src) return '';
+    // SVGs are vector — serve directly, skip raster optimizer
+    if (src.endsWith('.svg')) return src;
+    return '/_rex/image?url=' + encodeURIComponent(src) + '&w=' + w + '&q=' + q;
+}
+
 function Image(props: any): ReactElement {
-    const src = props.src;
-    const srcStr = typeof src === 'string' ? src
-        : (src && typeof src === 'object' && src.src) ? src.src
-        : (src && typeof src === 'object' && src.default && typeof src.default === 'string') ? src.default
+    const rawSrc = props.src;
+    const srcStr = typeof rawSrc === 'string' ? rawSrc
+        : (rawSrc && typeof rawSrc === 'object' && rawSrc.src) ? rawSrc.src
+        : (rawSrc && typeof rawSrc === 'object' && rawSrc.default && typeof rawSrc.default === 'string') ? rawSrc.default
         : '';
+
+    const quality = props.quality || 75;
+    const width = props.width || (props.fill ? 1920 : 0);
+    const resolvedSrc = resolveUrl(srcStr, width || 1920, quality);
 
     const imgProps: Record<string, any> = {
         alt: props.alt || '',
@@ -17,8 +28,7 @@ function Image(props: any): ReactElement {
         decoding: 'async',
     };
 
-    // Only set src if we have a non-empty URL
-    if (srcStr) imgProps.src = srcStr;
+    if (resolvedSrc) imgProps.src = resolvedSrc;
 
     if (props.fill) {
         imgProps.style = {

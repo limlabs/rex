@@ -75,11 +75,18 @@ pub async fn image_handler(
     }
 
     // Determine base directory: /_rex/static/ URLs map to the build client dir,
-    // everything else maps to public/
+    // everything else checks public/ first, then project root (for static imports).
     let (base_dir, rel_path) = if let Some(rest) = url_path.strip_prefix("_rex/static/") {
         (state.project_root.join(".rex/build/client"), rest)
     } else {
-        (state.project_root.join("public"), url_path)
+        let public_path = state.project_root.join("public").join(url_path);
+        if public_path.exists() {
+            (state.project_root.join("public"), url_path)
+        } else {
+            // Fallback to project root for source-relative paths (e.g., static
+            // asset imports like `import bg from './bg.png'` produce src-relative URLs).
+            (state.project_root.clone(), url_path)
+        }
     };
 
     let file_path = base_dir.join(rel_path);
