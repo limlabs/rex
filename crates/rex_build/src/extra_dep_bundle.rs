@@ -86,9 +86,6 @@ fn build_config(config: &RexConfig) -> Result<DepBundleConfig> {
             "node_modules/@aws-sdk/".to_string(),
             "node_modules/@smithy/".to_string(),
             "node_modules/pg-native/".to_string(),
-            "node_modules/pg/".to_string(),
-            "node_modules/pg-pool/".to_string(),
-            "node_modules/pg-cloudflare/".to_string(),
             "node_modules/@node-rs/".to_string(),
             "node_modules/undici/".to_string(),
         ]));
@@ -211,7 +208,7 @@ pub async fn build_extra_deps_multi_entry(
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(bc.aliases),
             condition_names: Some(
-                ["default", "import", "module"]
+                ["import", "module", "default"]
                     .iter()
                     .map(|s| s.to_string())
                     .collect(),
@@ -265,7 +262,15 @@ pub async fn build_extra_deps_multi_entry(
                 continue;
             }
 
-            let content = std::fs::read_to_string(&path)?;
+            let mut content = std::fs::read_to_string(&path)?;
+
+            // Patch rolldown's __toCommonJS helper to properly handle CJS→ESM interop.
+            // The default helper returns { __esModule: true, default: Class, ... } when
+            // CJS code require()s an ESM module. CJS consumers expect the raw value, not
+            // a namespace wrapper. The patch unwraps the default export when the module
+            // only has a default (matching Node.js CJS interop behavior).
+            content = patch_to_common_js(content);
+
             let path_specifier = format!("/_rex_deps/{filename}");
 
             debug!(
@@ -289,4 +294,30 @@ pub async fn build_extra_deps_multi_entry(
 
     let _ = std::fs::remove_dir_all(&output_dir);
     Ok(ExtraDepBundleResult { modules, aliases })
+}
+
+/// Patch rolldown's `__toCommonJS` runtime helper for proper CJS→ESM interop.
+///
+/// Rolldown's default `__toCommonJS` wraps an ESM namespace into
+/// `{ __esModule: true, default: Value, ... }`. When CJS code does
+/// `const Foo = require('esm-pkg')`, it gets this wrapper object instead
+/// of the actual value — breaking `class Bar extends Foo`.
+///
+/// The patched version checks if the namespace only has a `default` export
+/// and returns it directly, matching Node.js CJS interop behavior.
+fn patch_to_common_js(content: String) -> String {
+    const ORIGINAL: &str = "var __toCommonJS = (mod) => __hasOwnProp.call(mod, \"module.exports\") ? mod[\"module.exports\"] : __copyProps(__defProp({}, \"__esModule\", { value: true }), mod);";
+
+    const PATCHED: &str = "var __toCommonJS = (mod) => { \
+        if (__hasOwnProp.call(mod, \"module.exports\")) return mod[\"module.exports\"]; \
+        var keys = __getOwnPropNames(mod).filter(function(k) { return k !== '__esModule' && k !== Symbol.toStringTag; }); \
+        if (keys.length === 1 && keys[0] === 'default') return mod['default']; \
+        return __copyProps(__defProp({}, \"__esModule\", { value: true }), mod); \
+    };";
+
+    if content.contains(ORIGINAL) {
+        content.replacen(ORIGINAL, PATCHED, 1)
+    } else {
+        content
+    }
 }
