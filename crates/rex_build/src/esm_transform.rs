@@ -40,11 +40,8 @@ pub struct ClientBoundary {
 /// An extracted inline server action from a source file.
 #[derive(Debug, Clone)]
 pub struct ExtractedServerAction {
-    /// Relative path of the source file (from project root).
     pub rel_path: String,
-    /// Generated function name (e.g., `__rex_action_0`).
     pub action_name: String,
-    /// Stable action ID (SHA-256 based).
     pub action_id: String,
 }
 
@@ -127,6 +124,10 @@ fn collect_source_modules_inner(
     known_dep_specifiers: &HashSet<String>,
     build_id: Option<&str>,
 ) -> Result<CollectedModules> {
+    // Canonicalize to match IIFE build's path resolution for client ref $$id hashes.
+    let canonical_root = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
     let mut source_modules = Vec::new();
     let mut dep_imports: HashMap<String, DepImport> = HashMap::new();
     let mut client_boundaries: Vec<ClientBoundary> = Vec::new();
@@ -154,9 +155,10 @@ fn collect_source_modules_inner(
                 if let Ok(source) = std::fs::read_to_string(&path) {
                     let source_type = source_type_from_filename(&filename);
                     if crate::rsc_graph::has_use_client_directive(&source, source_type) {
-                        let rel_path = path
-                            .strip_prefix(project_root)
-                            .unwrap_or(&path)
+                        let canon_path = path.canonicalize().unwrap_or_else(|_| path.clone());
+                        let rel_path = canon_path
+                            .strip_prefix(&canonical_root)
+                            .unwrap_or(&canon_path)
                             .to_string_lossy()
                             .to_string();
                         let exports = extract_export_names(&source, &filename);
@@ -225,9 +227,10 @@ fn collect_source_modules_inner(
         if let Some(bid) = build_id {
             let source_type = source_type_from_filename(&oxc_filename);
             if crate::rsc_graph::has_use_client_directive(&source, source_type) {
-                let rel_path = path
-                    .strip_prefix(project_root)
-                    .unwrap_or(&path)
+                let canon_path = path.canonicalize().unwrap_or_else(|_| path.clone());
+                let rel_path = canon_path
+                    .strip_prefix(&canonical_root)
+                    .unwrap_or(&canon_path)
                     .to_string_lossy()
                     .to_string();
                 let exports = extract_export_names(&source, &oxc_filename);
@@ -259,7 +262,6 @@ fn collect_source_modules_inner(
         let (local_imports, bare_imports) =
             extract_and_resolve_imports(&source, &path, project_root, known_dep_specifiers);
 
-        // Build import resolution map (original specifier → absolute path)
         let mut import_map: HashMap<String, String> = HashMap::new();
         for (imp_specifier, resolved_path) in &local_imports {
             import_map.insert(
@@ -267,8 +269,6 @@ fn collect_source_modules_inner(
                 resolved_path.to_string_lossy().to_string(),
             );
         }
-
-        // Track bare specifier imports for extra dep IIFE
         for (imp_specifier, named, has_default) in &bare_imports {
             if known_dep_specifiers.contains(imp_specifier.as_str()) {
                 continue;

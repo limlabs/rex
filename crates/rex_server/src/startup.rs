@@ -130,7 +130,17 @@ pub async fn esm_load_modules(
         // which also comes from the IIFE build. Without this, path canonicalization
         // differences cause mismatched IDs and "module not found" errors in SSR.
         let webpack_config = if let Some(manifest) = client_manifest {
-            serde_json::to_string(&manifest.to_server_webpack_config()).unwrap_or_default()
+            let config = manifest.to_server_webpack_config();
+            let keys: Vec<&String> = config
+                .as_object()
+                .map(|o| o.keys().collect())
+                .unwrap_or_default();
+            debug!(
+                count = keys.len(),
+                sample = ?keys.iter().take(3).collect::<Vec<_>>(),
+                "ESM: using IIFE client manifest for webpack bundler config"
+            );
+            serde_json::to_string(&config).unwrap_or_default()
         } else {
             // Fallback: compute from ESM-discovered boundaries (no IIFE build available)
             let mut config = serde_json::Map::new();
