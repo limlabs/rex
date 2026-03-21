@@ -154,7 +154,7 @@ impl Rex {
                 build_id,
                 static_dir,
                 project_config,
-                None, // ESM state set during lazy init
+                Some(EsmState::empty()), // Populated during lazy init
                 opts.port,
                 opts.host,
                 Some(lazy_ctx),

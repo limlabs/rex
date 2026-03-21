@@ -16,10 +16,17 @@ use tracing::debug;
 pub async fn try_esm_fast_path(state: &Arc<AppState>, changed_path: &Path) -> Result<bool> {
     let esm_lock = match &state.esm {
         Some(lock) => lock,
-        None => return Ok(false),
+        None => {
+            tracing::info!("ESM fast path: state.esm is None");
+            return Ok(false);
+        }
     };
 
-    let changed_specifier = changed_path.to_string_lossy().to_string();
+    let changed_specifier = changed_path
+        .canonicalize()
+        .unwrap_or_else(|_| changed_path.to_path_buf())
+        .to_string_lossy()
+        .to_string();
 
     // Read and transform the changed file, rewriting relative imports to absolute paths
     let source = match std::fs::read_to_string(changed_path) {
@@ -65,7 +72,19 @@ pub async fn try_esm_fast_path(state: &Arc<AppState>, changed_path: &Path) -> Re
         }
 
         if !found {
-            debug!("File not in ESM module list, falling back to full rebuild");
+            // Log the specifier we searched for and a sample of what's in the list
+            let sample: Vec<&str> = esm
+                .source_modules
+                .iter()
+                .take(3)
+                .map(|m| m.specifier.as_str())
+                .collect();
+            tracing::info!(
+                changed = %changed_specifier,
+                sample = ?sample,
+                total = esm.source_modules.len(),
+                "ESM fast path: file not in module list, falling back to full rebuild"
+            );
             return Ok(false);
         }
 

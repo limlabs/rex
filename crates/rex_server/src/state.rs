@@ -69,6 +69,18 @@ pub struct EsmState {
     pub dep_aliases: Arc<Vec<(String, String)>>,
 }
 
+impl EsmState {
+    pub fn empty() -> Self {
+        Self {
+            dep_modules: Arc::new(Vec::new()),
+            source_modules: Vec::new(),
+            entry_specifier: String::new(),
+            entry_source: String::new(),
+            dep_aliases: Arc::new(Vec::new()),
+        }
+    }
+}
+
 /// Context for lazy initialization on first request (dev mode only).
 #[derive(Clone)]
 pub struct LazyInitContext {

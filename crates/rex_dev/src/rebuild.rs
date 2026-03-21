@@ -137,7 +137,7 @@ pub async fn handle_file_event(
     hmr: &HmrBroadcast,
     last_scan: &mut Option<ScanResult>,
 ) -> Result<()> {
-    debug!(path = %event.path.display(), kind = ?event.kind, "Processing file change");
+    info!(path = %event.path.display(), kind = ?event.kind, "Processing file change");
 
     match event.kind {
         FileEventKind::PageModified
