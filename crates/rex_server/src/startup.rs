@@ -38,19 +38,20 @@ pub async fn esm_startup(
         Arc::new(STUB_FUNCTIONS.to_string()),
         Some(Arc::new(project_root_str.to_string())),
     )?;
-    let esm_state = esm_load_modules(config, scan, build_id, &pool).await?;
+    let esm_state = esm_load_modules(config, scan, build_id, &pool, None).await?;
     Ok((pool, esm_state))
 }
 
 /// Load ESM modules into an existing isolate pool.
 ///
-/// Builds dep ESM modules, transforms source files, generates entry,
-/// and loads everything into the pool's V8 isolates.
+/// `client_manifest` should be provided for app-router projects — it's the
+/// manifest from the IIFE build, ensuring ref IDs match the SSR bundle.
 pub async fn esm_load_modules(
     config: &RexConfig,
     scan: &ScanResult,
     build_id: &str,
     pool: &IsolatePool,
+    client_manifest: Option<&rex_core::client_manifest::ClientReferenceManifest>,
 ) -> Result<EsmState> {
     use rex_build::esm_transform;
     use rex_build::server_bundle::SSR_RUNTIME;
@@ -124,26 +125,23 @@ pub async fn esm_load_modules(
     // Generate entry source
     let entry_specifier = "rex://entry".to_string();
     let entry_source = if let Some(app_scan) = &scan.app_scan {
-        // Build webpack config from ESM-discovered client boundaries (not the IIFE
-        // manifest, which may use different path resolution and produce mismatched IDs).
-        let webpack_config = {
+        // Use the IIFE build's client manifest for the webpack bundler config.
+        // This ensures ref IDs match the SSR bundle's __rex_webpack_ssr_manifest,
+        // which also comes from the IIFE build. Without this, path canonicalization
+        // differences cause mismatched IDs and "module not found" errors in SSR.
+        let webpack_config = if let Some(manifest) = client_manifest {
+            serde_json::to_string(&manifest.to_server_webpack_config()).unwrap_or_default()
+        } else {
+            // Fallback: compute from ESM-discovered boundaries (no IIFE build available)
             let mut config = serde_json::Map::new();
             for boundary in &collected.client_boundaries {
                 for (export, ref_id) in boundary.exports.iter().zip(boundary.ref_ids.iter()) {
                     config.insert(
                         ref_id.clone(),
-                        serde_json::json!({
-                            "id": ref_id,
-                            "name": export,
-                            "chunks": []
-                        }),
+                        serde_json::json!({ "id": ref_id, "name": export, "chunks": [] }),
                     );
                 }
             }
-            debug!(
-                manifest_keys = ?config.keys().collect::<Vec<_>>(),
-                "Webpack bundler config for RSC (from ESM stubs)"
-            );
             serde_json::to_string(&serde_json::Value::Object(config)).unwrap_or_default()
         };
 

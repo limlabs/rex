@@ -152,6 +152,7 @@ impl AppState {
                     &esm_scan,
                     &ctx.build_id,
                     &state.isolate_pool,
+                    build_result.manifest.client_reference_manifest.as_ref(),
                 )
                 .await?;
 
