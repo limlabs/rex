@@ -52,19 +52,15 @@ pub struct ExtractedServerAction {
 pub struct CollectedModules {
     /// Source modules (local files), OXC-transformed to valid ESM JS.
     pub source_modules: Vec<EsmSourceModule>,
-    /// Bare specifier imports (node_modules deps) discovered during the walk.
-    /// Does NOT include deps already covered by the dep IIFE (React, etc.).
+    /// Bare specifier imports (node_modules deps) not covered by the dep IIFE.
     pub extra_dep_imports: Vec<DepImport>,
-    /// Client boundaries discovered during the walk (only populated when
-    /// `collect_source_modules_with_stubs` is used).
+    /// Client boundaries discovered during the walk (app router only).
     pub client_boundaries: Vec<ClientBoundary>,
-    /// Inline server actions extracted from source files (only populated for
-    /// app router with build_id).
+    /// Inline server actions extracted from source files (app router only).
     pub extracted_actions: Vec<ExtractedServerAction>,
 }
 
-/// Transform a source file for HMR: strip TS/JSX and rewrite relative imports
-/// to absolute paths so V8's ESM module registry can resolve them.
+/// Transform a source file for HMR: strip TS/JSX and rewrite relative imports to absolute paths.
 pub fn transform_and_rewrite_imports(
     source: &str,
     file_path: &Path,
@@ -72,12 +68,8 @@ pub fn transform_and_rewrite_imports(
     known_dep_specifiers: &HashSet<String>,
 ) -> Result<String> {
     let filename = file_path.to_string_lossy().to_string();
-
-    // Extract and resolve imports
     let (local_imports, _bare_imports) =
         extract_and_resolve_imports(source, file_path, project_root, known_dep_specifiers);
-
-    // Build import map (original specifier → absolute path)
     let mut import_map: HashMap<String, String> = HashMap::new();
     for (specifier, resolved_path) in &local_imports {
         import_map.insert(
@@ -85,7 +77,6 @@ pub fn transform_and_rewrite_imports(
             resolved_path.to_string_lossy().to_string(),
         );
     }
-
     let transformed = transform_to_esm(source, &filename)?;
     Ok(rewrite_imports_to_absolute(&transformed, &import_map))
 }
@@ -112,8 +103,6 @@ pub fn transform_to_esm(source: &str, filename: &str) -> Result<String> {
 }
 
 /// Collect all source modules by walking the import graph from entry files.
-/// Resolves relative imports, OXC-transforms sources, rewrites specifiers to
-/// absolute paths, and collects bare-specifier deps for extra bundling.
 pub fn collect_source_modules(
     entries: &[PathBuf],
     project_root: &Path,
@@ -196,21 +185,27 @@ fn collect_source_modules_inner(
             continue;
         }
 
-        // Asset files (CSS, images, etc.) get registered as empty modules
-        // so V8 can resolve `import '../styles/globals.css'` without errors.
+        // Asset stubs: images export { src: "/path" } for next/image, others export {}.
         if is_asset_file(&path) {
+            let source = if is_image_asset(&path) {
+                let rel = path.strip_prefix(project_root).unwrap_or(&path);
+                format!(
+                    "export default {{ src: \"/{}\" }};",
+                    rel.to_string_lossy().replace('\\', "/")
+                )
+            } else {
+                "export default {};".to_string()
+            };
             source_modules.push(EsmSourceModule {
                 specifier: path.to_string_lossy().to_string(),
-                source: "export default {};".to_string(),
+                source,
             });
             continue;
         }
 
-        // The specifier is always the original path (V8 resolves imports by path).
         let specifier = path.to_string_lossy().to_string();
 
-        // MDX files need compilation before OXC transform.
-        // Compile MDX → JSX, absolutize relative imports, then treat as JSX.
+        // MDX → JSX compilation before OXC transform.
         let (mut source, oxc_filename) = if is_mdx_file(&path) {
             let raw = std::fs::read_to_string(&path)
                 .with_context(|| format!("Failed to read {}", path.display()))?;
@@ -219,7 +214,6 @@ fn collect_source_modules_inner(
                 .with_context(|| format!("Failed to compile MDX: {}", path.display()))?;
             let source_dir = path.parent().unwrap_or(Path::new("."));
             let compiled = crate::css_modules::absolutize_relative_imports(&compiled, source_dir);
-            // Use a .jsx filename so OXC knows to parse JSX syntax
             let jsx_name = path.with_extension("jsx").to_string_lossy().to_string();
             (compiled, jsx_name)
         } else {
@@ -228,7 +222,6 @@ fn collect_source_modules_inner(
             (raw, specifier.clone())
         };
 
-        // Check for "use client" directive — generate stub and stop walking imports
         if let Some(bid) = build_id {
             let source_type = source_type_from_filename(&oxc_filename);
             if crate::rsc_graph::has_use_client_directive(&source, source_type) {
@@ -550,6 +543,15 @@ fn is_asset_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|ext| ASSET_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+}
+
+fn is_image_asset(path: &Path) -> bool {
+    const EXTS: &[&str] = &[
+        "png", "jpg", "jpeg", "gif", "webp", "ico", "avif", "bmp", "tiff", "svg",
+    ];
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| EXTS.contains(&ext.to_lowercase().as_str()))
 }
 
 fn is_mdx_file(path: &Path) -> bool {
