@@ -58,25 +58,9 @@ impl TailwindProcess {
             let stem = css_path.file_stem().unwrap_or_default().to_string_lossy();
             let tw_output = output_dir.join(format!("{stem}.tailwind.css"));
 
-            // One-shot initial build
-            let status = Command::new(&tw_bin)
-                .arg("-i")
-                .arg(css_path)
-                .arg("-o")
-                .arg(&tw_output)
-                .arg("--minify")
-                .current_dir(&config.project_root)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()?;
-
-            if !status.success() {
-                anyhow::bail!(
-                    "Initial tailwindcss build failed for {}",
-                    css_path.display()
-                );
-            }
-
+            // Skip one-shot build — the --watch process does its own initial
+            // compilation, and build_bundles_with_id() handles tailwind CSS
+            // separately via process_tailwind_css() during lazy init.
             mappings.insert(css_path.clone(), tw_output.clone());
 
             // Start --watch for the first file (Tailwind watches all content sources)
