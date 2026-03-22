@@ -88,9 +88,14 @@ async fn e2e_hmr_esm_fast_path_for_source_change() {
     // Wait for server to be ready
     wait_for_server(port, Duration::from_secs(30));
 
-    // Make initial request to trigger lazy init (blocks until build + ESM complete)
+    // Make initial request to trigger lazy init (blocks until build + ESM complete).
+    // Use a long timeout — in CI the app-router RSC build can take 10-30s.
     let url = format!("http://127.0.0.1:{port}/");
-    let resp = reqwest::get(&url).await.unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .unwrap();
+    let resp = client.get(&url).send().await.unwrap();
     assert_eq!(resp.status(), 200, "Initial page load should return 200");
 
     // Wait for any in-flight rebuilds from the initial build to settle.
