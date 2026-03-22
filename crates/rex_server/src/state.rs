@@ -106,9 +106,16 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// No-op when build feature is disabled (production `rex start` path).
+    #[cfg(not(feature = "build"))]
+    pub async fn ensure_initialized(self: &Arc<Self>) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     /// Ensure the dev server is fully initialized (build + ESM + V8).
     /// First call does the work; subsequent calls return immediately.
     /// No-op in production mode (everything is initialized eagerly).
+    #[cfg(feature = "build")]
     pub async fn ensure_initialized(self: &Arc<Self>) -> anyhow::Result<()> {
         let state = Arc::clone(self);
         self.lazy_init
