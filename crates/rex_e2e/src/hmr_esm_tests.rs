@@ -5,7 +5,6 @@
 //! 1. The server log contains "ESM fast path rebuild" (not "Rebuild complete")
 //! 2. The page still renders correctly after the change
 
-use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -45,7 +44,8 @@ fn find_free_port() -> u16 {
     listener.local_addr().unwrap().port()
 }
 
-/// Wait until the server responds to HTTP requests.
+/// Wait until the server accepts TCP connections (port is open).
+/// Does NOT wait for an HTTP response — lazy init may take a long time in CI.
 fn wait_for_server(port: u16, timeout: Duration) {
     let deadline = Instant::now() + timeout;
     let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
@@ -53,24 +53,10 @@ fn wait_for_server(port: u16, timeout: Duration) {
         if Instant::now() > deadline {
             panic!("Server failed to start within {timeout:?} on port {port}");
         }
-        if let Ok(mut stream) =
-            std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200))
-        {
-            use std::io::Write;
-            stream
-                .set_read_timeout(Some(Duration::from_millis(500)))
-                .ok();
-            let req = format!("GET / HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n");
-            if stream.write_all(req.as_bytes()).is_ok() {
-                let mut buf = [0u8; 32];
-                if let Ok(n) = stream.read(&mut buf) {
-                    if n > 0 && String::from_utf8_lossy(&buf[..n]).contains("HTTP/") {
-                        return;
-                    }
-                }
-            }
+        if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() {
+            return;
         }
-        std::thread::sleep(Duration::from_millis(200));
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -102,10 +88,28 @@ async fn e2e_hmr_esm_fast_path_for_source_change() {
     // Wait for server to be ready
     wait_for_server(port, Duration::from_secs(30));
 
-    // Make initial request to trigger lazy init
+    // Make initial request to trigger lazy init (blocks until build + ESM complete)
     let url = format!("http://127.0.0.1:{port}/");
     let resp = reqwest::get(&url).await.unwrap();
     assert_eq!(resp.status(), 200, "Initial page load should return 200");
+
+    // Wait for any in-flight rebuilds from the initial build to settle.
+    // The watcher may fire events from build output before the ESM state is ready.
+    std::thread::sleep(Duration::from_secs(2));
+
+    // Drain stderr accumulated so far (initial build logs) so we only check
+    // logs produced AFTER the test file modification.
+    let stderr_handle = child.stderr.take().expect("stderr should be piped");
+    let (log_tx, log_rx) = std::sync::mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let reader = std::io::BufReader::new(stderr_handle);
+        for line in reader.lines().map_while(Result::ok) {
+            let _ = log_tx.send(line);
+        }
+    });
+    // Drain pre-modification logs
+    while log_rx.try_recv().is_ok() {}
 
     // Touch the component file with a whitespace change
     let modified = format!("{original}\n// hmr-test-marker\n");
@@ -122,24 +126,27 @@ async fn e2e_hmr_esm_fast_path_for_source_change() {
         "Page should still return 200 after HMR"
     );
 
-    // Kill the server and capture its stderr
+    // Collect only post-modification logs
+    let mut post_mod_lines = Vec::new();
+    while let Ok(line) = log_rx.try_recv() {
+        post_mod_lines.push(line);
+    }
+
+    // Kill the server
     child.kill().ok();
     child.wait().ok();
-    let mut stderr_output = String::new();
-    if let Some(mut stderr) = child.stderr.take() {
-        stderr.read_to_string(&mut stderr_output).ok();
-    }
 
     // Restore original file
     std::fs::write(&component_path, &original).expect("Failed to restore Counter.tsx");
 
-    // Check that ESM fast path was used
-    let used_fast_path = stderr_output.contains("ESM fast path rebuild");
-    let used_full_rebuild = stderr_output.contains("Rebuild complete");
+    // Check logs from AFTER the file modification only
+    let post_mod_output = post_mod_lines.join("\n");
+    let used_fast_path = post_mod_output.contains("ESM fast path rebuild");
+    let used_full_rebuild = post_mod_output.contains("Rebuild complete");
 
     if !used_fast_path {
         // Print diagnostics
-        let relevant_lines: Vec<&str> = stderr_output
+        let relevant_lines: Vec<&str> = post_mod_output
             .lines()
             .filter(|l| {
                 l.contains("ESM")
