@@ -44,6 +44,15 @@ pub async fn api_handler(
     let path = uri.path();
     info!(path, method = %method, "Handling API request");
 
+    // Lazy init: ensure build + ESM loading is complete (dev mode only)
+    if let Err(e) = state.ensure_initialized().await {
+        tracing::error!("Initialization failed: {e:#}");
+        return Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Body::from(format!("Initialization failed: {e}")))
+            .expect("response build");
+    }
+
     let hot = snapshot(&state);
 
     // Run middleware before route matching

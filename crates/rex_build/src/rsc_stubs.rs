@@ -7,6 +7,7 @@
 //! `createServerReference` proxies that call back to the server.
 
 use crate::client_manifest::client_reference_id;
+use crate::precomputed_ids::PrecomputedIds;
 use crate::server_action_manifest::server_action_id;
 
 /// Generate a client reference stub module for a `"use client"` component.
@@ -15,12 +16,20 @@ use crate::server_action_manifest::server_action_id;
 /// ```js
 /// export const Foo = { $$typeof: Symbol.for("react.client.reference"), $$id: "<refId>", $$name: "Foo" };
 /// ```
-pub fn generate_client_stub(rel_path: &str, exports: &[String], build_id: &str) -> String {
+pub fn generate_client_stub(
+    rel_path: &str,
+    exports: &[String],
+    build_id: &str,
+    precomputed: Option<&PrecomputedIds>,
+) -> String {
     let mut source = String::new();
     source.push_str("// Auto-generated client reference stub\n");
 
     for export in exports {
-        let ref_id = client_reference_id(rel_path, export, build_id);
+        let ref_id = match precomputed {
+            Some(ids) => ids.client_ref_id(rel_path, export, build_id),
+            None => client_reference_id(rel_path, export, build_id),
+        };
         let obj = format!(
             "{{ $$typeof: Symbol.for(\"react.client.reference\"), $$id: \"{ref_id}\", $$name: \"{export}\" }}"
         );
@@ -46,13 +55,17 @@ pub(crate) fn generate_server_action_stub(
     rel_path: &str,
     exports: &[String],
     build_id: &str,
+    precomputed: Option<&PrecomputedIds>,
 ) -> String {
     let mut source = String::new();
     source.push_str("// Auto-generated server action stub\n");
     source.push_str("import { createServerReference } from 'react-server-dom-webpack/client';\n");
 
     for export in exports {
-        let action_id = server_action_id(rel_path, export, build_id);
+        let action_id = match precomputed {
+            Some(ids) => ids.server_action_id(rel_path, export, build_id),
+            None => server_action_id(rel_path, export, build_id),
+        };
         if export == "default" {
             source.push_str(&format!(
                 "export default createServerReference(\"{action_id}\", window.__REX_CALL_SERVER);\n"
@@ -74,7 +87,12 @@ mod tests {
 
     #[test]
     fn client_stub_default_export() {
-        let stub = generate_client_stub("components/Counter.tsx", &["default".to_string()], "abc");
+        let stub = generate_client_stub(
+            "components/Counter.tsx",
+            &["default".to_string()],
+            "abc",
+            None,
+        );
         assert!(stub.contains("export default"));
         assert!(stub.contains("react.client.reference"));
         assert!(stub.contains("$$name: \"default\""));
@@ -86,6 +104,7 @@ mod tests {
             "utils.tsx",
             &["Counter".to_string(), "Input".to_string()],
             "abc",
+            None,
         );
         assert!(stub.contains("export const Counter"));
         assert!(stub.contains("export const Input"));
@@ -98,6 +117,7 @@ mod tests {
             "comp.tsx",
             &["default".to_string(), "Helper".to_string()],
             "abc",
+            None,
         );
         assert!(stub.contains("export default"));
         assert!(stub.contains("export const Helper"));
@@ -105,7 +125,7 @@ mod tests {
 
     #[test]
     fn client_stub_empty_exports() {
-        let stub = generate_client_stub("empty.tsx", &[], "abc");
+        let stub = generate_client_stub("empty.tsx", &[], "abc", None);
         assert_eq!(stub, "// Auto-generated client reference stub\n");
     }
 
@@ -115,6 +135,7 @@ mod tests {
             "app/actions.ts",
             &["increment".to_string(), "decrement".to_string()],
             "abc",
+            None,
         );
         assert!(stub.contains("import { createServerReference }"));
         assert!(stub.contains("export var increment = createServerReference("));
@@ -124,13 +145,14 @@ mod tests {
 
     #[test]
     fn server_action_stub_default_export() {
-        let stub = generate_server_action_stub("app/actions.ts", &["default".to_string()], "abc");
+        let stub =
+            generate_server_action_stub("app/actions.ts", &["default".to_string()], "abc", None);
         assert!(stub.contains("export default createServerReference("));
     }
 
     #[test]
     fn server_action_stub_empty_exports() {
-        let stub = generate_server_action_stub("empty.ts", &[], "abc");
+        let stub = generate_server_action_stub("empty.ts", &[], "abc", None);
         assert!(stub.contains("import { createServerReference }"));
         // Only header + import, no export lines
         assert!(!stub.contains("export"));
@@ -142,6 +164,7 @@ mod tests {
             "actions.ts",
             &["a".to_string(), "b".to_string(), "c".to_string()],
             "abc",
+            None,
         );
         let count = stub.matches("import { createServerReference }").count();
         assert_eq!(count, 1, "import should appear exactly once");

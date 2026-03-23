@@ -68,20 +68,20 @@ fn ensure_server() -> &'static TestServer {
             .spawn()
             .unwrap_or_else(|e| panic!("Failed to start rex: {e}"));
 
-        // Poll with HTTP GET until the server returns a valid response (not
-        // just TCP connect, since rex dev binds the port before the build).
-        let deadline = Instant::now() + Duration::from_secs(30);
+        // Poll with HTTP GET until the server returns a valid response.
+        // The first successful connection may block while lazy init runs
+        // (build + ESM loading), so use a generous per-request read timeout.
+        let deadline = Instant::now() + Duration::from_secs(60);
         let addr = format!("127.0.0.1:{port}");
         loop {
             if Instant::now() > deadline {
-                panic!("[e2e-app] Server failed to start within 30s on port {port}");
+                panic!("[e2e-app] Server failed to start within 60s on port {port}");
             }
             if let Ok(mut stream) =
                 TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_millis(500))
             {
-                stream
-                    .set_read_timeout(Some(Duration::from_millis(500)))
-                    .ok();
+                // Lazy init can take 10-30s in CI — give the first request enough time
+                stream.set_read_timeout(Some(Duration::from_secs(45))).ok();
                 let req = format!("GET / HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n");
                 if stream.write_all(req.as_bytes()).is_ok() {
                     let mut buf = [0u8; 32];

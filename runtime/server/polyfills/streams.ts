@@ -100,6 +100,24 @@ if (typeof globalThis.ReadableStream === 'undefined') {
                         self._pullAgain = false;
                         self._callPull();
                     }
+                    // After pull completes, deliver queued data to pending reader
+                    if (self._readerResolve && self._queue.length > 0) {
+                        const resolve = self._readerResolve;
+                        self._readerResolve = null;
+                        const val = self._queue.shift();
+                        if (self._isByteStream && val && typeof val.byteLength === 'number') {
+                            self._queueSize -= val.byteLength;
+                        } else {
+                            self._queueSize = Math.max(0, self._queueSize - 1);
+                        }
+                        resolve({ value: val, done: false });
+                    }
+                    // If stream closed during async pull, resolve pending reader
+                    if (self._readerResolve && self._closed) {
+                        const resolve = self._readerResolve;
+                        self._readerResolve = null;
+                        resolve({ value: undefined, done: true });
+                    }
                 }, function(err: any) {
                     self._pulling = false;
                     self._controller.error(err);
@@ -147,6 +165,12 @@ if (typeof globalThis.ReadableStream === 'undefined') {
                 }
                 if (self._closed) {
                     return Promise.resolve({ value: undefined, done: true });
+                }
+                // Signal that we need another pull when the current one finishes.
+                // Without this, the stream stalls: pull completes but nobody
+                // re-invokes pull to deliver the data the reader is waiting for.
+                if (self._pulling) {
+                    self._pullAgain = true;
                 }
                 return new Promise(function(resolve) {
                     self._readerResolve = resolve;

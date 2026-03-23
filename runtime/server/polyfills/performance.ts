@@ -1,5 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// performance.now() stub for bare V8
+// performance polyfill for bare V8
 if (typeof globalThis.performance === 'undefined') {
-    (globalThis as any).performance = { now: function() { return Date.now(); } };
+    const _timeOrigin = Date.now();
+    (globalThis as any).performance = {
+        now: function() { return Date.now() - _timeOrigin; },
+        timeOrigin: _timeOrigin,
+    };
 }

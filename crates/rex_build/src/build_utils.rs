@@ -25,7 +25,7 @@ pub(crate) fn find_route_for_chunk<'a>(
 }
 
 /// Generate a build ID based on current timestamp
-pub(crate) fn generate_build_id() -> String {
+pub fn generate_build_id() -> String {
     use sha2::{Digest, Sha256};
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
