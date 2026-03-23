@@ -409,6 +409,9 @@ impl TestAppBuilder {
             is_dev: self.is_dev,
             image_cache: rex_image::ImageCache::new(project_root.join(".rex-cache")),
             project_root,
+            esm: None,
+            lazy_init: tokio::sync::OnceCell::const_new_with(()),
+            lazy_init_ctx: std::sync::Mutex::new(None),
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
                 api_route_trie: api_trie,

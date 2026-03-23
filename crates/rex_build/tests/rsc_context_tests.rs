@@ -233,7 +233,7 @@ fn context_client_stubs_generated_correctly() {
         "default".to_string(),
     ];
 
-    let stub = generate_client_stub("components/ThemeProvider.tsx", &exports, "test-build");
+    let stub = generate_client_stub("components/ThemeProvider.tsx", &exports, "test-build", None);
 
     // Every export should have a client reference object
     assert!(

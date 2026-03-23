@@ -14,6 +14,11 @@ mod app_router_tests;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+#[path = "hmr_esm_tests.rs"]
+mod hmr_esm_tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use std::io::{Read, Write};
     use std::net::TcpStream;

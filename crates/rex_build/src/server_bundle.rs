@@ -355,7 +355,8 @@ pub const V8_POLYFILLS: &str = include_str!(concat!(env!("OUT_DIR"), "/v8-polyfi
 
 /// SSR runtime functions appended to the virtual entry.
 /// These are bundled into the IIFE by rolldown alongside React and page code.
-const SSR_RUNTIME: &str = include_str!(concat!(env!("OUT_DIR"), "/ssr-runtime.js"));
+/// Public so ESM entry generation can include the runtime.
+pub const SSR_RUNTIME: &str = include_str!(concat!(env!("OUT_DIR"), "/ssr-runtime.js"));
 
 /// MCP tool runtime functions appended to the virtual entry when mcp/ tools exist.
 /// Defines __rex_list_mcp_tools() and __rex_call_mcp_tool(name, paramsJson).

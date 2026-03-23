@@ -334,7 +334,7 @@ pub fn tcp_debug_callback(
         return;
     }
     let msg = args.get(0).to_rust_string_lossy(scope);
-    eprintln!("[JS] {}", msg);
+    tracing::debug!(target: "v8::console", "{}", msg);
 }
 
 // ── Push-based polling ────────────────────────────────────────────────────

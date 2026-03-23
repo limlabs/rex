@@ -81,7 +81,8 @@ async fn test_minimal_server_bundle_app_route_handlers() {
     )
     .unwrap();
 
-    let config = RexConfig::new(root).with_dev(true);
+    // Use dev=false so the RSC server IIFE bundle is built (it's skipped in dev/ESM mode)
+    let config = RexConfig::new(root).with_dev(false);
     let scan = rex_router::ScanResult {
         routes: vec![],
         api_routes: vec![],

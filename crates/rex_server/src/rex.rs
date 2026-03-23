@@ -1,6 +1,6 @@
 use crate::core::{self, body_to_string, RexRequest, RexResponse, RouteMatchResult};
 use crate::server::RexServer;
-use crate::state::{snapshot, AppState, HotState};
+use crate::state::{snapshot, AppState, EsmState, HotState};
 use anyhow::Result;
 use axum::Router;
 use rex_core::{AssetManifest, DataStrategy, ProjectConfig, RexConfig, ServerSidePropsContext};
@@ -95,6 +95,10 @@ impl Rex {
     ///
     /// This is the primary constructor for dev mode and fresh builds.
     /// Requires the `build` feature (pulls in the rolldown bundler).
+    ///
+    /// Uses native V8 ESM module loading. Deps are pre-bundled by rolldown as
+    /// ESM, user source files are OXC-transformed individually. Enables fast
+    /// per-file HMR invalidation (~100ms vs ~3500ms full rebuild).
     #[cfg(feature = "build")]
     pub async fn new(opts: RexOptions) -> Result<Self> {
         let root = std::fs::canonicalize(&opts.root)?;
@@ -114,47 +118,79 @@ impl Rex {
             "Routes scanned"
         );
 
-        // Build bundles
-        debug!("Building bundles...");
-        let build_result = rex_build::build_bundles(&config, &scan, &project_config).await?;
-        debug!(build_id = %build_result.build_id, "Build complete");
-
         // Initialize V8
-        debug!("Initializing V8...");
         init_v8();
-
-        let mut server_bundle = std::fs::read_to_string(&build_result.server_bundle_path)?;
-
-        // If RSC bundles exist, append them so RSC functions are available in V8
-        if let Some(rsc_path) = &build_result.manifest.rsc_server_bundle {
-            let rsc_bundle = std::fs::read_to_string(rsc_path)?;
-            server_bundle.push_str("\n;\n");
-            server_bundle.push_str(&rsc_bundle);
-            debug!("RSC flight bundle appended to V8 bundle");
-        }
-        if let Some(ssr_path) = &build_result.manifest.rsc_ssr_bundle {
-            let ssr_bundle = std::fs::read_to_string(ssr_path)?;
-            server_bundle.push_str("\n;\n");
-            server_bundle.push_str(&ssr_bundle);
-            debug!("RSC SSR bundle appended to V8 bundle");
-        }
 
         let pool_size = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(4)
             .min(if opts.dev { 4 } else { 8 });
 
-        debug!(pool_size, "Creating V8 isolate pool");
         let project_root_str = config.project_root.to_string_lossy().to_string();
-        let pool = IsolatePool::new(
+
+        if opts.dev {
+            // Dev mode: create stub pool and return immediately.
+            // Full initialization (build + ESM) happens lazily on first request.
+            let build_id = rex_build::build_utils::generate_build_id();
+            let pool = IsolatePool::new(
+                pool_size,
+                Arc::new(crate::startup::STUB_FUNCTIONS.to_string()),
+                Some(Arc::new(project_root_str)),
+            )?;
+
+            let lazy_ctx = crate::state::LazyInitContext {
+                config: config.clone(),
+                scan: scan.clone(),
+                build_id: build_id.clone(),
+                pool_size,
+            };
+
+            let static_dir = config.client_build_dir();
+            let rex = Self::init_from_parts(
+                config,
+                scan,
+                pool,
+                AssetManifest::new(build_id.clone()),
+                build_id,
+                static_dir,
+                project_config,
+                Some(EsmState::empty()), // Populated during lazy init
+                opts.port,
+                opts.host,
+                Some(lazy_ctx),
+            )
+            .await?;
+
+            // Start initialization in a background task so it's never cancelled
+            // by dropped HTTP connections. `ensure_initialized()` in page_handler
+            // waits for this task via the OnceCell.
+            let init_state = rex.state();
+            tokio::spawn(async move {
+                if let Err(e) = init_state.ensure_initialized().await {
+                    tracing::error!("Background initialization failed: {e:#}");
+                }
+            });
+
+            return Ok(rex);
+        }
+
+        // Production: build everything eagerly
+        debug!("Building bundles...");
+        let build_result = rex_build::build_bundles(&config, &scan, &project_config).await?;
+        debug!(build_id = %build_result.build_id, "Build complete");
+
+        let (pool, esm_state) = crate::startup::esm_startup(
+            &config,
+            &scan,
+            &build_result.build_id,
             pool_size,
-            Arc::new(server_bundle),
-            Some(Arc::new(project_root_str)),
-        )?;
+            &project_root_str,
+        )
+        .await?;
 
         let static_dir = config.client_build_dir();
 
-        Self::init_from_parts(
+        let rex = Self::init_from_parts(
             config,
             scan,
             pool,
@@ -162,10 +198,14 @@ impl Rex {
             build_result.build_id,
             static_dir,
             project_config,
+            Some(esm_state),
             opts.port,
             opts.host,
+            None, // No lazy init in production
         )
-        .await
+        .await?;
+
+        Ok(rex)
     }
 
     /// Create a Rex instance from a pre-built manifest (for `rex start`).
@@ -225,8 +265,10 @@ impl Rex {
             build_id,
             static_dir,
             project_config,
+            None, // ESM state not used for from_build (IIFE path)
             opts.port,
             opts.host,
+            None, // No lazy init in production
         )
         .await
     }
@@ -242,8 +284,10 @@ impl Rex {
         build_id: String,
         static_dir: PathBuf,
         project_config: ProjectConfig,
+        esm_state: Option<EsmState>,
         port: u16,
         host: IpAddr,
+        lazy_init_ctx: Option<crate::state::LazyInitContext>,
     ) -> Result<Self> {
         let trie = RouteTrie::from_routes(&scan.routes);
         let api_trie = RouteTrie::from_routes(&scan.api_routes);
@@ -318,6 +362,9 @@ impl Rex {
             is_dev: config.dev,
             project_root: config.project_root.clone(),
             image_cache,
+            esm: esm_state.map(RwLock::new),
+            lazy_init: tokio::sync::OnceCell::new(),
+            lazy_init_ctx: std::sync::Mutex::new(lazy_init_ctx),
             hot: RwLock::new(Arc::new(HotState {
                 route_trie: trie,
                 api_route_trie: api_trie,

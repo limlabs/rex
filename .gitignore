@@ -19,3 +19,4 @@ benchmarks/results*.json
 dist/
 
 *.tsbuildinfo
+coverage.json
