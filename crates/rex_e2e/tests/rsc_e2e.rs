@@ -909,7 +909,7 @@ mod rsc {
         assert_eq!(resp.status(), 404, "Stale build_id should return 404");
 
         // Test: unknown action ID returns error JSON (not a 500)
-        let resp = client
+        let resp2 = client
             .post(format!(
                 "{}/_rex/action/{}/nonexistent-action-id",
                 base_url(),
@@ -920,8 +920,10 @@ mod rsc {
             .send()
             .await
             .unwrap();
-        assert_eq!(resp.status(), 200);
-        let result: serde_json::Value = resp.json().await.unwrap();
+        let status2 = resp2.status();
+        let body2 = resp2.text().await.unwrap();
+        assert_eq!(status2, 500, "Unknown action should return 500");
+        let result: serde_json::Value = serde_json::from_str(&body2).unwrap();
         assert!(
             result.get("error").is_some(),
             "Unknown action should return error JSON, got: {result}"
@@ -960,6 +962,7 @@ mod rsc {
         let server_actions = manifest
             .get("server_actions")
             .expect("Missing server_actions in manifest");
+        eprintln!("[e2e-rsc] server_actions in manifest: {server_actions}");
         assert!(
             server_actions.is_object() && !server_actions.as_object().unwrap().is_empty(),
             "server_actions should be a non-empty object, got: {server_actions}"

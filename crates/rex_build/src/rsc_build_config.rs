@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use tracing::debug;
 
 /// Shared context threaded through all RSC bundle builds.
-pub(crate) struct RscBuildContext<'a> {
+pub struct RscBuildContext<'a> {
     pub config: &'a RexConfig,
     /// Canonicalized project root (computed once).
     pub project_root: PathBuf,
@@ -20,6 +20,9 @@ pub(crate) struct RscBuildContext<'a> {
     pub module_dirs: &'a [String],
     /// Pre-compiled MDX file aliases (original path → compiled JSX path).
     pub mdx_aliases: Vec<(String, Vec<Option<String>>)>,
+    /// Pre-computed IDs from the ESM module walk (dev mode only).
+    /// When present, ID lookups use these instead of computing from rel_paths.
+    pub precomputed_ids: Option<&'a crate::precomputed_ids::PrecomputedIds>,
 }
 
 impl<'a> RscBuildContext<'a> {
@@ -28,6 +31,7 @@ impl<'a> RscBuildContext<'a> {
         build_id: &'a str,
         define: &'a [(String, String)],
         module_dirs: &'a [String],
+        precomputed_ids: Option<&'a crate::precomputed_ids::PrecomputedIds>,
     ) -> Self {
         let project_root = config.project_root.canonicalize().unwrap_or_else(|e| {
             debug!(
@@ -49,6 +53,25 @@ impl<'a> RscBuildContext<'a> {
             define,
             module_dirs,
             mdx_aliases,
+            precomputed_ids,
+        }
+    }
+
+    /// Resolve a client reference ID: use pre-computed if available, else compute.
+    pub fn resolve_client_ref_id(&self, rel_path: &str, export: &str) -> String {
+        match self.precomputed_ids {
+            Some(ids) => ids.client_ref_id(rel_path, export, self.build_id),
+            None => crate::client_manifest::client_reference_id(rel_path, export, self.build_id),
+        }
+    }
+
+    /// Resolve a server action ID: use pre-computed if available, else compute.
+    pub fn resolve_server_action_id(&self, rel_path: &str, export: &str) -> String {
+        match self.precomputed_ids {
+            Some(ids) => ids.server_action_id(rel_path, export, self.build_id),
+            None => {
+                crate::server_action_manifest::server_action_id(rel_path, export, self.build_id)
+            }
         }
     }
 
@@ -264,21 +287,21 @@ mod tests {
     #[test]
     fn rsc_build_context_hash() {
         let config = rex_core::RexConfig::new(std::path::PathBuf::from("/tmp")).with_dev(true);
-        let ctx = RscBuildContext::new(&config, "abcdef1234567890", &[], &[]);
+        let ctx = RscBuildContext::new(&config, "abcdef1234567890", &[], &[], None);
         assert_eq!(ctx.hash(), "abcdef12");
     }
 
     #[test]
     fn rsc_build_context_short_build_id() {
         let config = rex_core::RexConfig::new(std::path::PathBuf::from("/tmp")).with_dev(true);
-        let ctx = RscBuildContext::new(&config, "abc", &[], &[]);
+        let ctx = RscBuildContext::new(&config, "abc", &[], &[], None);
         assert_eq!(ctx.hash(), "abc");
     }
 
     #[test]
     fn non_js_empty_module_types_has_expected_extensions() {
         let config = rex_core::RexConfig::new(std::path::PathBuf::from("/tmp")).with_dev(true);
-        let ctx = RscBuildContext::new(&config, "test", &[], &[]);
+        let ctx = RscBuildContext::new(&config, "test", &[], &[], None);
         let types = ctx.non_js_empty_module_types();
         assert!(types.contains_key(".css"));
         assert!(types.contains_key(".scss"));
@@ -289,12 +312,12 @@ mod tests {
     #[test]
     fn minify_options_dev_vs_prod() {
         let dev_config = rex_core::RexConfig::new(std::path::PathBuf::from("/tmp")).with_dev(true);
-        let dev_ctx = RscBuildContext::new(&dev_config, "test", &[], &[]);
+        let dev_ctx = RscBuildContext::new(&dev_config, "test", &[], &[], None);
         assert!(dev_ctx.minify_options().is_none());
 
         let prod_config =
             rex_core::RexConfig::new(std::path::PathBuf::from("/tmp")).with_dev(false);
-        let prod_ctx = RscBuildContext::new(&prod_config, "test", &[], &[]);
+        let prod_ctx = RscBuildContext::new(&prod_config, "test", &[], &[], None);
         assert!(prod_ctx.minify_options().is_some());
     }
 }

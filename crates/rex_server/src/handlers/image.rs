@@ -2,10 +2,28 @@ use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{debug, error};
 
 use super::AppState;
+
+/// Canonicalize `base_dir/rel_path` and verify containment within `base_dir`.
+/// Returns 404 on missing files, 400 on traversal attempts.
+#[allow(clippy::result_large_err)]
+fn resolve_contained(base_dir: &Path, rel_path: &str) -> Result<PathBuf, Response> {
+    let base_canon = base_dir
+        .canonicalize()
+        .map_err(|_| (StatusCode::NOT_FOUND, "image not found").into_response())?;
+    let file_canon = base_dir
+        .join(rel_path)
+        .canonicalize()
+        .map_err(|_| (StatusCode::NOT_FOUND, "image not found").into_response())?;
+    if !file_canon.starts_with(&base_canon) {
+        return Err((StatusCode::BAD_REQUEST, "invalid path").into_response());
+    }
+    Ok(file_canon)
+}
 
 /// Query parameters for the image optimization endpoint.
 #[derive(serde::Deserialize)]
@@ -74,29 +92,25 @@ pub async fn image_handler(
         return (StatusCode::BAD_REQUEST, "invalid path").into_response();
     }
 
-    // Determine base directory: /_rex/static/ URLs map to the build client dir,
-    // everything else maps to public/
-    let (base_dir, rel_path) = if let Some(rest) = url_path.strip_prefix("_rex/static/") {
-        (state.project_root.join(".rex/build/client"), rest)
+    // Resolve the image source file. Priority:
+    //   1. /_rex/static/ → .rex/build/client/
+    //   2. public/ directory (canonicalize + containment check)
+    //   3. project root fallback (for source-relative static asset imports)
+    //
+    // No unsanitized user input touches the filesystem. Every candidate path
+    // is canonicalized and verified to reside within its allowed base directory.
+    let canonical = if let Some(rest) = url_path.strip_prefix("_rex/static/") {
+        resolve_contained(&state.project_root.join(".rex/build/client"), rest)
     } else {
-        (state.project_root.join("public"), url_path)
+        // Try public/ first; canonicalize implicitly checks existence.
+        // Fall back to project root for source-relative static asset imports.
+        resolve_contained(&state.project_root.join("public"), url_path)
+            .or_else(|_| resolve_contained(&state.project_root, url_path))
     };
-
-    let file_path = base_dir.join(rel_path);
-
-    // Prevent path traversal — both canonicalizations must succeed
-    // and the resolved path must be inside the base directory
-    let base_canonical = match base_dir.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return (StatusCode::NOT_FOUND, "image not found").into_response(),
+    let canonical = match canonical {
+        Ok(path) => path,
+        Err(resp) => return resp,
     };
-    let canonical = match file_path.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return (StatusCode::NOT_FOUND, "image not found").into_response(),
-    };
-    if !canonical.starts_with(&base_canonical) {
-        return (StatusCode::BAD_REQUEST, "invalid path").into_response();
-    }
 
     let src_bytes = match std::fs::read(&canonical) {
         Ok(data) => data,

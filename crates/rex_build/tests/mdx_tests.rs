@@ -258,7 +258,8 @@ async fn test_integration_mdx_app_router_build() {
         root_layout: Some(layout_path),
     };
 
-    let config = RexConfig::new(root).with_dev(true);
+    // Use dev=false so server/SSR IIFE bundles are produced (skipped in dev/ESM mode)
+    let config = RexConfig::new(root).with_dev(false);
     let scan = ScanResult {
         routes: vec![],
         api_routes: vec![],

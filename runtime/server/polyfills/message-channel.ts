@@ -15,8 +15,12 @@ if (typeof (globalThis as any).MessagePort === 'undefined') {
         }
 
         postMessage(data: any) {
-            if (this._otherPort && this._otherPort.onmessage) {
-                this._otherPort.onmessage({ data });
+            const other = this._otherPort;
+            if (other && other.onmessage) {
+                // Deliver asynchronously via microtask, matching browser behavior.
+                // React's scheduler relies on async MessageChannel delivery to yield
+                // between work chunks — synchronous delivery breaks the scheduler.
+                queueMicrotask(function() { other.onmessage({ data }); });
             }
         }
 

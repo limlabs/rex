@@ -71,6 +71,11 @@ impl SsrIsolate {
         // Log unhandled promise rejections for debugging
         isolate.set_promise_reject_callback(promise_reject_callback);
 
+        // Support dynamic import() — resolves modules from the ESM registry
+        isolate.set_host_import_module_dynamically_callback(
+            crate::esm_module_registry::dynamic_import_callback,
+        );
+
         let (
             context,
             render_fn,
