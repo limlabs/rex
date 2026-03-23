@@ -7,6 +7,8 @@ pub mod mcp;
 pub mod prerender;
 pub mod rex;
 pub mod server;
+#[cfg(feature = "build")]
+pub mod startup;
 pub mod state;
 
 pub use rex::{PageResult, Rex, RexOptions};

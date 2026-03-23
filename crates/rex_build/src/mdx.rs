@@ -21,7 +21,7 @@ pub(crate) struct MdxProcessing {
 }
 
 /// Build `MdxOptions` by scanning the project root for `mdx-components.*`.
-fn mdx_options_for_project(project_root: &Path) -> MdxOptions {
+pub(crate) fn mdx_options_for_project(project_root: &Path) -> MdxOptions {
     MdxOptions {
         mdx_components_path: find_mdx_components(project_root),
     }
@@ -94,7 +94,7 @@ pub(crate) fn process_mdx_pages(
 ///
 /// Returns a cloned `AppScanResult` with any `.mdx` page/layout paths replaced
 /// by their compiled `.jsx` equivalents.
-pub(crate) fn process_mdx_app_pages(
+pub fn process_mdx_app_pages(
     app_scan: &AppScanResult,
     output_dir: &Path,
     project_root: &Path,
@@ -281,7 +281,8 @@ fn is_mdx(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()) == Some("mdx")
 }
 
-fn path_hash(path: &Path) -> String {
+/// Hash a path for MDX compiled filename generation.
+pub fn path_hash(path: &Path) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(path.to_string_lossy().as_bytes());

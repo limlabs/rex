@@ -56,13 +56,33 @@ pub struct BuildResult {
     pub manifest: AssetManifest,
 }
 
-/// Build both server and client bundles
+/// Build both server and client bundles.
+///
+/// If `explicit_build_id` is provided, uses that build ID (for ESM dev mode
+/// where the build ID must match between ESM modules and SSR bundle).
+/// Otherwise generates a fresh build ID.
 pub async fn build_bundles(
     config: &RexConfig,
     scan: &ScanResult,
     project_config: &ProjectConfig,
 ) -> Result<BuildResult> {
-    let build_id = generate_build_id();
+    build_bundles_with_id(config, scan, project_config, None, None).await
+}
+
+/// Build both server and client bundles with an explicit build ID.
+///
+/// When `precomputed_ids` is provided, the RSC bundle builder uses these
+/// pre-computed IDs (from the ESM module walk) instead of computing its own.
+pub async fn build_bundles_with_id(
+    config: &RexConfig,
+    scan: &ScanResult,
+    project_config: &ProjectConfig,
+    explicit_build_id: Option<&str>,
+    precomputed_ids: Option<&crate::precomputed_ids::PrecomputedIds>,
+) -> Result<BuildResult> {
+    let build_id = explicit_build_id
+        .map(String::from)
+        .unwrap_or_else(generate_build_id);
     let server_dir = config.server_build_dir();
     let client_dir = config.client_build_dir();
 
@@ -210,8 +230,15 @@ pub async fn build_bundles(
             manifest.font_preloads.extend(app_font_result.font_preloads);
         }
 
-        let rsc_result =
-            crate::rsc_bundler::build_rsc_bundles(config, app_scan, &build_id, &define).await?;
+        let rsc_result = crate::rsc_bundler::build_rsc_bundles(
+            config,
+            app_scan,
+            &build_id,
+            &define,
+            config.dev, // skip server/SSR IIFE in dev (ESM replaces them)
+            precomputed_ids,
+        )
+        .await?;
 
         // Populate app_routes in manifest with automatic static optimization
         for route in &app_scan.routes {
@@ -251,15 +278,21 @@ pub async fn build_bundles(
         }
 
         manifest.client_reference_manifest = Some(rsc_result.client_manifest);
-        manifest.rsc_server_bundle =
-            Some(rsc_result.server_bundle_path.to_string_lossy().to_string());
-        manifest.rsc_ssr_bundle = Some(rsc_result.ssr_bundle_path.to_string_lossy().to_string());
+        manifest.rsc_server_bundle = rsc_result
+            .server_bundle_path
+            .map(|p| p.to_string_lossy().to_string());
+        manifest.rsc_ssr_bundle = rsc_result
+            .ssr_bundle_path
+            .map(|p| p.to_string_lossy().to_string());
 
         // Expose server action IDs so clients can discover them
         for (action_id, entry) in &rsc_result.server_action_manifest.actions {
             manifest
                 .server_actions
                 .insert(action_id.clone(), entry.export_name.clone());
+            manifest
+                .server_action_modules
+                .insert(action_id.clone(), entry.module_path.clone());
         }
 
         // Collect CSS imports from app/ layout and page files into global_css.
@@ -317,8 +350,11 @@ pub async fn build_bundles(
     let _ = fs::remove_dir_all(&fonts_dir);
     let mdx_dir = client_dir.join("_mdx");
     let _ = fs::remove_dir_all(&mdx_dir);
-    let server_mdx_dir = server_dir.join("_mdx");
-    let _ = fs::remove_dir_all(&server_mdx_dir);
+    // In dev mode, ESM module loader needs compiled MDX .jsx files after the build
+    if !config.dev {
+        let server_mdx_dir = server_dir.join("_mdx");
+        let _ = fs::remove_dir_all(&server_mdx_dir);
+    }
 
     Ok(BuildResult {
         build_id,

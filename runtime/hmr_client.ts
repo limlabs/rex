@@ -15,6 +15,7 @@
   } | null = null;
   let tscErrors: RexTscDiagnostic[] = [];
   let activeEscListener: ((e: KeyboardEvent) => void) | null = null;
+  let pendingReload = false;
 
   function connect(): void {
     ws = new WebSocket(url);
@@ -44,8 +45,7 @@
           break;
 
         case "full-reload":
-          console.log("[Rex HMR] Full reload");
-          window.location.reload();
+          rscSoftRefreshOrReload();
           break;
 
         case "error":
@@ -442,14 +442,13 @@
       return;
     }
 
-    // App Router pages use RSC Flight protocol — full reload for now
+    // App Router pages use RSC — soft refresh via flight data refetch
     if (
       newManifest.app_routes &&
       Object.keys(newManifest.app_routes).length > 0 &&
       !newManifest.pages
     ) {
-      console.log("[Rex HMR] App router update, reloading");
-      window.location.reload();
+      rscSoftRefreshOrReload();
       return;
     }
 
@@ -540,6 +539,39 @@
         window.location.reload();
       });
   }
+
+  // For RSC (app router) pages, refetch flight data and let React reconcile —
+  // no full page reload needed. Falls back to hard reload for pages router
+  // or if the RSC navigate function isn't available.
+  function rscSoftRefreshOrReload(): void {
+    // Background tabs: defer entirely
+    if (document.visibilityState !== "visible") {
+      console.log("[Rex HMR] Tab hidden, deferring reload");
+      pendingReload = true;
+      return;
+    }
+
+    // RSC soft refresh: refetch flight data, React reconciles only changed parts
+    if (typeof window.__REX_RSC_NAVIGATE === "function") {
+      console.log("[Rex HMR] RSC soft refresh");
+      window.__REX_RSC_NAVIGATE(window.location.pathname).catch(function () {
+        console.log("[Rex HMR] Soft refresh failed, falling back to reload");
+        window.location.reload();
+      });
+      return;
+    }
+
+    // Pages router: full reload
+    console.log("[Rex HMR] Reloading");
+    window.location.reload();
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible" && pendingReload) {
+      pendingReload = false;
+      rscSoftRefreshOrReload();
+    }
+  });
 
   connect();
 })();

@@ -1,5 +1,6 @@
 pub mod hmr;
 pub mod rebuild;
+pub mod rebuild_esm;
 pub mod tailwind;
 pub mod typecheck;
 pub mod watcher;
