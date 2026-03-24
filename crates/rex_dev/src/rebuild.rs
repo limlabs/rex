@@ -96,8 +96,39 @@ pub async fn handle_file_event(
                             path = %event.path.display(),
                             "ESM fast path rebuild"
                         );
-                        hmr.send_full_reload();
-                        debug!("ESM fast path complete — sent full reload");
+
+                        // Invalidate browser transform cache for this file
+                        if let Some(cache) = state.browser_transform_cache.get() {
+                            let canonical = event
+                                .path
+                                .canonicalize()
+                                .unwrap_or_else(|_| event.path.clone());
+                            cache.invalidate(&canonical.to_string_lossy());
+                        }
+
+                        // Compute browser URL for the changed file
+                        let rel = event
+                            .path
+                            .strip_prefix(&config.project_root)
+                            .unwrap_or(&event.path);
+                        let url = format!("/_rex/src/{}", rel.to_string_lossy());
+
+                        // Find which route pattern this file belongs to (if any)
+                        let route = {
+                            let hot = state.hot.read().ok();
+                            hot.and_then(|h| {
+                                h.route_paths.iter().find_map(|(pattern, path)| {
+                                    if path == &event.path {
+                                        Some(pattern.clone())
+                                    } else {
+                                        None
+                                    }
+                                })
+                            })
+                        };
+
+                        hmr.send_module_update(&url, route.as_deref());
+                        debug!("ESM fast path complete — sent module update");
                         return Ok(());
                     }
                     Ok(false) => {

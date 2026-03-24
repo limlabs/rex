@@ -17,6 +17,16 @@ pub enum HmrMessage {
     },
     #[serde(rename = "full-reload")]
     FullReload,
+    /// Module-level update for unbundled dev serving.
+    /// Client reimports the specific module instead of full page reload.
+    #[serde(rename = "module-update")]
+    ModuleUpdate {
+        /// Source URL of the changed module (e.g., "/_rex/src/pages/index.tsx")
+        url: String,
+        timestamp: u64,
+        /// Route pattern affected (if the changed file is a page)
+        route: Option<String>,
+    },
     #[serde(rename = "error")]
     Error {
         message: String,
@@ -93,6 +103,19 @@ impl HmrBroadcast {
 
     pub fn send_tsc_errors(&self, errors: Vec<TscDiagnostic>) {
         let _ = self.tx.send(HmrMessage::TscError { errors });
+    }
+
+    pub fn send_module_update(&self, url: &str, route: Option<&str>) {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before UNIX epoch")
+            .as_millis() as u64;
+
+        let _ = self.tx.send(HmrMessage::ModuleUpdate {
+            url: url.to_string(),
+            timestamp,
+            route: route.map(String::from),
+        });
     }
 
     pub fn send_tsc_clear(&self) {

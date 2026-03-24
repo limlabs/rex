@@ -48,6 +48,12 @@
           rscSoftRefreshOrReload();
           break;
 
+        case "module-update":
+          console.log("[Rex HMR] Module update:", msg.url);
+          clearAllErrors();
+          moduleUpdate(msg);
+          break;
+
         case "error":
           console.error("[Rex HMR] Error:", msg.message);
           currentError = {
@@ -534,6 +540,68 @@
       .catch(function (err) {
         console.error(
           "[Rex HMR] Hot update failed, falling back to full reload:",
+          err,
+        );
+        window.location.reload();
+      });
+  }
+
+  // --- Module-level HMR update for unbundled dev serving ---
+
+  function moduleUpdate(msg: RexHmrMessage): void {
+    const url = msg.url as string;
+    const timestamp = msg.timestamp as number;
+    const route = msg.route as string | undefined;
+
+    // Reimport the changed module with cache-bust
+    import(url + "?t=" + timestamp)
+      .then(function () {
+        if (route && window.__REX_PAGES && window.__REX_PAGES[route]) {
+          // Page module updated — fetch fresh GSSP data + re-render
+          const buildId = window.__REX_MANIFEST__?.build_id;
+          if (
+            typeof buildId !== "string" ||
+            !/^[a-zA-Z0-9_-]+$/.test(buildId)
+          ) {
+            throw new Error("Invalid build_id in manifest");
+          }
+          const dataUrl =
+            "/_rex/data/" + buildId + window.location.pathname + ".json";
+          return fetch(dataUrl)
+            .then(function (res) {
+              if (!res.ok) throw new Error("Data fetch failed: " + res.status);
+              return res.json() as Promise<{
+                props?: Record<string, unknown>;
+              }>;
+            })
+            .then(function (data) {
+              const props = (data.props || {}) as Record<string, unknown>;
+              const dataEl = document.getElementById("__REX_DATA__");
+              if (dataEl) dataEl.textContent = JSON.stringify(props);
+              const page = window.__REX_PAGES[route!];
+              if (page && window.__REX_RENDER__) {
+                window.__REX_RENDER__(page.default, props);
+                console.log("[Rex HMR] Module update applied");
+              }
+            });
+        }
+        // Non-page module (component, util) — reimport the page entry
+        // to pick up the transitive change
+        const router = window.__REX_ROUTER;
+        if (router && router.state && router.state.route) {
+          const pattern = router.state.route;
+          if (window.__REX_PAGES) {
+            delete window.__REX_PAGES[pattern];
+          }
+          const entryUrl = "/_rex/entry/" + pattern + "?t=" + timestamp;
+          return import(entryUrl).then(function () {
+            console.log("[Rex HMR] Module update applied (via entry reload)");
+          });
+        }
+      })
+      .catch(function (err) {
+        console.error(
+          "[Rex HMR] Module update failed, falling back to full reload:",
           err,
         );
         window.location.reload();
