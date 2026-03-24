@@ -224,13 +224,6 @@ pub async fn handle_file_event(
                 "Rebuild complete"
             );
 
-            // Build manifest JSON for HMR before moving into hot state
-            let hmr_manifest_json = serde_json::json!({
-                "build_id": &build_result.build_id,
-                "pages": &build_result.manifest.pages,
-                "app_routes": &build_result.manifest.app_routes,
-            });
-
             // Snapshot the old hot state (Arc clone, cheap)
             let old_hot = {
                 let guard = state
@@ -361,15 +354,12 @@ pub async fn handle_file_event(
             )
             .await?;
 
-            // Notify HMR clients with the new manifest
-            let rel_path = event
-                .path
-                .strip_prefix(&config.pages_dir)
-                .or_else(|_| event.path.strip_prefix(&config.app_dir))
-                .unwrap_or(&event.path);
-            hmr.send_update(&rel_path.to_string_lossy(), hmr_manifest_json);
+            // Notify HMR clients — full rebuild completed, trigger page reload.
+            // In unbundled dev mode there are no bundled chunks to hot-swap,
+            // so a full reload is the correct fallback.
+            hmr.send_full_reload();
 
-            debug!("Hot reload complete");
+            debug!("Hot reload complete (full rebuild)");
         }
         FileEventKind::PageRemoved => {
             // Full rebuild: routes changed, need new trie + manifest

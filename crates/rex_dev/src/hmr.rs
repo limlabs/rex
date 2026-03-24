@@ -8,13 +8,6 @@ use tracing::{debug, info};
 pub enum HmrMessage {
     #[serde(rename = "connected")]
     Connected,
-    #[serde(rename = "update")]
-    Update {
-        path: String,
-        timestamp: u64,
-        /// Serialized manifest ({ build_id, pages }) for the client to hot-swap chunks
-        manifest: serde_json::Value,
-    },
     #[serde(rename = "full-reload")]
     FullReload,
     /// Module-level update for unbundled dev serving.
@@ -66,19 +59,6 @@ impl HmrBroadcast {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(64);
         Self { tx }
-    }
-
-    pub fn send_update(&self, path: &str, manifest: serde_json::Value) {
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system clock before UNIX epoch")
-            .as_millis() as u64;
-
-        let _ = self.tx.send(HmrMessage::Update {
-            path: path.to_string(),
-            timestamp,
-            manifest,
-        });
     }
 
     pub fn send_full_reload(&self) {

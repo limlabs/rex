@@ -38,12 +38,6 @@
           console.log("[Rex HMR] Ready");
           break;
 
-        case "update":
-          console.log("[Rex HMR] Update:", msg.path);
-          clearAllErrors();
-          hotUpdate(msg);
-          break;
-
         case "full-reload":
           rscSoftRefreshOrReload();
           break;
@@ -434,116 +428,6 @@
       "#__rex_error_overlay .eo-dot{display:inline-block;width:8px;height:8px;border-radius:50%;" +
       "margin-right:8px;background:#2ecc71}"
     );
-  }
-
-  // --- Hot update: re-import changed page module and re-render in place ---
-
-  function hotUpdate(msg: RexHmrMessage): void {
-    const manifest = window.__REX_MANIFEST__;
-    const newManifest = msg.manifest;
-
-    if (!manifest || !newManifest) {
-      console.log("[Rex HMR] No manifest, falling back to full reload");
-      window.location.reload();
-      return;
-    }
-
-    // App Router pages use RSC — soft refresh via flight data refetch
-    if (
-      newManifest.app_routes &&
-      Object.keys(newManifest.app_routes).length > 0 &&
-      !newManifest.pages
-    ) {
-      rscSoftRefreshOrReload();
-      return;
-    }
-
-    if (!newManifest.pages) {
-      console.log(
-        "[Rex HMR] No pages in manifest, falling back to full reload",
-      );
-      window.location.reload();
-      return;
-    }
-
-    // Figure out which route pattern we're currently on
-    const router = window.__REX_ROUTER;
-    const currentPattern =
-      router && router.state ? router.state.route : null;
-
-    if (!currentPattern || !newManifest.pages[currentPattern]) {
-      console.log(
-        "[Rex HMR] Current route not in manifest, falling back to full reload",
-      );
-      window.location.reload();
-      return;
-    }
-
-    // Update manifest in place so the router's closure references stay valid
-    manifest.build_id = newManifest.build_id;
-    for (const pattern in newManifest.pages) {
-      manifest.pages[pattern] = newManifest.pages[pattern];
-    }
-
-    // Clear old page module so ensureChunk will re-import
-    if (window.__REX_PAGES) {
-      delete window.__REX_PAGES[currentPattern];
-    }
-
-    const newChunk = newManifest.pages[currentPattern].js;
-    const chunkUrl = "/_rex/static/" + newChunk;
-
-    // Dynamic import with cache-bust (chunk filename already has new hash)
-    window.__REX_NAVIGATING__ = true;
-    import(chunkUrl)
-      .then(function () {
-        window.__REX_NAVIGATING__ = false;
-
-        // Fetch fresh GSSP data — validate build_id to prevent request forgery
-        const buildId = newManifest.build_id;
-        if (
-          typeof buildId !== "string" ||
-          !/^[a-zA-Z0-9_-]+$/.test(buildId)
-        ) {
-          throw new Error("Invalid build_id in manifest");
-        }
-        const dataUrl =
-          "/_rex/data/" +
-          buildId +
-          window.location.pathname +
-          ".json";
-        return fetch(dataUrl).then(function (res) {
-          if (!res.ok) throw new Error("Data fetch failed: " + res.status);
-          return res.json() as Promise<{ props?: Record<string, unknown> }>;
-        });
-      })
-      .then(function (data) {
-        const props = (data.props || {}) as Record<string, unknown>;
-
-        // Update the data element
-        const dataEl = document.getElementById("__REX_DATA__");
-        if (dataEl) dataEl.textContent = JSON.stringify(props);
-
-        // Re-render with the new page component
-        const page =
-          window.__REX_PAGES && window.__REX_PAGES[currentPattern];
-        if (page && window.__REX_RENDER__) {
-          window.__REX_RENDER__(page.default, props);
-          console.log("[Rex HMR] Hot update applied");
-        } else {
-          console.log(
-            "[Rex HMR] Could not re-render, falling back to full reload",
-          );
-          window.location.reload();
-        }
-      })
-      .catch(function (err) {
-        console.error(
-          "[Rex HMR] Hot update failed, falling back to full reload:",
-          err,
-        );
-        window.location.reload();
-      });
   }
 
   // --- Module-level HMR update for unbundled dev serving ---
