@@ -15,6 +15,17 @@ pub fn setup_test_project(
     setup_test_project_full(pages, app_source, None)
 }
 
+/// Create a test project with `dev: false` (production mode).
+/// Use for tests that verify client bundle output (chunk files, manifest filenames, etc.).
+pub fn setup_test_project_prod(
+    pages: &[(&str, &str)],
+    app_source: Option<&str>,
+) -> (tempfile::TempDir, RexConfig, ScanResult) {
+    let (tmp, config, scan) = setup_test_project_full(pages, app_source, None);
+    let config = RexConfig::new(config.project_root).with_dev(false);
+    (tmp, config, scan)
+}
+
 /// Create a temp project directory with page files, returning (config, scan)
 pub fn setup_test_project_full(
     pages: &[(&str, &str)],

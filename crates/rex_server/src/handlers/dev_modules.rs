@@ -242,6 +242,125 @@ fn serve_css_module_proxy(css_path: &std::path::Path) -> impl IntoResponse {
         .into_response()
 }
 
+/// Handler for `/_rex/entry/{*pattern}` — serves virtual page entry modules.
+///
+/// Generates an ESM module that imports the page component from `/_rex/src/`
+/// and sets up hydration (same logic as rolldown virtual entries, but importing
+/// from dev-mode URLs instead of filesystem paths).
+pub async fn entry_handler(
+    State(state): State<Arc<AppState>>,
+    Path(pattern): Path<String>,
+) -> impl IntoResponse {
+    if !state.is_dev {
+        return (StatusCode::NOT_FOUND, "Not available in production").into_response();
+    }
+
+    let hot = crate::state::snapshot(&state);
+
+    // Special case: _app entry
+    if pattern == "_app" {
+        let app_path = match hot.route_paths.get("/_app") {
+            Some(p) => p,
+            None => {
+                return (StatusCode::NOT_FOUND, "No _app found").into_response();
+            }
+        };
+        let rel_path = app_path
+            .strip_prefix(&state.project_root)
+            .unwrap_or(app_path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let js = format!("import App from '/_rex/src/{rel_path}';\nwindow.__REX_APP__ = App;\n");
+        return (
+            StatusCode::OK,
+            [
+                ("content-type", "application/javascript; charset=utf-8"),
+                ("cache-control", "no-store"),
+            ],
+            js,
+        )
+            .into_response();
+    }
+
+    // Normalise: the pattern comes from the URL path after /_rex/entry/
+    // e.g. "/"  or  "/about"  or  "/blog/:slug"
+    let route_pattern = if pattern.starts_with('/') {
+        pattern.clone()
+    } else {
+        format!("/{pattern}")
+    };
+
+    // Look up the source file path from the route_paths map
+    let abs_path = match hot.route_paths.get(&route_pattern) {
+        Some(p) => p.clone(),
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                format!("No route for pattern: {route_pattern}"),
+            )
+                .into_response();
+        }
+    };
+
+    let rel_path = abs_path
+        .strip_prefix(&state.project_root)
+        .unwrap_or(&abs_path)
+        .to_string_lossy()
+        .replace('\\', "/");
+
+    let src_url = format!("/_rex/src/{rel_path}");
+
+    let js = format!(
+        r#"import {{ createElement }} from 'react';
+import {{ hydrateRoot }} from 'react-dom/client';
+import Page from '{src_url}';
+
+window.__REX_PAGES = window.__REX_PAGES || {{}};
+window.__REX_PAGES['{route_pattern}'] = {{ default: Page }};
+
+// Expose render function for client-side navigation (used by router.js)
+if (!window.__REX_RENDER__) {{
+  window.__REX_RENDER__ = function(Component, props) {{
+    var element;
+    if (window.__REX_APP__) {{
+      element = createElement(window.__REX_APP__, {{ Component: Component, pageProps: props }});
+    }} else {{
+      element = createElement(Component, props);
+    }}
+    if (window.__REX_ROOT__) {{
+      window.__REX_ROOT__.render(element);
+    }}
+  }};
+}}
+
+if (!window.__REX_NAVIGATING__) {{
+  var dataEl = document.getElementById('__REX_DATA__');
+  var pageProps = dataEl ? JSON.parse(dataEl.textContent) : {{}};
+  var container = document.getElementById('__rex');
+  if (container) {{
+    var element;
+    if (window.__REX_APP__) {{
+      element = createElement(window.__REX_APP__, {{ Component: Page, pageProps: pageProps }});
+    }} else {{
+      element = createElement(Page, pageProps);
+    }}
+    window.__REX_ROOT__ = hydrateRoot(container, element);
+  }}
+}}
+"#
+    );
+
+    (
+        StatusCode::OK,
+        [
+            ("content-type", "application/javascript; charset=utf-8"),
+            ("cache-control", "no-store"),
+        ],
+        js,
+    )
+        .into_response()
+}
+
 /// Convert kebab-case to camelCase for CSS module class names.
 fn to_camel_case(s: &str) -> String {
     let mut result = String::new();

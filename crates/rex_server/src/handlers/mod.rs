@@ -9,7 +9,7 @@ mod rsc;
 pub use action::server_action_handler;
 pub use api::api_handler;
 pub use data::data_handler;
-pub use dev_modules::src_handler;
+pub use dev_modules::{entry_handler, src_handler};
 pub use image::{image_handler, ImageQuery};
 pub use page::page_handler;
 pub use rsc::{rsc_handler, rsc_handler_root};
@@ -176,6 +176,7 @@ pub(crate) async fn render_error_page(
         doc_descriptor: hot.document_descriptor.as_ref(),
         manifest_json: Some(&hot.manifest_json),
         font_preloads: &hot.manifest.font_preloads,
+        import_map_json: None,
     });
 
     (status, Html(document)).into_response()

@@ -437,6 +437,7 @@ impl TestAppBuilder {
                 prerendered: self.prerendered,
                 prerendered_app: std::collections::HashMap::new(),
                 import_map_json: None,
+                route_paths: std::collections::HashMap::new(),
             })),
         });
 

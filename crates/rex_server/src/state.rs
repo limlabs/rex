@@ -39,6 +39,9 @@ pub struct HotState {
     /// Import map JSON for unbundled dev serving (dev mode only).
     /// Injected into HTML `<script type="importmap">`. None in production.
     pub import_map_json: Option<String>,
+    /// Map from route pattern to absolute source file path.
+    /// Used by the `/_rex/entry/` handler to find page source files.
+    pub route_paths: HashMap<String, std::path::PathBuf>,
 }
 
 impl HotState {
@@ -217,6 +220,18 @@ impl AppState {
                     "Lazy init complete"
                 );
 
+                // Build route_paths map from scan result for /_rex/entry/ handler
+                let route_paths = {
+                    let mut map = HashMap::new();
+                    for route in &ctx.scan.routes {
+                        map.insert(route.pattern.clone(), route.abs_path.clone());
+                    }
+                    if let Some(app) = &ctx.scan.app {
+                        map.insert("/_app".to_string(), app.abs_path.clone());
+                    }
+                    map
+                };
+
                 // Update HotState with real manifest
                 {
                     let mut guard = state
@@ -228,6 +243,7 @@ impl AppState {
                     hot.build_id = build_result.build_id.clone();
                     hot.manifest_json =
                         HotState::compute_manifest_json(&hot.build_id, &hot.manifest);
+                    hot.route_paths = route_paths;
                     *guard = Arc::new(hot);
                 }
 

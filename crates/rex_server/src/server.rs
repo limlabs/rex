@@ -96,6 +96,7 @@ impl RexServer {
                 prerendered: std::collections::HashMap::new(),
                 prerendered_app: std::collections::HashMap::new(),
                 import_map_json: None,
+                route_paths: std::collections::HashMap::new(),
             })),
         });
 
@@ -163,6 +164,8 @@ impl RexServer {
             .route("/_rex/src/{*path}", get(handlers::src_handler))
             // Dev-only: pre-bundled browser deps for unbundled serving
             .route("/_rex/dep/{*specifier}", get(dep_handler))
+            // Dev-only: virtual page entry modules for unbundled serving
+            .route("/_rex/entry/{*pattern}", get(handlers::entry_handler))
             // Merge any extra routes (e.g., HMR websocket)
             .merge(extra_routes)
             // Static file serving

@@ -142,7 +142,6 @@ pub async fn build_bundles_with_id(
     let has_pages = !scan.routes.is_empty() || scan.app.is_some();
 
     let (server_bundle_path, mut manifest) = if has_pages {
-        // Build server and client bundles in parallel
         let server_fut = build_server_bundle(
             config,
             scan,
@@ -153,20 +152,36 @@ pub async fn build_bundles_with_id(
             &module_dirs,
         )
         .instrument(info_span!("build_server_bundle"));
-        let client_fut = build_client_bundles(
-            config,
-            scan,
-            &client_dir,
-            &build_id,
-            &css_modules_merged,
-            &define,
-            &tailwind_outputs,
-            project_config,
-            &module_dirs,
-        )
-        .instrument(info_span!("build_client_bundles"));
 
-        tokio::try_join!(server_fut, client_fut)?
+        if config.dev {
+            // Dev mode: skip client bundling. Build server IIFE only.
+            // Client modules served individually via /_rex/src/ and /_rex/entry/
+            let server_path = server_fut.await?;
+            let manifest = build_dev_manifest(
+                scan,
+                &build_id,
+                &css_modules_merged,
+                &tailwind_outputs,
+                &client_dir,
+            )?;
+            (server_path, manifest)
+        } else {
+            // Production: build both server + client bundles in parallel
+            let client_fut = build_client_bundles(
+                config,
+                scan,
+                &client_dir,
+                &build_id,
+                &css_modules_merged,
+                &define,
+                &tailwind_outputs,
+                project_config,
+                &module_dirs,
+            )
+            .instrument(info_span!("build_client_bundles"));
+
+            tokio::try_join!(server_fut, client_fut)?
+        }
     } else {
         // App-only project: create a minimal server bundle with V8 polyfills + React + stubs
         build_minimal_server_bundle(
@@ -561,4 +576,70 @@ globalThis.__rex_resolve_api = function() {
     let bundle_path = server_dir.join("server-bundle.js");
     let manifest = AssetManifest::new(build_id.to_string());
     Ok((bundle_path, manifest))
+}
+
+/// Build a minimal manifest for dev mode (no client bundling).
+/// Pages map to `/_rex/entry/` URLs instead of bundled chunk filenames.
+fn build_dev_manifest(
+    scan: &ScanResult,
+    build_id: &str,
+    css_modules: &crate::css_modules::CssModuleProcessing,
+    tailwind_outputs: &std::collections::HashMap<std::path::PathBuf, std::path::PathBuf>,
+    client_dir: &Path,
+) -> Result<AssetManifest> {
+    let mut manifest = AssetManifest::new(build_id.to_string());
+
+    // Collect CSS files first (same as production path — CSS is independent of JS bundling).
+    // This may create page entries with production-style JS filenames, which we overwrite below.
+    crate::css_collect::collect_css_files(
+        scan,
+        client_dir,
+        build_id,
+        &mut manifest,
+        tailwind_outputs,
+        &css_modules.page_overrides,
+    )?;
+
+    // Add CSS module global files
+    for css_file in &css_modules.global_css {
+        manifest.global_css.push(css_file.clone());
+    }
+
+    // Add CSS module per-route files
+    for (pattern, css_files) in &css_modules.route_css {
+        if let Some(existing) = manifest.pages.get_mut(pattern) {
+            existing.css.extend(css_files.iter().cloned());
+        }
+    }
+
+    // Register/update pages with /_rex/entry/ URLs (overwriting any JS filenames from CSS collect)
+    for route in &scan.routes {
+        let entry_url = format!("/_rex/entry/{}", route.pattern);
+        let strategy =
+            crate::page_exports::detect_data_strategy(&route.abs_path).unwrap_or_default();
+        let has_static_paths =
+            crate::page_exports::detect_has_static_paths(&route.abs_path).unwrap_or(false);
+
+        let page = manifest
+            .pages
+            .entry(route.pattern.clone())
+            .or_insert_with(|| rex_core::manifest::PageAssets {
+                js: entry_url.clone(),
+                css: Vec::new(),
+                data_strategy: strategy.clone(),
+                render_mode: rex_core::RenderMode::default(),
+                has_static_paths: false,
+                fallback: rex_core::Fallback::default(),
+            });
+        page.js = entry_url;
+        page.data_strategy = strategy;
+        page.has_static_paths = has_static_paths;
+    }
+
+    // _app entry
+    if scan.app.is_some() {
+        manifest.app_script = Some("/_rex/entry/_app".to_string());
+    }
+
+    Ok(manifest)
 }

@@ -386,6 +386,7 @@ impl Rex {
                 prerendered,
                 prerendered_app,
                 import_map_json: None,
+                route_paths: std::collections::HashMap::new(),
             })),
         });
 
