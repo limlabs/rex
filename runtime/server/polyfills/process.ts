@@ -50,6 +50,36 @@ if (typeof (globalThis as any).process === 'undefined') {
         };
     }
 
+    // on('unhandledRejection') — capture rejection details for debugging
+    if (!p._events) p._events = {};
+    if (typeof p.on !== 'function') {
+        const handlers: Record<string, Array<(...args: any[]) => void>> = {};
+        p.on = function(event: string, fn: (...args: any[]) => void) {
+            if (!handlers[event]) handlers[event] = [];
+            handlers[event].push(fn);
+            return p;
+        };
+        p.off = function(event: string, fn: (...args: any[]) => void) {
+            const h = handlers[event];
+            if (h) { const i = h.indexOf(fn); if (i >= 0) h.splice(i, 1); }
+            return p;
+        };
+        p.emit = function(event: string, ...args: any[]) {
+            const h = handlers[event];
+            if (h) h.forEach((fn: (...args: any[]) => void) => fn(...args));
+        };
+        p.once = function(event: string, fn: (...args: any[]) => void) {
+            const wrapped = (...args: any[]) => { p.off(event, wrapped); fn(...args); };
+            return p.on(event, wrapped);
+        };
+        p.listeners = function(event: string) { return handlers[event] || []; };
+        p.removeListener = p.off;
+        p.removeAllListeners = function(event?: string) {
+            if (event) delete handlers[event]; else Object.keys(handlers).forEach(k => delete handlers[k]);
+            return p;
+        };
+    }
+
     // stdout/stderr — used by some packages for logging
     if (!p.stdout) {
         p.stdout = {

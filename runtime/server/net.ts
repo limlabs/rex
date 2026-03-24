@@ -1,5 +1,6 @@
 // Node.js `net` module polyfill for Rex server bundles.
-// Provides a push-based Socket implementation for pg (node-postgres).
+// Provides a push-based Socket implementation compatible with pg (node-postgres)
+// and porsager/postgres (Postgres.js).
 //
 // Architecture:
 // - Socket.connect() calls __rex_tcp_connect() synchronously (blocking TCP connect)
@@ -49,9 +50,23 @@ export class Socket extends EventEmitter {
     readable: boolean = false;
     destroyed: boolean = false;
     private _connecting: boolean = false;
+    private _paused: boolean = false;
+
+    // Allow libraries (e.g., postgres.js) to set arbitrary properties
+    [key: string]: any;
 
     constructor() {
         super();
+    }
+
+    // Node.js net.Socket.readyState — used by postgres.js to check connection state
+    get readyState(): string {
+        if (this.destroyed) return 'closed';
+        if (this._connecting) return 'opening';
+        if (this.readable && this.writable) return 'open';
+        if (this.readable && !this.writable) return 'readOnly';
+        if (!this.readable && this.writable) return 'writeOnly';
+        return 'closed';
     }
 
     connect(...args: any[]): this {
@@ -182,6 +197,25 @@ export class Socket extends EventEmitter {
         if (error) this.emit('error', error);
         this.emit('close');
 
+        return this;
+    }
+
+    // Pause the readable side — disables Rust-side polling so no more
+    // 'data' events fire. Used by postgres.js for COPY OUT backpressure.
+    pause(): this {
+        this._paused = true;
+        if (this._connId !== null) {
+            _g.__rex_tcp_disable_polling(this._connId);
+        }
+        return this;
+    }
+
+    // Resume the readable side — re-enables Rust-side polling.
+    resume(): this {
+        this._paused = false;
+        if (this._connId !== null && this.readable && !this.destroyed) {
+            _g.__rex_tcp_enable_polling(this._connId);
+        }
         return this;
     }
 
