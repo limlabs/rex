@@ -14,12 +14,10 @@ BENCHMARKS_DIR="$ROOT/benchmarks"
 # zero-config: types are extracted by `rex build`, not available before Rex runs
 SKIP=("tanstack-basic" "tanstack-tailwind" "zero-config" "context")
 
-# Ensure packages/rex has its dependencies installed (fixtures resolve
-# rex source files via path aliases and need @types/react available).
-REX_PKG="$ROOT/packages/rex"
-if [[ ! -d "$REX_PKG/node_modules" ]]; then
-  echo "--- Installing packages/rex dependencies ---"
-  (cd "$REX_PKG" && npm install --no-package-lock --ignore-scripts --no-audit --no-fund)
+# Ensure workspace dependencies are installed (hoisted to root node_modules).
+if [[ ! -d "$ROOT/node_modules" ]]; then
+  echo "--- Installing workspace dependencies ---"
+  (cd "$ROOT" && npm install --no-audit --no-fund)
 fi
 
 TMPDIR_BASE="$(mktemp -d)"

@@ -181,22 +181,24 @@ async fn test_font_app_router_layout() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().to_path_buf();
 
-    // Use real node_modules from app-router fixture
-    let fixture_nm = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    // Use real node_modules — workspace root (hoisted) or fixture-local
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
         .unwrap()
-        .join("fixtures/app-router/node_modules");
-    if !fixture_nm.exists() {
-        eprintln!("Skipping test: fixtures/app-router/node_modules not found");
+        .to_path_buf();
+    let workspace_nm = repo_root.join("node_modules");
+    let fixture_nm = repo_root.join("fixtures/app-router/node_modules");
+    let source = if workspace_nm.join("react").exists() {
+        &workspace_nm
+    } else if fixture_nm.exists() {
+        &fixture_nm
+    } else {
+        eprintln!("Skipping test: node_modules not found");
         return;
-    }
-    std::os::unix::fs::symlink(
-        fixture_nm.canonicalize().unwrap(),
-        root.join("node_modules"),
-    )
-    .unwrap();
+    };
+    std::os::unix::fs::symlink(source.canonicalize().unwrap(), root.join("node_modules")).unwrap();
     fs::write(
         root.join("package.json"),
         r#"{"name":"font-test","private":true}"#,
