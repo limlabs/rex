@@ -7,6 +7,59 @@
 //   - `cd fixtures/basic && npm install`
 //   - `cd fixtures/app-router && npm install`
 
+#![allow(clippy::unwrap_used)]
+
+use std::path::PathBuf;
+
+/// Find the rex binary for E2E tests.
+///
+/// Checks `REX_BIN` env var first, then `target/debug/rex` (preferred),
+/// then `target/release/rex`. Panics if not found.
+pub fn rex_binary() -> PathBuf {
+    if let Ok(bin) = std::env::var("REX_BIN") {
+        return PathBuf::from(bin);
+    }
+
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+
+    // Prefer debug (matches `cargo build` default and pre-push hook)
+    let debug = workspace_root.join("target/debug/rex");
+    if debug.exists() {
+        return debug;
+    }
+
+    let release = workspace_root.join("target/release/rex");
+    if release.exists() {
+        return release;
+    }
+
+    panic!(
+        "Rex binary not found. Run `cargo build` or `cargo build --release` first.\n\
+         Or set REX_BIN=/path/to/rex"
+    );
+}
+
+/// Find the workspace root directory (parent of `crates/`).
+pub fn workspace_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf()
+}
+
+/// Find a free TCP port for test servers.
+pub fn find_free_port() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.local_addr().unwrap().port()
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 #[path = "app_router_tests.rs"]
@@ -34,55 +87,15 @@ mod tests {
 
     static SERVER: OnceLock<TestServer> = OnceLock::new();
 
-    fn rex_binary() -> PathBuf {
-        // Check REX_BIN env var first
-        if let Ok(bin) = std::env::var("REX_BIN") {
-            return PathBuf::from(bin);
-        }
-
-        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .to_path_buf();
-
-        // Prefer debug (matches `cargo build` default and pre-push hook)
-        let debug = workspace_root.join("target/debug/rex");
-        if debug.exists() {
-            return debug;
-        }
-
-        let release = workspace_root.join("target/release/rex");
-        if release.exists() {
-            return release;
-        }
-
-        panic!(
-            "Rex binary not found. Run `cargo build` or `cargo build --release` first.\n\
-             Or set REX_BIN=/path/to/rex"
-        );
-    }
-
     fn fixture_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("fixtures/basic")
-    }
-
-    fn find_free_port() -> u16 {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.local_addr().unwrap().port()
+        super::workspace_root().join("fixtures/basic")
     }
 
     fn ensure_server() -> &'static TestServer {
         SERVER.get_or_init(|| {
-            let bin = rex_binary();
+            let bin = super::rex_binary();
             let root = fixture_root();
-            let port = find_free_port();
+            let port = super::find_free_port();
 
             eprintln!("[e2e] Starting rex dev server on port {port}");
             eprintln!("[e2e] Binary: {}", bin.display());
@@ -529,14 +542,9 @@ mod tests {
     async fn e2e_graceful_shutdown() {
         // Spawn a separate server instance on a DIFFERENT fixture directory
         // to avoid build cache conflicts with the shared TestServer on fixtures/basic.
-        let bin = rex_binary();
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("fixtures/zero-config");
-        let port = find_free_port();
+        let bin = super::rex_binary();
+        let root = super::workspace_root().join("fixtures/zero-config");
+        let port = super::find_free_port();
 
         let mut child = Command::new(&bin)
             .arg("dev")
@@ -807,14 +815,9 @@ mod tests {
     async fn e2e_console_log_appears_in_server_output() {
         use std::io::{BufRead, BufReader};
 
-        let bin = rex_binary();
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("fixtures/zero-config");
-        let port = find_free_port();
+        let bin = super::rex_binary();
+        let root = super::workspace_root().join("fixtures/zero-config");
+        let port = super::find_free_port();
 
         let mut child = Command::new(&bin)
             .arg("dev")

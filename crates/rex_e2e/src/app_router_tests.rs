@@ -12,47 +12,15 @@ struct TestServer {
 
 static APP_SERVER: OnceLock<TestServer> = OnceLock::new();
 
-fn rex_binary() -> PathBuf {
-    if let Ok(bin) = std::env::var("REX_BIN") {
-        return PathBuf::from(bin);
-    }
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf();
-    // Prefer debug (matches `cargo build` default and pre-push hook)
-    let debug = workspace_root.join("target/debug/rex");
-    if debug.exists() {
-        return debug;
-    }
-    let release = workspace_root.join("target/release/rex");
-    if release.exists() {
-        return release;
-    }
-    panic!("Rex binary not found. Run `cargo build` first.");
-}
-
 fn fixture_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("fixtures/app-router")
-}
-
-fn find_free_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.local_addr().unwrap().port()
+    crate::workspace_root().join("fixtures/app-router")
 }
 
 fn ensure_server() -> &'static TestServer {
     APP_SERVER.get_or_init(|| {
-        let bin = rex_binary();
+        let bin = crate::rex_binary();
         let root = fixture_root();
-        let port = find_free_port();
+        let port = crate::find_free_port();
 
         eprintln!("[e2e-app] Starting rex dev server on port {port}");
         eprintln!("[e2e-app] Root: {}", root.display());

@@ -12,7 +12,6 @@
 #[allow(clippy::unwrap_used)]
 mod live {
     use std::net::TcpStream;
-    use std::path::PathBuf;
     use std::process::{Child, Command, Stdio};
     use std::sync::OnceLock;
     use std::time::{Duration, Instant};
@@ -24,53 +23,15 @@ mod live {
 
     static SERVER: OnceLock<LiveServer> = OnceLock::new();
 
-    fn rex_binary() -> PathBuf {
-        if let Ok(bin) = std::env::var("REX_BIN") {
-            return PathBuf::from(bin);
-        }
-
-        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .to_path_buf();
-
-        let release = workspace_root.join("target/release/rex");
-        if release.exists() {
-            return release;
-        }
-
-        let debug = workspace_root.join("target/debug/rex");
-        if debug.exists() {
-            return debug;
-        }
-
-        panic!(
-            "Rex binary not found. Run `cargo build` or `cargo build --release` first.\n\
-             Or set REX_BIN=/path/to/rex"
-        );
-    }
-
-    fn fixture_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("fixtures/live")
-    }
-
-    fn find_free_port() -> u16 {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.local_addr().unwrap().port()
+    fn fixture_root() -> std::path::PathBuf {
+        rex_e2e::workspace_root().join("fixtures/live")
     }
 
     fn ensure_server() -> &'static LiveServer {
         SERVER.get_or_init(|| {
-            let bin = rex_binary();
+            let bin = rex_e2e::rex_binary();
             let root = fixture_root();
-            let port = find_free_port();
+            let port = rex_e2e::find_free_port();
 
             eprintln!("[live-e2e] Starting rex live on port {port}");
             eprintln!("[live-e2e] Binary: {}", bin.display());
@@ -298,9 +259,9 @@ mod live {
     #[tokio::test]
     #[ignore]
     async fn live_graceful_shutdown() {
-        let bin = rex_binary();
+        let bin = rex_e2e::rex_binary();
         let root = fixture_root();
-        let port = find_free_port();
+        let port = rex_e2e::find_free_port();
 
         let mut child = Command::new(&bin)
             .arg("live")
