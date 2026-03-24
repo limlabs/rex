@@ -3,7 +3,7 @@ use rex_core::{AssetManifest, ProjectConfig, RexConfig};
 use rex_router::{RouteTrie, ScanResult};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 /// State that can change during dev-mode rebuilds.
 #[derive(Clone)]
@@ -36,6 +36,9 @@ pub struct HotState {
     /// Pre-rendered app routes (route pattern → HTML + flight data).
     /// Populated at startup for production builds; empty in dev mode.
     pub prerendered_app: HashMap<String, crate::prerender::PrerenderedAppRoute>,
+    /// Import map JSON for unbundled dev serving (dev mode only).
+    /// Injected into HTML `<script type="importmap">`. None in production.
+    pub import_map_json: Option<String>,
 }
 
 impl HotState {
@@ -99,6 +102,10 @@ pub struct AppState {
     pub hot: RwLock<Arc<HotState>>,
     /// ESM module state for HMR fast path. None if using IIFE loading.
     pub esm: Option<RwLock<EsmState>>,
+    /// Pre-bundled browser deps for unbundled dev serving (dev mode only).
+    /// Maps URL key (e.g., "react__jsx-runtime") → ESM source.
+    /// Set once during lazy init via `OnceLock`.
+    pub client_deps: OnceLock<Arc<HashMap<String, String>>>,
     /// Lazy init gate — first request triggers build + ESM loading (dev mode only).
     pub lazy_init: tokio::sync::OnceCell<()>,
     /// Context needed for lazy init. Consumed on first use.
@@ -225,6 +232,58 @@ impl AppState {
                 if let Some(esm_lock) = &state.esm {
                     if let Ok(mut guard) = esm_lock.write() {
                         *guard = esm_state;
+                    }
+                }
+
+                // Build browser dep bundles for unbundled dev serving (dev mode only).
+                // Runs lazily here (not at startup) to avoid increasing startup time.
+                if state.is_dev {
+                    let module_dirs = rex_build::resolve_modules_dirs(&ctx.config)?;
+                    // Collect extra deps from ESM state (discovered during import graph walk)
+                    let extra_deps = if let Some(esm_lock) = &state.esm {
+                        if let Ok(esm) = esm_lock.read() {
+                            // Re-collect source modules to discover extra dep imports
+                            // for the browser. We need the DepImport list which isn't
+                            // stored in EsmState, so pass empty for now — core React
+                            // deps are always bundled. Extra deps will be added in
+                            // Phase 2 when we have the full import graph available.
+                            let _ = &esm.source_modules; // suppress unused warning
+                            Vec::new()
+                        } else {
+                            Vec::new()
+                        }
+                    } else {
+                        Vec::new()
+                    };
+
+                    match rex_build::client_dep_bundle::build_client_dep_esm(
+                        &ctx.config,
+                        &extra_deps,
+                        &module_dirs,
+                    )
+                    .await
+                    {
+                        Ok(bundle) => {
+                            tracing::debug!(
+                                modules = bundle.modules.len(),
+                                "Client dep bundles ready"
+                            );
+                            // Store client deps in AppState for /_rex/dep/ handler.
+                            let _ = state.client_deps.set(Arc::new(bundle.modules));
+
+                            // Store import map JSON in HotState
+                            {
+                                let mut guard = state.hot.write().map_err(|e| {
+                                    anyhow::anyhow!("HotState write lock poisoned: {e}")
+                                })?;
+                                let mut hot = (**guard).clone();
+                                hot.import_map_json = Some(bundle.import_map_json);
+                                *guard = Arc::new(hot);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Client dep bundling failed: {e:#}");
+                        }
                     }
                 }
 

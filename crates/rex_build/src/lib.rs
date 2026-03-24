@@ -1,5 +1,6 @@
 pub mod builtin_modules;
 pub mod bundler;
+pub mod client_dep_bundle;
 pub mod client_manifest;
 pub mod dce;
 pub(crate) mod diagnostics;

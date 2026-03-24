@@ -363,6 +363,7 @@ impl Rex {
             project_root: config.project_root.clone(),
             image_cache,
             esm: esm_state.map(RwLock::new),
+            client_deps: std::sync::OnceLock::new(), // Populated during lazy init (dev)
             lazy_init: tokio::sync::OnceCell::new(),
             lazy_init_ctx: std::sync::Mutex::new(lazy_init_ctx),
             hot: RwLock::new(Arc::new(HotState {
@@ -383,6 +384,7 @@ impl Rex {
                 has_mcp_tools: !scan.mcp_tools.is_empty(),
                 prerendered,
                 prerendered_app,
+                import_map_json: None,
             })),
         });
 

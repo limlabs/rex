@@ -366,6 +366,7 @@ pub async fn handle_file_event(
                     project_config: old_hot.project_config.clone(),
                     app_route_trie,
                     app_api_route_trie,
+                    import_map_json: old_hot.import_map_json.clone(),
                 });
 
                 (new_build_id, new_client_manifest, new_ssr_bundle_path)
@@ -496,6 +497,7 @@ pub async fn handle_file_event(
                     has_mcp_tools: !scan.mcp_tools.is_empty(),
                     prerendered: std::collections::HashMap::new(),
                     prerendered_app: std::collections::HashMap::new(),
+                    import_map_json: old_hot.import_map_json.clone(),
                 });
                 (bid, cm, ssr)
             };

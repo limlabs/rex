@@ -410,6 +410,7 @@ impl TestAppBuilder {
             image_cache: rex_image::ImageCache::new(project_root.join(".rex-cache")),
             project_root,
             esm: None,
+            client_deps: std::sync::OnceLock::new(),
             lazy_init: tokio::sync::OnceCell::const_new_with(()),
             lazy_init_ctx: std::sync::Mutex::new(None),
             hot: RwLock::new(Arc::new(HotState {
@@ -434,6 +435,7 @@ impl TestAppBuilder {
                 has_mcp_tools: false,
                 prerendered: self.prerendered,
                 prerendered_app: std::collections::HashMap::new(),
+                import_map_json: None,
             })),
         });
 
