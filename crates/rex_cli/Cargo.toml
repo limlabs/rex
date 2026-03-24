@@ -21,7 +21,7 @@ runtime = []
 ## Adds `rex build` (pulls in rolldown + OXC bundler).
 build = ["dep:rex_build", "rex_server/build"]
 ## Adds `rex dev` + `rex typecheck` (pulls in file watcher, TUI, and build deps).
-dev = ["build", "dep:rex_dev", "dep:ratatui", "dep:crossterm"]
+dev = ["build", "dep:rex_dev", "dep:ratatui", "dep:crossterm", "dep:chrono"]
 ## Adds `rex lint` + `rex fmt` (pulls in OXC linter/formatter).
 lint = [
     "dep:oxc_formatter",
@@ -58,6 +58,7 @@ oxc_allocator = { git = "https://github.com/oxc-project/oxc", branch = "main", o
 oxc_parser = { git = "https://github.com/oxc-project/oxc", branch = "main", optional = true }
 oxc_span = { git = "https://github.com/oxc-project/oxc", branch = "main", optional = true }
 rayon = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"
