@@ -411,6 +411,7 @@ impl TestAppBuilder {
             project_root,
             esm: None,
             client_deps: std::sync::OnceLock::new(),
+            browser_transform_cache: std::sync::OnceLock::new(),
             lazy_init: tokio::sync::OnceCell::const_new_with(()),
             lazy_init_ctx: std::sync::Mutex::new(None),
             hot: RwLock::new(Arc::new(HotState {

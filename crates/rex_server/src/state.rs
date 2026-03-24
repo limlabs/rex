@@ -106,6 +106,9 @@ pub struct AppState {
     /// Maps URL key (e.g., "react__jsx-runtime") → ESM source.
     /// Set once during lazy init via `OnceLock`.
     pub client_deps: OnceLock<Arc<HashMap<String, String>>>,
+    /// Browser-side OXC transform cache for `/_rex/src/` handler (dev mode only).
+    /// Keyed by canonical path, invalidated by mtime change.
+    pub browser_transform_cache: OnceLock<crate::handlers::dev_modules::BrowserTransformCache>,
     /// Lazy init gate — first request triggers build + ESM loading (dev mode only).
     pub lazy_init: tokio::sync::OnceCell<()>,
     /// Context needed for lazy init. Consumed on first use.

@@ -1,6 +1,7 @@
 mod action;
 mod api;
 mod data;
+pub mod dev_modules;
 mod image;
 mod page;
 mod rsc;
@@ -8,6 +9,7 @@ mod rsc;
 pub use action::server_action_handler;
 pub use api::api_handler;
 pub use data::data_handler;
+pub use dev_modules::src_handler;
 pub use image::{image_handler, ImageQuery};
 pub use page::page_handler;
 pub use rsc::{rsc_handler, rsc_handler_root};

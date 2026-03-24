@@ -74,6 +74,7 @@ impl RexServer {
             image_cache,
             esm: None,
             client_deps: std::sync::OnceLock::new(),
+            browser_transform_cache: std::sync::OnceLock::new(),
             lazy_init: tokio::sync::OnceCell::const_new_with(()),
             lazy_init_ctx: std::sync::Mutex::new(None),
             hot: RwLock::new(Arc::new(HotState {
@@ -158,6 +159,8 @@ impl RexServer {
             .route("/_rex/router.js", get(router_js_handler))
             // RSC client runtime
             .route("/_rex/rsc-runtime.js", get(rsc_runtime_js_handler))
+            // Dev-only: unbundled source file serving (OXC-transformed ESM)
+            .route("/_rex/src/{*path}", get(handlers::src_handler))
             // Dev-only: pre-bundled browser deps for unbundled serving
             .route("/_rex/dep/{*specifier}", get(dep_handler))
             // Merge any extra routes (e.g., HMR websocket)
