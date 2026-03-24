@@ -10,7 +10,7 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 markdown = "1"
-oxc_allocator = "0.115"
-oxc_parser = "0.115"
-oxc_ast = "0.115"
-oxc_span = "0.115"
+oxc_allocator = "0.122"
+oxc_parser = "0.122"
+oxc_ast = "0.122"
+oxc_span = "0.122"
