@@ -28,8 +28,7 @@
     },
     emit: function (event: string, ...args: unknown[]) {
       const arr = listeners[event];
-      if (arr)
-        for (let i = 0; i < arr.length; i++) arr[i].apply(null, args);
+      if (arr) for (let i = 0; i < arr.length; i++) arr[i].apply(null, args);
     },
   };
 
@@ -53,7 +52,7 @@
 
   // --- Base path ---
 
-  const basePath = ((window.__REX_BASE_PATH || "") as string).replace(/\/+$/, "");
+  const basePath = ((window.__REX_BASE_PATH || '') as string).replace(/\/+$/, '');
 
   // Strip the base path prefix and any trailing slash from a browser pathname
   // so it can be matched against manifest route patterns (which never include
@@ -61,11 +60,11 @@
   function stripBasePath(pathname: string): string {
     let p = pathname;
     if (basePath && p.startsWith(basePath)) {
-      p = p.slice(basePath.length) || "/";
+      p = p.slice(basePath.length) || '/';
     }
     // Normalise trailing slash (GitHub Pages redirects to trailing slash for
     // directory/index.html files)
-    if (p.length > 1 && p.endsWith("/")) {
+    if (p.length > 1 && p.endsWith('/')) {
       p = p.slice(0, -1);
     }
     return p;
@@ -76,12 +75,13 @@
   function parseQuery(search: string): Record<string, string> {
     const query: Record<string, string> = {};
     if (!search || search.length < 2) return query;
-    const pairs = search.substring(1).split("&");
+    const pairs = search.substring(1).split('&');
     for (let i = 0; i < pairs.length; i++) {
-      const idx = pairs[i].indexOf("=");
+      const idx = pairs[i].indexOf('=');
       if (idx > 0) {
-        query[decodeURIComponent(pairs[i].substring(0, idx))] =
-          decodeURIComponent(pairs[i].substring(idx + 1));
+        query[decodeURIComponent(pairs[i].substring(0, idx))] = decodeURIComponent(
+          pairs[i].substring(idx + 1),
+        );
       }
     }
     return query;
@@ -92,23 +92,20 @@
   function matchRoute(pathname: string): RouteMatch | null {
     if (pages[pathname]) return { pattern: pathname, params: {} };
     for (const pattern in pages) {
-      if (pattern.indexOf(":") === -1) continue;
+      if (pattern.indexOf(':') === -1) continue;
       const params = matchDynamic(pattern, pathname);
       if (params) return { pattern, params };
     }
     return null;
   }
 
-  function matchDynamic(
-    pattern: string,
-    pathname: string,
-  ): Record<string, string> | null {
-    const pp = pattern.split("/");
-    const up = pathname.split("/");
+  function matchDynamic(pattern: string, pathname: string): Record<string, string> | null {
+    const pp = pattern.split('/');
+    const up = pathname.split('/');
     if (pp.length !== up.length) return null;
     const params: Record<string, string> = {};
     for (let i = 0; i < pp.length; i++) {
-      if (pp[i][0] === ":") {
+      if (pp[i][0] === ':') {
         params[pp[i].slice(1)] = decodeURIComponent(up[i]);
       } else if (pp[i] !== up[i]) {
         return null;
@@ -120,7 +117,7 @@
   function matchAppRoute(pathname: string): RouteMatch | null {
     if (appRoutes[pathname]) return { pattern: pathname, params: {} };
     for (const pattern in appRoutes) {
-      if (pattern.indexOf(":") === -1) continue;
+      if (pattern.indexOf(':') === -1) continue;
       const params = matchDynamic(pattern, pathname);
       if (params) return { pattern, params };
     }
@@ -130,9 +127,7 @@
   // --- Router state ---
 
   const initialPathname = stripBasePath(window.location.pathname);
-  const initialMatch =
-    matchRoute(initialPathname) ||
-    matchAppRoute(initialPathname);
+  const initialMatch = matchRoute(initialPathname) || matchAppRoute(initialPathname);
   const initialQuery = parseQuery(window.location.search);
   if (initialMatch) {
     for (const k in initialMatch.params) initialQuery[k] = initialMatch.params[k];
@@ -146,7 +141,7 @@
   };
 
   function updateState(match: RouteMatch | null, url: string): void {
-    const a = document.createElement("a");
+    const a = document.createElement('a');
     a.href = url;
     const query = parseQuery(a.search);
     if (match) {
@@ -162,11 +157,12 @@
 
   function fetchPageData(pathname: string): Promise<GsspData> {
     // Static export uses index.json for root to avoid dotfile that static servers skip
-    const file = window.__REX_STATIC_EXPORT && pathname === "/" ? "/index.json" : pathname + ".json";
-    const basePath = ((window.__REX_BASE_PATH || "") as string).replace(/\/+$/, "");
-    const dataUrl = basePath + "/_rex/data/" + buildId + file;
+    const file =
+      window.__REX_STATIC_EXPORT && pathname === '/' ? '/index.json' : pathname + '.json';
+    const basePath = ((window.__REX_BASE_PATH || '') as string).replace(/\/+$/, '');
+    const dataUrl = basePath + '/_rex/data/' + buildId + file;
     return fetch(dataUrl).then(function (res) {
-      if (!res.ok) throw new Error("Data fetch failed: " + res.status);
+      if (!res.ok) throw new Error('Data fetch failed: ' + res.status);
       return res.json() as Promise<GsspData>;
     });
   }
@@ -178,13 +174,13 @@
       return Promise.resolve();
     }
     const js = pages[pattern] && pages[pattern].js;
-    if (!js) return Promise.reject(new Error("No chunk for: " + pattern));
+    if (!js) return Promise.reject(new Error('No chunk for: ' + pattern));
 
     if (!loadingChunks[js]) {
       window.__REX_NAVIGATING__ = true;
       // Dev unbundled mode: js is already a full URL (/_rex/entry/...)
       // Production: js is a chunk filename that needs /_rex/static/ prefix
-      const url = js.startsWith("/_rex/") ? js : "/_rex/static/" + js;
+      const url = js.startsWith('/_rex/') ? js : '/_rex/static/' + js;
       loadingChunks[js] = import(url).then(function () {
         delete loadingChunks[js];
       });
@@ -199,10 +195,10 @@
     if (!entry || !entry.css || !entry.css.length) return;
 
     for (let i = 0; i < entry.css.length; i++) {
-      const href = "/_rex/static/" + entry.css[i];
+      const href = '/_rex/static/' + entry.css[i];
       if (!document.querySelector('link[href="' + href + '"]')) {
-        const link = document.createElement("link");
-        link.rel = "stylesheet";
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
         link.href = href;
         document.head.appendChild(link);
       }
@@ -217,7 +213,7 @@
     match: RouteMatch,
     opts: NavigateOpts,
   ): Promise<void> {
-    events.emit("routeChangeStart", fullUrl);
+    events.emit('routeChangeStart', fullUrl);
 
     const rscNavigate = window.__REX_RSC_NAVIGATE;
     if (!rscNavigate) {
@@ -228,19 +224,19 @@
     return rscNavigate(pathname)
       .then(function () {
         if (!opts.popstate) {
-          events.emit("beforeHistoryChange", fullUrl);
+          events.emit('beforeHistoryChange', fullUrl);
           if (opts.replace) {
-            history.replaceState({ __rex: pathname }, "", fullUrl);
+            history.replaceState({ __rex: pathname }, '', fullUrl);
           } else {
-            history.pushState({ __rex: pathname }, "", fullUrl);
+            history.pushState({ __rex: pathname }, '', fullUrl);
           }
         }
         updateState(match, fullUrl);
         if (!opts.popstate) window.scrollTo(0, 0);
-        events.emit("routeChangeComplete", fullUrl);
+        events.emit('routeChangeComplete', fullUrl);
       })
       .catch(function (err: Error) {
-        events.emit("routeChangeError", err, fullUrl);
+        events.emit('routeChangeError', err, fullUrl);
         window.location.href = fullUrl;
       });
   }
@@ -250,7 +246,7 @@
   function navigate(url: string, opts?: NavigateOpts): Promise<void> {
     opts = opts || {};
 
-    const a = document.createElement("a");
+    const a = document.createElement('a');
     a.href = url;
     const rawPathname = a.pathname;
     const pathname = stripBasePath(rawPathname);
@@ -266,7 +262,7 @@
       return Promise.resolve();
     }
 
-    events.emit("routeChangeStart", fullUrl);
+    events.emit('routeChangeStart', fullUrl);
 
     const dataPromise = prefetchCache[pathname] || fetchPageData(pathname);
     delete prefetchCache[pathname];
@@ -292,11 +288,11 @@
 
         // Update URL (skip on popstate — browser already updated it)
         if (!opts!.popstate) {
-          events.emit("beforeHistoryChange", fullUrl);
+          events.emit('beforeHistoryChange', fullUrl);
           if (opts!.replace) {
-            history.replaceState({ __rex: pathname }, "", url);
+            history.replaceState({ __rex: pathname }, '', url);
           } else {
-            history.pushState({ __rex: pathname }, "", url);
+            history.pushState({ __rex: pathname }, '', url);
           }
         }
 
@@ -304,7 +300,7 @@
         updateState(match, url);
 
         // Update data element
-        const dataEl = document.getElementById("__REX_DATA__");
+        const dataEl = document.getElementById('__REX_DATA__');
         if (dataEl) dataEl.textContent = JSON.stringify(props);
 
         // Load page CSS
@@ -321,29 +317,25 @@
           window.scrollTo(0, 0);
         }
 
-        events.emit("routeChangeComplete", fullUrl);
+        events.emit('routeChangeComplete', fullUrl);
       })
       .catch(function (err) {
-        console.error("Rex navigation failed:", err);
-        events.emit("routeChangeError", err, fullUrl);
+        console.error('Rex navigation failed:', err);
+        events.emit('routeChangeError', err, fullUrl);
         window.location.href = url;
       });
   }
 
   // --- Popstate (back/forward) ---
 
-  window.addEventListener("popstate", function (e: PopStateEvent) {
+  window.addEventListener('popstate', function (e: PopStateEvent) {
     if (e.state && (e.state as Record<string, unknown>).__rex) {
       navigate(window.location.href, { replace: true, popstate: true });
     }
   });
 
   // Mark initial page in history state
-  history.replaceState(
-    { __rex: window.location.pathname },
-    "",
-    window.location.href,
-  );
+  history.replaceState({ __rex: window.location.pathname }, '', window.location.href);
 
   // --- Public API ---
 
@@ -365,7 +357,7 @@
       window.location.reload();
     },
     prefetch: function (url: string) {
-      const a = document.createElement("a");
+      const a = document.createElement('a');
       a.href = url;
       const pathname = stripBasePath(a.pathname);
       if (matchRoute(pathname)) {
