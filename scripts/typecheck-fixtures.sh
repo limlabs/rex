@@ -23,13 +23,18 @@ fi
 TMPDIR_BASE="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_BASE"' EXIT
 
-# Check if a directory is part of the npm workspace (deps hoisted to root).
+# Build the list of npm workspace member paths (deps hoisted to root).
+WORKSPACE_MEMBERS=""
+if [[ -f "$ROOT/package.json" ]]; then
+  WORKSPACE_MEMBERS="$(cd "$ROOT" && npm query ':root > .workspace' 2>/dev/null | node -e "
+    const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+    data.forEach(w => console.log(w.path));
+  " 2>/dev/null)" || true
+fi
+
 is_workspace_member() {
-  local dir="$1"
-  case "$dir" in
-    "$FIXTURES_DIR"/*|"$ROOT"/packages/*|"$ROOT"/runtime|"$ROOT"/docs|"$ROOT"/crates/rex_napi) return 0 ;;
-    *) return 1 ;;
-  esac
+  local dir="${1%/}"
+  echo "$WORKSPACE_MEMBERS" | grep -qxF "$dir"
 }
 
 check_fixture() {

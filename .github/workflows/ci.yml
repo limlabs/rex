@@ -36,9 +36,6 @@ jobs:
       - name: cargo check
         run: cargo check --all-targets
 
-      - name: Install runtime dependencies
-        run: cd runtime && npm ci
-
       - name: TypeScript strict check (runtime)
         run: cd runtime && npm run typecheck
 

@@ -8,7 +8,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "paths": {
-      "rex/*": ["./node_modules/@limlabs/rex/src/*", "../../node_modules/@limlabs/rex/src/*"],
+      "rex/*": ["./node_modules/@limlabs/rex/src/*"],
       "@limlabs/rex/server": ["../../packages/rex/src/server.ts"]
     }
   },

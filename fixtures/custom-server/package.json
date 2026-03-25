@@ -6,7 +6,7 @@
     "dev": "bun run server.ts"
   },
   "dependencies": {
-    "@limlabs/rex": "*",
+    "@limlabs/rex": "file:../../packages/rex",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },
