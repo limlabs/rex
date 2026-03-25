@@ -4,13 +4,7 @@
   "workspaces": [
     "packages/rex",
     "packages/create-rex-app",
-    "fixtures/app-router",
-    "fixtures/basic",
-    "fixtures/font",
-    "fixtures/mcp",
-    "fixtures/mdx",
-    "fixtures/nextjs-app-router",
-    "fixtures/tailwind",
+    "fixtures/*",
     "runtime",
     "docs",
     "crates/rex_napi"
