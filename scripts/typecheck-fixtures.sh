@@ -14,16 +14,28 @@ BENCHMARKS_DIR="$ROOT/benchmarks"
 # zero-config: types are extracted by `rex build`, not available before Rex runs
 SKIP=("tanstack-basic" "tanstack-tailwind" "zero-config" "context")
 
-# Ensure packages/rex has its dependencies installed (fixtures resolve
-# rex source files via path aliases and need @types/react available).
-REX_PKG="$ROOT/packages/rex"
-if [[ ! -d "$REX_PKG/node_modules" ]]; then
-  echo "--- Installing packages/rex dependencies ---"
-  (cd "$REX_PKG" && npm install --no-package-lock --ignore-scripts --no-audit --no-fund)
+# Ensure workspace dependencies are installed (hoisted to root node_modules).
+if [[ ! -d "$ROOT/node_modules" ]]; then
+  echo "--- Installing workspace dependencies ---"
+  (cd "$ROOT" && npm install --no-audit --no-fund)
 fi
 
 TMPDIR_BASE="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_BASE"' EXIT
+
+# Build the list of npm workspace member paths (deps hoisted to root).
+WORKSPACE_MEMBERS=""
+if [[ -f "$ROOT/package.json" ]]; then
+  WORKSPACE_MEMBERS="$(cd "$ROOT" && npm query ':root > .workspace' 2>/dev/null | node -e "
+    const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+    data.forEach(w => console.log(w.path));
+  " 2>/dev/null)" || true
+fi
+
+is_workspace_member() {
+  local dir="${1%/}"
+  echo "$WORKSPACE_MEMBERS" | grep -qxF "$dir"
+}
 
 check_fixture() {
   local dir="$1"
@@ -38,7 +50,9 @@ check_fixture() {
   {
     echo "--- Checking $name ---"
 
-    if [[ ! -d "$dir/node_modules" ]]; then
+    # For directories outside the npm workspace (e.g. benchmarks/), install
+    # deps locally. Workspace members get their deps from the root install.
+    if [[ ! -d "$dir/node_modules" ]] && ! is_workspace_member "$dir"; then
       echo "  Installing dependencies..."
       (cd "$dir" && npm install --no-package-lock --ignore-scripts --no-audit --no-fund) || {
         echo "  WARN: npm install failed for $name, skipping"

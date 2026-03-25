@@ -1,0 +1,12 @@
+{
+  "name": "rex-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/rex",
+    "packages/create-rex-app",
+    "fixtures/*",
+    "runtime",
+    "docs",
+    "crates/rex_napi"
+  ]
+}

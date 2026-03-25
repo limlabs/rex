@@ -17,8 +17,8 @@ export default function Home({ greeting, runtime }: Props) {
 export async function getServerSideProps() {
   return {
     props: {
-      greeting: "Hello from Rex + Bun!",
-      runtime: typeof Bun !== "undefined" ? "Bun" : "Node.js",
+      greeting: "Hello from Rex + Node.js!",
+      runtime: "Node.js",
     },
   };
 }

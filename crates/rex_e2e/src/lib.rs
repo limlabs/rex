@@ -538,18 +538,68 @@ mod tests {
         );
     }
 
+    /// Create an isolated copy of fixtures/basic in a temp directory so that
+    /// tests that spawn their own `rex dev` don't share `.rex/build/` with the
+    /// shared TestServer or each other (which causes race conditions).
+    fn isolated_fixture_copy() -> tempfile::TempDir {
+        let src = fixture_root();
+        let tmp = tempfile::tempdir().unwrap();
+        let dst = tmp.path();
+
+        // Copy pages/ and config files
+        for entry in std::fs::read_dir(&src).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            // Skip build artifacts and node_modules (we'll symlink node_modules)
+            if name_str == ".rex" || name_str == "node_modules" {
+                continue;
+            }
+            let src_path = entry.path();
+            let dst_path = dst.join(&name);
+            if src_path.is_dir() {
+                copy_dir_recursive(&src_path, &dst_path);
+            } else {
+                std::fs::copy(&src_path, &dst_path).unwrap();
+            }
+        }
+
+        // Symlink node_modules — first try fixture-local, then workspace root
+        let fixture_nm = src.join("node_modules");
+        let workspace_nm = src.parent().unwrap().parent().unwrap().join("node_modules");
+        let nm_source = if fixture_nm.join("react").exists() {
+            &fixture_nm
+        } else {
+            &workspace_nm
+        };
+        std::os::unix::fs::symlink(nm_source.canonicalize().unwrap(), dst.join("node_modules"))
+            .unwrap();
+
+        tmp
+    }
+
+    fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) {
+        std::fs::create_dir_all(dst).unwrap();
+        for entry in std::fs::read_dir(src).unwrap() {
+            let entry = entry.unwrap();
+            let src_path = entry.path();
+            let dst_path = dst.join(entry.file_name());
+            if src_path.is_dir() {
+                copy_dir_recursive(&src_path, &dst_path);
+            } else {
+                std::fs::copy(&src_path, &dst_path).unwrap();
+            }
+        }
+    }
+
     #[tokio::test]
     #[ignore]
     async fn e2e_graceful_shutdown() {
-        // Spawn a separate server instance on a DIFFERENT fixture directory
-        // to avoid build cache conflicts with the shared TestServer on fixtures/basic.
+        // Use an isolated copy of fixtures/basic so this test's .rex/build/
+        // doesn't conflict with the shared TestServer or other standalone tests.
+        let tmp = isolated_fixture_copy();
         let bin = rex_binary();
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("fixtures/zero-config");
+        let root = tmp.path().to_path_buf();
         let port = find_free_port();
 
         let mut child = Command::new(&bin)
@@ -834,13 +884,9 @@ mod tests {
     async fn e2e_console_log_appears_in_server_output() {
         use std::io::{BufRead, BufReader};
 
+        let tmp = isolated_fixture_copy();
         let bin = rex_binary();
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("fixtures/zero-config");
+        let root = tmp.path().to_path_buf();
         let port = find_free_port();
 
         let mut child = Command::new(&bin)
