@@ -1,6 +1,6 @@
 [package]
 name = "rex_e2e"
-version = "0.19.3" # x-release-please-version
+version = "0.20.0" # x-release-please-version
 edition = "2021"
 publish = false
 
