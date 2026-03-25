@@ -25,17 +25,43 @@ jobs:
       beta_tag: ${{ steps.version.outputs.beta_tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Extract version from manifest
+      - name: Compute next version from conventional commits
         id: version
         run: |
-          VERSION=$(jq -r '."."' .release-please-manifest.json)
-          BETA_VERSION="${VERSION}-beta.${{ github.run_number }}"
+          CURRENT=$(jq -r '."."' .release-please-manifest.json)
+          LAST_TAG="v${CURRENT}"
+
+          # Determine bump type by scanning commits since last release
+          BUMP="patch"
+          if git rev-parse "$LAST_TAG" >/dev/null 2>&1; then
+            COMMITS=$(git log "${LAST_TAG}..HEAD" --pretty=format:"%s")
+            BODIES=$(git log "${LAST_TAG}..HEAD" --pretty=format:"%b")
+            # Breaking changes -> minor (bump-minor-pre-major while <1.0)
+            if echo "$COMMITS" | grep -qE '^[a-z]+(\(.*\))?!:' || echo "$BODIES" | grep -qE '^BREAKING CHANGE:'; then
+              BUMP="minor"
+            # Features -> minor
+            elif echo "$COMMITS" | grep -qE '^feat(\(.*\))?:'; then
+              BUMP="minor"
+            fi
+          fi
+
+          # Apply bump
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          case "$BUMP" in
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+          NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+
+          BETA_VERSION="${NEXT_VERSION}-beta.${{ github.run_number }}"
           BETA_TAG="v${BETA_VERSION}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
           echo "beta_version=$BETA_VERSION" >> "$GITHUB_OUTPUT"
           echo "beta_tag=$BETA_TAG" >> "$GITHUB_OUTPUT"
-          echo "::notice::Beta version: $BETA_VERSION (tag: $BETA_TAG)"
+          echo "::notice::Current: $CURRENT, bump: $BUMP, next: $NEXT_VERSION, beta: $BETA_VERSION"
 
   build-linux:
     name: Build Linux (x86_64)
