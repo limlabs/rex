@@ -33,19 +33,28 @@ mod tests {
         }
     }
 
-    /// Symlink the real node_modules from fixtures/app-router into a test directory.
+    /// Symlink node_modules into a test directory.
+    ///
+    /// Tries the workspace root first (npm workspaces hoists deps there),
+    /// then falls back to the fixture-local node_modules for non-workspace setups.
     fn setup_rsc_node_modules(root: &Path) {
-        let fixture_nm =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/app-router/node_modules");
-        assert!(
-            fixture_nm.exists(),
-            "fixtures/app-router/node_modules not found — run `cd fixtures/app-router && npm install`"
-        );
-        std::os::unix::fs::symlink(
-            fixture_nm.canonicalize().unwrap(),
-            root.join("node_modules"),
-        )
-        .unwrap();
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let workspace_nm = repo_root.join("node_modules");
+        let fixture_nm = repo_root.join("fixtures/app-router/node_modules");
+
+        let source = if workspace_nm.join("react").exists() {
+            &workspace_nm
+        } else if fixture_nm.exists() {
+            &fixture_nm
+        } else {
+            panic!(
+                "node_modules not found — run `npm install` from the repo root \
+                 or `cd fixtures/app-router && npm install`"
+            );
+        };
+
+        std::os::unix::fs::symlink(source.canonicalize().unwrap(), root.join("node_modules"))
+            .unwrap();
         // package.json is needed so the build doesn't try to use built-in modules
         fs::write(
             root.join("package.json"),
