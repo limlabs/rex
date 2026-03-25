@@ -1,3 +1,4 @@
+use chrono::Local;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use tracing::field::{Field, Visit};
@@ -9,6 +10,7 @@ use tracing_subscriber::Layer;
 pub struct LogEntry {
     pub level: Level,
     pub message: String,
+    pub timestamp: String,
 }
 
 /// Thread-safe ring buffer of log entries.
@@ -137,9 +139,12 @@ impl<S: Subscriber> Layer<S> for TuiLogLayer {
             message.push_str(&visitor.fields.join(" "));
         }
 
+        let timestamp = Local::now().format("%H:%M:%S").to_string();
+
         self.buffer.push(LogEntry {
             level: *event.metadata().level(),
             message,
+            timestamp,
         });
     }
 }

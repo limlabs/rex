@@ -490,6 +490,29 @@ pub fn drain_js_timers(isolate: &mut v8::OwnedIsolate, context: &v8::Global<v8::
     }
 }
 
+/// Check if the JS-side async result (GSSP/GSP/API) has settled.
+/// Returns true if the promise has resolved or rejected.
+fn is_async_settled(isolate: &mut v8::OwnedIsolate, context: &v8::Global<v8::Context>) -> bool {
+    v8::scope_with_context!(scope, isolate, context);
+    let global = context.open(scope).global(scope);
+
+    let Some(key) = v8::String::new(scope, "__rex_is_async_settled") else {
+        return false;
+    };
+    let Some(func_val) = global.get(scope, key.into()) else {
+        return false;
+    };
+    let Ok(func) = v8::Local::<v8::Function>::try_from(func_val) else {
+        return false;
+    };
+
+    let recv = v8::undefined(scope);
+    match func.call(scope, recv.into(), &[]) {
+        Some(result) => result.boolean_value(scope),
+        None => false,
+    }
+}
+
 /// Run the batch-and-resolve loop until all async work is settled.
 ///
 /// This is the core IO loop that enables `fetch()` and TCP sockets in bare V8:
@@ -583,34 +606,45 @@ pub fn run_fetch_loop(isolate: &mut v8::OwnedIsolate, context: &v8::Global<v8::C
             continue;
         }
 
-        // No progress. Wait briefly and retry once — the server may respond
-        // within a millisecond (typical for localhost database queries).
-        std::thread::sleep(std::time::Duration::from_millis(1));
-
-        isolate.perform_microtask_checkpoint();
-
-        // Drain timers again after sleep
-        if drain_js_timers(isolate, context) {
-            continue;
-        }
-
-        // Check if microtasks produced new fetch requests (without consuming them)
-        let new_fetch = FETCH_QUEUE.with(|q| !q.borrow().is_empty());
-        if new_fetch {
-            continue;
-        }
-
-        // Retry TCP poll after sleep
+        // No progress this iteration. If there are active TCP sockets, keep
+        // polling — the remote server may need more than 1ms to respond
+        // (e.g., SCRAM-SHA-256 auth, remote databases, server under load).
+        // The 30-second deadline provides the safety net against infinite loops.
         if has_tcp {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+
+            isolate.perform_microtask_checkpoint();
+
+            // Drain timers again after sleep
+            if drain_js_timers(isolate, context) {
+                continue;
+            }
+
+            // Check if microtasks produced new fetch requests
+            let new_fetch = FETCH_QUEUE.with(|q| !q.borrow().is_empty());
+            if new_fetch {
+                continue;
+            }
+
+            // Retry TCP poll after sleep
             let tcp_progress = crate::tcp::poll_tcp_sockets(isolate, context);
             if tcp_progress {
                 isolate.perform_microtask_checkpoint();
                 continue;
             }
+
+            // Still no TCP data — but sockets are still active, so keep waiting
+            // UNLESS the main async operation has already settled (e.g., the GSSP
+            // query completed but postgres.js keeps the connection open for reuse).
+            if crate::tcp::has_active_tcp_sockets() {
+                if is_async_settled(isolate, context) {
+                    break;
+                }
+                continue;
+            }
         }
 
-        // Still no progress after retry — exit. The outer loop (resolve_rsc_async)
-        // will re-enter if the render/action is still pending.
+        // No active TCP sockets and no other pending work — exit.
         break;
     }
 }

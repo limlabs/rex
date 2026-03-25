@@ -378,6 +378,10 @@ impl TuiApp {
             match last_entry {
                 Some(entry) => Line::from(vec![
                     Span::styled(
+                        format!("{} ", entry.timestamp),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::styled(
                         level_symbol(&entry.level),
                         Style::default().fg(level_color(&entry.level)),
                     ),

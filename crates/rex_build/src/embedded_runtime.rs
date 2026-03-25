@@ -153,6 +153,10 @@ const SERVER_FILES: &[(&str, &str)] = &[
         include_str!("../../../runtime/server/react-server-bridge.ts"),
     ),
     (
+        "perf_hooks.ts",
+        include_str!("../../../runtime/server/perf_hooks.ts"),
+    ),
+    (
         "readline.ts",
         include_str!("../../../runtime/server/readline.ts"),
     ),

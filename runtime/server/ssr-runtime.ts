@@ -17,6 +17,7 @@ declare var __rex_gsp_resolved: any;
 declare var __rex_gsp_rejected: any;
 declare var __rex_get_static_props: (routeKey: string, contextJson: string) => string;
 declare var __rex_resolve_gsp: () => string;
+declare var __rex_is_async_settled: () => boolean;
 /* eslint-enable no-var */
 
 // SSR render function — returns JSON { body, head }
@@ -163,4 +164,23 @@ globalThis.__rex_resolve_static_paths = function(): string {
     if (globalThis.__rex_gsp_paths_rejected) throw globalThis.__rex_gsp_paths_rejected;
     if (globalThis.__rex_gsp_paths_resolved !== null) return JSON.stringify(globalThis.__rex_gsp_paths_resolved);
     throw new Error('getStaticPaths promise did not resolve');
+};
+
+// Generic "is the async result settled?" check for the IO loop.
+// Returns true if any async operation (GSSP, GSP, API, etc.) has resolved or rejected.
+// Called from Rust's run_fetch_loop() to exit early when the main promise settles,
+// even if TCP sockets remain active (e.g., connection pooling).
+globalThis.__rex_is_async_settled = function(): boolean {
+    // Check only defined flags — uninitialized globals are undefined, not null.
+    // Each async operation sets its flags to null before starting, then to a
+    // non-null value when settled. We check for non-null AND non-undefined.
+    const g = globalThis as any;
+    return (g.__rex_gssp_resolved != null)
+        || (g.__rex_gssp_rejected != null)
+        || (g.__rex_gsp_resolved != null)
+        || (g.__rex_gsp_rejected != null)
+        || (g.__rex_api_resolved != null)
+        || (g.__rex_api_rejected != null)
+        || (g.__rex_gsp_paths_resolved != null)
+        || (g.__rex_gsp_paths_rejected != null);
 };
