@@ -1,7 +1,8 @@
-"use client";
+'use client';
 
-import React, { useState, useEffect, useCallback } from "react";
-import Link from "rex/link";
+import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'rex/link';
+import { VERSION } from '../lib/version';
 
 interface NavItem {
   title: string;
@@ -15,48 +16,48 @@ interface NavSection {
 
 const navigation: NavSection[] = [
   {
-    title: "Getting Started",
+    title: 'Getting Started',
     items: [
-      { title: "Quickstart", href: "/getting-started" },
-      { title: "Installation", href: "/getting-started/installation" },
+      { title: 'Quickstart', href: '/getting-started' },
+      { title: 'Installation', href: '/getting-started/installation' },
     ],
   },
   {
-    title: "How Rex Works",
+    title: 'How Rex Works',
     items: [
-      { title: "Motivations", href: "/architecture/motivations" },
-      { title: "Architecture", href: "/architecture" },
-      { title: "Differences from Next.js", href: "/architecture/differences" },
+      { title: 'Motivations', href: '/architecture/motivations' },
+      { title: 'Architecture', href: '/architecture' },
+      { title: 'Differences from Next.js', href: '/architecture/differences' },
     ],
   },
   {
-    title: "Features",
+    title: 'Features',
     items: [
-      { title: "Routing", href: "/features/routing" },
-      { title: "Data Fetching", href: "/features/data-fetching" },
-      { title: "Styling", href: "/features/styling" },
-      { title: "Middleware", href: "/features/middleware" },
-      { title: "Custom Server", href: "/features/custom-server" },
-      { title: "MDX", href: "/features/mdx" },
-      { title: "Live Mode", href: "/features/live-mode" },
+      { title: 'Routing', href: '/features/routing' },
+      { title: 'Data Fetching', href: '/features/data-fetching' },
+      { title: 'Styling', href: '/features/styling' },
+      { title: 'Middleware', href: '/features/middleware' },
+      { title: 'Custom Server', href: '/features/custom-server' },
+      { title: 'MDX', href: '/features/mdx' },
+      { title: 'Live Mode', href: '/features/live-mode' },
     ],
   },
   {
-    title: "Reference",
+    title: 'Reference',
     items: [
-      { title: "CLI", href: "/cli" },
-      { title: "Configuration", href: "/configuration" },
+      { title: 'CLI', href: '/cli' },
+      { title: 'Configuration', href: '/configuration' },
     ],
   },
   {
-    title: "Deployment",
-    items: [{ title: "Deploy Rex", href: "/deployment" }],
+    title: 'Deployment',
+    items: [{ title: 'Deploy Rex', href: '/deployment' }],
   },
 ];
 
 export default function Sidebar() {
   const [open, setOpen] = useState(false);
-  const [pathname, setPathname] = useState("");
+  const [pathname, setPathname] = useState('');
 
   useEffect(() => {
     setPathname(window.location.pathname);
@@ -64,8 +65,8 @@ export default function Sidebar() {
     function onPopState() {
       setPathname(window.location.pathname);
     }
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
   const handleNavClick = useCallback(() => {
@@ -93,21 +94,20 @@ export default function Sidebar() {
       </button>
 
       {open && (
-        <div
-          className="lg:hidden fixed inset-0 bg-black/30 z-30"
-          onClick={() => setOpen(false)}
-        />
+        <div className="lg:hidden fixed inset-0 bg-black/30 z-30" onClick={() => setOpen(false)} />
       )}
 
       <aside
         className={`fixed top-0 left-0 z-40 h-full w-64 bg-slate-900 text-slate-300 overflow-y-auto transition-transform lg:translate-x-0 ${
-          open ? "translate-x-0" : "-translate-x-full"
+          open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         <div className="px-5 py-5 border-b border-slate-700">
           <Link href="/" className="flex items-center gap-2 no-underline">
             <span className="text-xl font-bold text-emerald-400">Rex</span>
-            <span className="text-xs text-slate-500 font-mono mt-1">docs</span>
+            <span className="text-xs text-slate-500 font-mono mt-1">
+              docs{VERSION !== 'dev' ? ` · v${VERSION}` : ''}
+            </span>
           </Link>
         </div>
 
@@ -126,8 +126,8 @@ export default function Sidebar() {
                         href={item.href}
                         className={`block px-2 py-1.5 rounded text-sm transition-colors no-underline ${
                           active
-                            ? "text-white bg-slate-800"
-                            : "text-slate-400 hover:text-white hover:bg-slate-800"
+                            ? 'text-white bg-slate-800'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800'
                         }`}
                       >
                         {item.title}
