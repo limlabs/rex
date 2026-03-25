@@ -10,6 +10,7 @@
 mod rsc {
     use futures::StreamExt;
     use std::net::TcpStream;
+    use std::path::PathBuf;
     use std::process::{Child, Command, Stdio};
     use std::sync::OnceLock;
     use std::time::{Duration, Instant};
@@ -21,11 +22,53 @@ mod rsc {
 
     static RSC_SERVER: OnceLock<TestServer> = OnceLock::new();
 
+    fn rex_binary() -> PathBuf {
+        if let Ok(bin) = std::env::var("REX_BIN") {
+            return PathBuf::from(bin);
+        }
+
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+
+        let release = workspace_root.join("target/release/rex");
+        if release.exists() {
+            return release;
+        }
+
+        let debug = workspace_root.join("target/debug/rex");
+        if debug.exists() {
+            return debug;
+        }
+
+        panic!(
+            "Rex binary not found. Run `cargo build` or `cargo build --release` first.\n\
+             Or set REX_BIN=/path/to/rex"
+        );
+    }
+
+    fn fixture_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("fixtures/app-router")
+    }
+
+    fn find_free_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    }
+
     fn ensure_server() -> &'static TestServer {
         RSC_SERVER.get_or_init(|| {
-            let bin = rex_e2e::rex_binary();
-            let root = rex_e2e::workspace_root().join("fixtures/app-router");
-            let port = rex_e2e::find_free_port();
+            let bin = rex_binary();
+            let root = fixture_root();
+            let port = find_free_port();
 
             eprintln!("[rsc-e2e] Starting rex dev server on port {port}");
             eprintln!("[rsc-e2e] Binary: {}", bin.display());

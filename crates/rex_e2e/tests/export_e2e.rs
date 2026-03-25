@@ -17,11 +17,48 @@ mod export {
 
     static EXPORT_OUTPUT: OnceLock<PathBuf> = OnceLock::new();
 
+    fn rex_binary() -> PathBuf {
+        if let Ok(bin) = std::env::var("REX_BIN") {
+            return PathBuf::from(bin);
+        }
+
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+
+        let release = workspace_root.join("target/release/rex");
+        if release.exists() {
+            return release;
+        }
+
+        let debug = workspace_root.join("target/debug/rex");
+        if debug.exists() {
+            return debug;
+        }
+
+        panic!(
+            "Rex binary not found. Run `cargo build` or `cargo build --release` first.\n\
+             Or set REX_BIN=/path/to/rex"
+        );
+    }
+
+    fn fixture_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("fixtures/app-router")
+    }
+
     /// Run `rex export` once and return the output directory path.
     fn ensure_export() -> &'static PathBuf {
         EXPORT_OUTPUT.get_or_init(|| {
-            let bin = rex_e2e::rex_binary();
-            let root = rex_e2e::workspace_root().join("fixtures/app-router");
+            let bin = rex_binary();
+            let root = fixture_root();
             let output_dir = root.join(".rex/export");
 
             eprintln!("[export-e2e] Running rex export...");

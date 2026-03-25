@@ -10,13 +10,47 @@
 mod init {
     use std::io::{Read, Write};
     use std::net::TcpStream;
+    use std::path::PathBuf;
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
+
+    fn rex_binary() -> PathBuf {
+        if let Ok(bin) = std::env::var("REX_BIN") {
+            return PathBuf::from(bin);
+        }
+
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+
+        let debug = workspace_root.join("target/debug/rex");
+        if debug.exists() {
+            return debug;
+        }
+
+        let release = workspace_root.join("target/release/rex");
+        if release.exists() {
+            return release;
+        }
+
+        panic!(
+            "Rex binary not found. Run `cargo build` or `cargo build --release` first.\n\
+             Or set REX_BIN=/path/to/rex"
+        );
+    }
+
+    fn find_free_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    }
 
     #[tokio::test]
     #[ignore]
     async fn e2e_init_project_starts_without_error() {
-        let bin = rex_e2e::rex_binary();
+        let bin = rex_binary();
 
         // Create a temp directory for the test project
         let tmp = std::env::temp_dir().join(format!("rex-init-e2e-{}", std::process::id()));
@@ -49,7 +83,7 @@ mod init {
         );
 
         // Start `rex dev` in the initialized project
-        let port = rex_e2e::find_free_port();
+        let port = find_free_port();
         let mut child = Command::new(&bin)
             .arg("dev")
             .arg("--root")

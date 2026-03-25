@@ -22,7 +22,7 @@ pre-commit:
       fail_text: "Fix oxlint warnings before committing"
     typecheck:
       glob: "runtime/**/*.{ts,tsx}"
-      run: cd runtime && { [ -d node_modules ] || npm install --no-package-lock --ignore-scripts --no-audit --no-fund; } && npm run typecheck
+      run: "{ [ -d node_modules ] || npm install --no-audit --no-fund; } && cd runtime && npm run typecheck"
       fail_text: "Fix TypeScript errors in runtime/"
     typecheck-fixtures:
       glob: "**/*.{ts,tsx}"
@@ -50,7 +50,7 @@ pre-push:
     coverage:
       run: |
         COVERAGE_THRESHOLD=$(cat .coverage-threshold | tr -d '[:space:]')
-        cargo llvm-cov --workspace --exclude rex_python --ignore-filename-regex 'tests/' --json --output-path coverage.json
+        cargo llvm-cov --workspace --exclude rex_python --ignore-filename-regex 'tests/|rex_e2e' --json --output-path coverage.json
         COVERAGE=$(jq '.data[0].totals.lines.percent | floor' coverage.json)
         echo "Line coverage: ${COVERAGE}% (threshold: ${COVERAGE_THRESHOLD}%)"
         if [ "$COVERAGE" -lt "$COVERAGE_THRESHOLD" ]; then

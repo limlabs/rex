@@ -22,15 +22,46 @@ struct TestServer {
 
 static SERVER: OnceLock<TestServer> = OnceLock::new();
 
+fn rex_binary() -> std::path::PathBuf {
+    if let Ok(bin) = std::env::var("REX_BIN") {
+        return std::path::PathBuf::from(bin);
+    }
+    let ws = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let debug = ws.join("target/debug/rex");
+    if debug.exists() {
+        return debug;
+    }
+    let release = ws.join("target/release/rex");
+    if release.exists() {
+        return release;
+    }
+    panic!("Rex binary not found");
+}
+
+fn find_free_port() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.local_addr().unwrap().port()
+}
+
 fn fixture_root() -> std::path::PathBuf {
-    crate::workspace_root().join("fixtures/basic")
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("fixtures/basic")
 }
 
 fn ensure_server() -> &'static TestServer {
     SERVER.get_or_init(|| {
-        let bin = crate::rex_binary();
+        let bin = rex_binary();
         let root = fixture_root();
-        let port = crate::find_free_port();
+        let port = find_free_port();
 
         eprintln!("[hmr-pages-e2e] Starting rex dev on port {port}");
 

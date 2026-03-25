@@ -7,59 +7,6 @@
 //   - `cd fixtures/basic && npm install`
 //   - `cd fixtures/app-router && npm install`
 
-#![allow(clippy::unwrap_used)]
-
-use std::path::PathBuf;
-
-/// Find the rex binary for E2E tests.
-///
-/// Checks `REX_BIN` env var first, then `target/debug/rex` (preferred),
-/// then `target/release/rex`. Panics if not found.
-pub fn rex_binary() -> PathBuf {
-    if let Ok(bin) = std::env::var("REX_BIN") {
-        return PathBuf::from(bin);
-    }
-
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf();
-
-    // Prefer debug (matches `cargo build` default and pre-push hook)
-    let debug = workspace_root.join("target/debug/rex");
-    if debug.exists() {
-        return debug;
-    }
-
-    let release = workspace_root.join("target/release/rex");
-    if release.exists() {
-        return release;
-    }
-
-    panic!(
-        "Rex binary not found. Run `cargo build` or `cargo build --release` first.\n\
-         Or set REX_BIN=/path/to/rex"
-    );
-}
-
-/// Find the workspace root directory (parent of `crates/`).
-pub fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf()
-}
-
-/// Find a free TCP port for test servers.
-pub fn find_free_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.local_addr().unwrap().port()
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 #[path = "app_router_tests.rs"]
@@ -97,15 +44,55 @@ mod tests {
 
     static SERVER: OnceLock<TestServer> = OnceLock::new();
 
+    fn rex_binary() -> PathBuf {
+        // Check REX_BIN env var first
+        if let Ok(bin) = std::env::var("REX_BIN") {
+            return PathBuf::from(bin);
+        }
+
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+
+        // Prefer debug (matches `cargo build` default and pre-push hook)
+        let debug = workspace_root.join("target/debug/rex");
+        if debug.exists() {
+            return debug;
+        }
+
+        let release = workspace_root.join("target/release/rex");
+        if release.exists() {
+            return release;
+        }
+
+        panic!(
+            "Rex binary not found. Run `cargo build` or `cargo build --release` first.\n\
+             Or set REX_BIN=/path/to/rex"
+        );
+    }
+
     fn fixture_root() -> PathBuf {
-        super::workspace_root().join("fixtures/basic")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("fixtures/basic")
+    }
+
+    fn find_free_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
     }
 
     fn ensure_server() -> &'static TestServer {
         SERVER.get_or_init(|| {
-            let bin = super::rex_binary();
+            let bin = rex_binary();
             let root = fixture_root();
-            let port = super::find_free_port();
+            let port = find_free_port();
 
             eprintln!("[e2e] Starting rex dev server on port {port}");
             eprintln!("[e2e] Binary: {}", bin.display());
@@ -556,14 +543,69 @@ mod tests {
         );
     }
 
+    /// Create an isolated copy of fixtures/basic in a temp directory so that
+    /// tests that spawn their own `rex dev` don't share `.rex/build/` with the
+    /// shared TestServer or each other (which causes race conditions).
+    fn isolated_fixture_copy() -> tempfile::TempDir {
+        let src = fixture_root();
+        let tmp = tempfile::tempdir().unwrap();
+        let dst = tmp.path();
+
+        // Copy pages/ and config files
+        for entry in std::fs::read_dir(&src).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            // Skip build artifacts and node_modules (we'll symlink node_modules)
+            if name_str == ".rex" || name_str == "node_modules" {
+                continue;
+            }
+            let src_path = entry.path();
+            let dst_path = dst.join(&name);
+            if src_path.is_dir() {
+                copy_dir_recursive(&src_path, &dst_path);
+            } else {
+                std::fs::copy(&src_path, &dst_path).unwrap();
+            }
+        }
+
+        // Symlink node_modules — first try fixture-local, then workspace root
+        let fixture_nm = src.join("node_modules");
+        let workspace_nm = src.parent().unwrap().parent().unwrap().join("node_modules");
+        let nm_source = if fixture_nm.join("react").exists() {
+            &fixture_nm
+        } else {
+            &workspace_nm
+        };
+        std::os::unix::fs::symlink(nm_source.canonicalize().unwrap(), dst.join("node_modules"))
+            .unwrap();
+
+        tmp
+    }
+
+    fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) {
+        std::fs::create_dir_all(dst).unwrap();
+        for entry in std::fs::read_dir(src).unwrap() {
+            let entry = entry.unwrap();
+            let src_path = entry.path();
+            let dst_path = dst.join(entry.file_name());
+            if src_path.is_dir() {
+                copy_dir_recursive(&src_path, &dst_path);
+            } else {
+                std::fs::copy(&src_path, &dst_path).unwrap();
+            }
+        }
+    }
+
     #[tokio::test]
     #[ignore]
     async fn e2e_graceful_shutdown() {
-        // Spawn a separate server instance on a DIFFERENT fixture directory
-        // to avoid build cache conflicts with the shared TestServer on fixtures/basic.
-        let bin = super::rex_binary();
-        let root = super::workspace_root().join("fixtures/zero-config");
-        let port = super::find_free_port();
+        // Use an isolated copy of fixtures/basic so this test's .rex/build/
+        // doesn't conflict with the shared TestServer or other standalone tests.
+        let tmp = isolated_fixture_copy();
+        let bin = rex_binary();
+        let root = tmp.path().to_path_buf();
+        let port = find_free_port();
 
         let mut child = Command::new(&bin)
             .arg("dev")
@@ -847,9 +889,10 @@ mod tests {
     async fn e2e_console_log_appears_in_server_output() {
         use std::io::{BufRead, BufReader};
 
-        let bin = super::rex_binary();
-        let root = super::workspace_root().join("fixtures/zero-config");
-        let port = super::find_free_port();
+        let tmp = isolated_fixture_copy();
+        let bin = rex_binary();
+        let root = tmp.path().to_path_buf();
+        let port = find_free_port();
 
         let mut child = Command::new(&bin)
             .arg("dev")

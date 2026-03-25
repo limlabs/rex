@@ -364,6 +364,7 @@ impl Rex {
             image_cache,
             esm: esm_state.map(RwLock::new),
             client_deps: std::sync::OnceLock::new(), // Populated during lazy init (dev)
+            #[cfg(feature = "build")]
             browser_transform_cache: std::sync::OnceLock::new(),
             lazy_init: tokio::sync::OnceCell::new(),
             lazy_init_ctx: std::sync::Mutex::new(lazy_init_ctx),

@@ -111,6 +111,7 @@ pub struct AppState {
     pub client_deps: OnceLock<Arc<HashMap<String, String>>>,
     /// Browser-side OXC transform cache for `/_rex/src/` handler (dev mode only).
     /// Keyed by canonical path, invalidated by mtime change.
+    #[cfg(feature = "build")]
     pub browser_transform_cache: OnceLock<crate::handlers::dev_modules::BrowserTransformCache>,
     /// Lazy init gate — first request triggers build + ESM loading (dev mode only).
     pub lazy_init: tokio::sync::OnceCell<()>,

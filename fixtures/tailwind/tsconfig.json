@@ -10,7 +10,7 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "paths": {
-      "rex/*": ["./node_modules/@limlabs/rex/src/*"]
+      "rex/*": ["./node_modules/@limlabs/rex/src/*", "../../node_modules/@limlabs/rex/src/*"]
     }
   },
   "include": ["pages/**/*"]
