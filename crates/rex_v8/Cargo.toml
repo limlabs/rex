@@ -1,6 +1,6 @@
 [package]
 name = "rex_v8"
-version = "0.19.3" # x-release-please-version
+version = "0.20.0" # x-release-please-version
 edition = "2021"
 description = "V8 isolate pool and SSR engine for the Rex framework"
 license = "MIT"
@@ -10,7 +10,7 @@ repository = "https://github.com/limlabs/rex"
 workspace = true
 
 [dependencies]
-rex_core = { path = "../rex_core", version = "0.19.3" } # x-release-please-version
+rex_core = { path = "../rex_core", version = "0.20.0" } # x-release-please-version
 v8 = { workspace = true }
 crossbeam-channel = { workspace = true }
 tokio = { workspace = true }
