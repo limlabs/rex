@@ -16,5 +16,8 @@ declare const globalThis: {
 export const randomUUID = globalThis.crypto.randomUUID.bind(globalThis.crypto);
 export const randomBytes = globalThis.crypto.randomBytes;
 export const createHash = globalThis.crypto.createHash;
+export const createHmac = globalThis.crypto.createHmac;
+export const pbkdf2Sync = globalThis.crypto.pbkdf2Sync;
+export const pbkdf2 = globalThis.crypto.pbkdf2;
 
 export default globalThis.crypto;

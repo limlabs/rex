@@ -150,8 +150,17 @@ if (typeof (globalThis as any).Buffer === 'undefined') {
         return { type: 'Buffer', data: Array.prototype.slice.call(this) };
     };
 
+    // Override subarray to return a Buffer (not a plain Uint8Array).
+    // Uint8Array.prototype.subarray returns a plain Uint8Array that shares
+    // the same ArrayBuffer, but loses all Buffer methods. Libraries like
+    // postgres.js call buf.subarray() then buf.readUInt32BE() on the result.
+    const _origSubarray = Uint8Array.prototype.subarray;
+    Buffer.prototype.subarray = function(this: any, start: number, end: number): any {
+        return _mkBuf(_origSubarray.call(this, start, end));
+    };
+
     Buffer.prototype.slice = function(this: any, start: number, end: number): any {
-        return _mkBuf(this.subarray(start, end));
+        return _mkBuf(_origSubarray.call(this, start, end));
     };
 
     Buffer.prototype.copy = function(this: any, target: any, targetStart: number, sourceStart: number, sourceEnd: number): number {

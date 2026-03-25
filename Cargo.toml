@@ -106,6 +106,7 @@ base64 = "0.22"
 # TUI
 ratatui = "0.30"
 crossterm = { version = "0.28", features = ["event-stream"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [workspace.lints.clippy]
 unwrap_used = "warn"

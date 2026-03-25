@@ -176,6 +176,10 @@ enum Commands {
         /// Check formatting without writing (exits with error if unformatted)
         #[arg(long)]
         check: bool,
+
+        /// Format a single file instead of discovering files
+        #[arg(long)]
+        file: Option<PathBuf>,
     },
 }
 
@@ -294,9 +298,13 @@ async fn main() -> Result<()> {
             cmd_init::cmd_init(name)
         }
         #[cfg(feature = "lint")]
-        Commands::Fmt { root, check } => {
+        Commands::Fmt { root, check, file } => {
             init_plain_tracing();
-            cmd_fmt::cmd_fmt(root, check)
+            if let Some(file) = file {
+                cmd_fmt::cmd_fmt_file(file, root, check)
+            } else {
+                cmd_fmt::cmd_fmt(root, check)
+            }
         }
     }
 }
