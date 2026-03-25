@@ -55,25 +55,24 @@ pub fn ensure_builtin_modules(project_root: &Path) -> Result<PathBuf> {
     Ok(node_modules_dir)
 }
 
-/// Packages that Rex always provides, even when the project has its own
-/// package.json. These are internal deps needed by Rex's RSC runtime.
-const REX_INTERNAL_PACKAGES: &[&str] = &["react-server-dom-webpack"];
-
-/// Ensures Rex-internal packages are available in the project's node_modules,
-/// extracting them from the embedded binary if missing. Unlike
-/// `ensure_builtin_modules`, this does NOT wipe existing node_modules — it only
-/// adds missing packages.
-pub fn ensure_internal_packages(project_root: &Path) -> Result<()> {
+/// Ensures all embedded packages are available in the project's node_modules,
+/// extracting any that are missing. Unlike `ensure_builtin_modules`, this does
+/// NOT wipe existing node_modules — it only adds packages the user hasn't
+/// installed themselves. This means projects with a `package.json` don't need
+/// to `npm install` react, react-dom, etc. — Rex provides them automatically.
+pub fn ensure_missing_builtin_packages(project_root: &Path) -> Result<()> {
     let node_modules_dir = project_root.join("node_modules");
-    for &pkg in REX_INTERNAL_PACKAGES {
-        let pkg_dir = node_modules_dir.join(pkg);
+    fs::create_dir_all(&node_modules_dir)?;
+
+    for pkg_path in all_embedded_packages() {
+        let pkg_dir = node_modules_dir.join(&pkg_path);
         if pkg_dir.join("package.json").exists() {
             continue;
         }
         // Extract from embedded vendor directory
-        if let Some(embedded) = VENDOR_NODE_MODULES.get_dir(pkg) {
+        if let Some(embedded) = VENDOR_NODE_MODULES.get_dir(&pkg_path) {
             info!(
-                "Extracting built-in {pkg} to {}",
+                "Extracting built-in {pkg_path} to {}",
                 node_modules_dir.display()
             );
             fs::create_dir_all(&pkg_dir)?;
@@ -81,6 +80,25 @@ pub fn ensure_internal_packages(project_root: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Returns all package paths in the embedded vendor directory.
+/// Handles scoped packages (e.g. `@types/react`) by descending one level
+/// into `@`-prefixed directories.
+fn all_embedded_packages() -> Vec<String> {
+    let mut packages = Vec::new();
+    for dir in VENDOR_NODE_MODULES.dirs() {
+        let name = dir.path().to_string_lossy().to_string();
+        if name.starts_with('@') {
+            // Scoped package scope dir — iterate sub-packages
+            for subdir in dir.dirs() {
+                packages.push(subdir.path().to_string_lossy().to_string());
+            }
+        } else {
+            packages.push(name);
+        }
+    }
+    packages
 }
 
 /// Recursively extracts an embedded directory to a filesystem path.
@@ -168,5 +186,51 @@ mod tests {
             .unwrap();
 
         assert_eq!(first_modified, second_modified);
+    }
+
+    #[test]
+    fn test_ensure_missing_builtin_packages_extracts_all() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Project with package.json but no node_modules
+        fs::write(tmp.path().join("package.json"), "{}").unwrap();
+
+        ensure_missing_builtin_packages(tmp.path()).unwrap();
+
+        let nm = tmp.path().join("node_modules");
+        assert!(nm.join("react/package.json").exists());
+        assert!(nm.join("react-dom/package.json").exists());
+        assert!(nm.join("scheduler/package.json").exists());
+        assert!(nm.join("react-server-dom-webpack/package.json").exists());
+        assert!(nm.join("@types/react/package.json").exists());
+        assert!(nm.join("@types/react-dom/package.json").exists());
+        assert!(nm.join("@limlabs/rex/package.json").exists());
+    }
+
+    #[test]
+    fn test_ensure_missing_builtin_packages_preserves_existing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nm = tmp.path().join("node_modules");
+
+        // Simulate user-installed react with custom content
+        let react_dir = nm.join("react");
+        fs::create_dir_all(&react_dir).unwrap();
+        fs::write(
+            react_dir.join("package.json"),
+            r#"{"name":"react","version":"18.0.0"}"#,
+        )
+        .unwrap();
+
+        ensure_missing_builtin_packages(tmp.path()).unwrap();
+
+        // User's react should be untouched
+        let pkg: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(react_dir.join("package.json")).unwrap())
+                .unwrap();
+        assert_eq!(pkg["version"], "18.0.0");
+
+        // But missing packages should be extracted
+        assert!(nm.join("react-dom/package.json").exists());
+        assert!(nm.join("scheduler/package.json").exists());
     }
 }
