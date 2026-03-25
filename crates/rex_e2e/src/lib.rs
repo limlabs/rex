@@ -541,15 +541,11 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn e2e_graceful_shutdown() {
-        // Spawn a separate server instance on a DIFFERENT fixture directory
-        // to avoid build cache conflicts with the shared TestServer on fixtures/basic.
+        // Use fixtures/basic (same as shared TestServer) on a different port.
+        // This reuses the npm-installed deps instead of cold-extracting built-in
+        // modules, avoiding 60s+ startup timeouts on slow CI runners.
         let bin = rex_binary();
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("fixtures/zero-config");
+        let root = fixture_root();
         let port = find_free_port();
 
         let mut child = Command::new(&bin)
@@ -835,12 +831,7 @@ mod tests {
         use std::io::{BufRead, BufReader};
 
         let bin = rex_binary();
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("fixtures/zero-config");
+        let root = fixture_root();
         let port = find_free_port();
 
         let mut child = Command::new(&bin)

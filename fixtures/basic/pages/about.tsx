@@ -23,6 +23,7 @@ export default function About({ description, builtAt }: Props) {
 }
 
 export async function getServerSideProps() {
+  console.log("hello limothy");
   return {
     props: {
       description: "Rex is a Next.js Pages Router reimplemented in Rust.",
