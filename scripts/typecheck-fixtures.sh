@@ -23,6 +23,15 @@ fi
 TMPDIR_BASE="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_BASE"' EXIT
 
+# Check if a directory is part of the npm workspace (deps hoisted to root).
+is_workspace_member() {
+  local dir="$1"
+  case "$dir" in
+    "$FIXTURES_DIR"/*|"$ROOT"/packages/*|"$ROOT"/runtime|"$ROOT"/docs|"$ROOT"/crates/rex_napi) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 check_fixture() {
   local dir="$1"
   local name
@@ -36,7 +45,9 @@ check_fixture() {
   {
     echo "--- Checking $name ---"
 
-    if [[ ! -d "$dir/node_modules" ]]; then
+    # For directories outside the npm workspace (e.g. benchmarks/), install
+    # deps locally. Workspace members get their deps from the root install.
+    if [[ ! -d "$dir/node_modules" ]] && ! is_workspace_member "$dir"; then
       echo "  Installing dependencies..."
       (cd "$dir" && npm install --no-package-lock --ignore-scripts --no-audit --no-fund) || {
         echo "  WARN: npm install failed for $name, skipping"
