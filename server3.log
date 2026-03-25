@@ -1,0 +1,110 @@
+
+  [38;2;46;204;113m        ▄████▄       [0m
+  [38;2;46;204;113m        █ ◦ █▀█▄    [0m  [38;2;46;204;113mrex[0m [2m0.19.3[0m
+  [38;2;46;204;113m  ▄▄▄▄▄▄█████▀▀     [0m
+  [38;2;46;204;113m    ▀▀▀▀██████       [0m
+  [38;2;46;204;113m        █▀ █▀        [0m
+
+[2m2026-03-25T02:57:14.456932Z[0m [34mDEBUG[0m [2mrex_server::rex[0m[2m:[0m Scanning routes...
+[2m2026-03-25T02:57:14.457390Z[0m [34mDEBUG[0m [2mrex_router::scanner[0m[2m:[0m scanned route [3mpattern[0m[2m=[0m/404 [3mfile[0m[2m=[0m404.tsx
+[2m2026-03-25T02:57:14.457437Z[0m [34mDEBUG[0m [2mrex_router::scanner[0m[2m:[0m scanned route [3mpattern[0m[2m=[0m/_app [3mfile[0m[2m=[0m_app.tsx
+[2m2026-03-25T02:57:14.457456Z[0m [34mDEBUG[0m [2mrex_router::scanner[0m[2m:[0m scanned route [3mpattern[0m[2m=[0m/_document [3mfile[0m[2m=[0m_document.tsx
+[2m2026-03-25T02:57:14.457472Z[0m [34mDEBUG[0m [2mrex_router::scanner[0m[2m:[0m scanned route [3mpattern[0m[2m=[0m/about [3mfile[0m[2m=[0mabout.tsx
+[2m2026-03-25T02:57:14.457531Z[0m [34mDEBUG[0m [2mrex_router::scanner[0m[2m:[0m scanned route [3mpattern[0m[2m=[0m/api/hello [3mfile[0m[2m=[0mapi/hello.ts
+[2m2026-03-25T02:57:14.457615Z[0m [34mDEBUG[0m [2mrex_router::scanner[0m[2m:[0m scanned route [3mpattern[0m[2m=[0m/blog/:slug [3mfile[0m[2m=[0mblog/[slug].tsx
+[2m2026-03-25T02:57:14.457632Z[0m [34mDEBUG[0m [2mrex_router::scanner[0m[2m:[0m scanned route [3mpattern[0m[2m=[0m/buffer-test [3mfile[0m[2m=[0mbuffer-test.tsx
+[2m2026-03-25T02:57:14.457645Z[0m [34mDEBUG[0m [2mrex_router::scanner[0m[2m:[0m scanned route [3mpattern[0m[2m=[0m/gallery [3mfile[0m[2m=[0mgallery.tsx
+[2m2026-03-25T02:57:14.457658Z[0m [34mDEBUG[0m [2mrex_router::scanner[0m[2m:[0m scanned route [3mpattern[0m[2m=[0m/ [3mfile[0m[2m=[0mindex.tsx
+[2m2026-03-25T02:57:14.457710Z[0m [34mDEBUG[0m [2mrex_router::scanner[0m[2m:[0m scanned route [3mpattern[0m[2m=[0m/posts/:id [3mfile[0m[2m=[0mposts/[id].tsx
+[2m2026-03-25T02:57:14.457725Z[0m [34mDEBUG[0m [2mrex_router::scanner[0m[2m:[0m scanned route [3mpattern[0m[2m=[0m/static [3mfile[0m[2m=[0mstatic.tsx
+[2m2026-03-25T02:57:14.457809Z[0m [34mDEBUG[0m [2mrex_router::scanner[0m[2m:[0m scanned mcp tool [3mname[0m[2m=[0msearch [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/mcp/search.ts
+[2m2026-03-25T02:57:14.457847Z[0m [34mDEBUG[0m [2mrex_server::rex[0m[2m:[0m Routes scanned [3mroutes[0m[2m=[0m7 [3mhas_app[0m[2m=[0mtrue [3mhas_404[0m[2m=[0mtrue [3mhas_error[0m[2m=[0mfalse
+[2m2026-03-25T02:57:14.459635Z[0m [34mDEBUG[0m [2mrex_v8::platform[0m[2m:[0m V8 platform initialized
+[2m2026-03-25T02:57:14.460825Z[0m [34mDEBUG[0m [2mrex_v8::isolate_pool[0m[2m:[0m V8 isolate pool created [3mcount[0m[2m=[0m4
+[2m2026-03-25T02:57:14.466951Z[0m [34mDEBUG[0m [2mrex_v8::fs[0m[2m:[0m Registered fs callbacks on globalThis
+[2m2026-03-25T02:57:14.466952Z[0m [34mDEBUG[0m [2mrex_v8::fs[0m[2m:[0m Registered fs callbacks on globalThis
+[2m2026-03-25T02:57:14.466952Z[0m [34mDEBUG[0m [2mrex_v8::fs[0m[2m:[0m Registered fs callbacks on globalThis
+[2m2026-03-25T02:57:14.467054Z[0m [34mDEBUG[0m [2mrex_v8::tcp[0m[2m:[0m Registered TCP callbacks on globalThis
+[2m2026-03-25T02:57:14.467069Z[0m [34mDEBUG[0m [2mrex_v8::tcp[0m[2m:[0m Registered TCP callbacks on globalThis
+[2m2026-03-25T02:57:14.466951Z[0m [34mDEBUG[0m [2mrex_v8::fs[0m[2m:[0m Registered fs callbacks on globalThis
+[2m2026-03-25T02:57:14.467055Z[0m [34mDEBUG[0m [2mrex_v8::tcp[0m[2m:[0m Registered TCP callbacks on globalThis
+[2m2026-03-25T02:57:14.467161Z[0m [34mDEBUG[0m [2mrex_v8::tcp[0m[2m:[0m Registered TCP callbacks on globalThis
+[2m2026-03-25T02:57:14.468678Z[0m [34mDEBUG[0m [2mrex_v8::isolate_pool[0m[2m:[0m V8 isolate 0 ready
+[2m2026-03-25T02:57:14.468678Z[0m [34mDEBUG[0m [2mrex_v8::isolate_pool[0m[2m:[0m V8 isolate 1 ready
+[2m2026-03-25T02:57:14.468679Z[0m [34mDEBUG[0m [2mrex_v8::isolate_pool[0m[2m:[0m V8 isolate 3 ready
+[2m2026-03-25T02:57:14.468685Z[0m [34mDEBUG[0m [2mrex_v8::isolate_pool[0m[2m:[0m V8 isolate 2 ready
+[2m2026-03-25T02:57:14.469564Z[0m [34mDEBUG[0m [2mrex_server::state[0m[2m:[0m Lazy init: building bundles + loading ESM...
+  [2m◇[0m [2mTypeScript (watching)[0m
+[2m2026-03-25T02:57:14.474536Z[0m [34mDEBUG[0m [2mrex_dev::watcher[0m[2m:[0m File watcher started [3mdir[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic
+  [1;32m✓ Ready in[0m [1;32m20ms[0m
+
+  [2m➜ Local:[0m [1mhttp://localhost:3813[0m
+
+  [2m7 pages · 1 API route[0m
+
+[2m2026-03-25T02:57:14.799993Z[0m [34mDEBUG[0m [1mbuild_server_bundle[0m[2m:[0m [2mrex_build::server_bundle[0m[2m:[0m Server bundle written [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/.rex/build/server/server-bundle.js
+[2m2026-03-25T02:57:14.845983Z[0m [34mDEBUG[0m [2mrex_build::server_dep_bundle[0m[2m:[0m Dep ESM module built [3mname[0m[2m=[0m"react" [3msize[0m[2m=[0m115301
+[2m2026-03-25T02:57:14.894168Z[0m [34mDEBUG[0m [2mrex_build::server_dep_bundle[0m[2m:[0m Dep ESM module built [3mname[0m[2m=[0m"react/jsx-runtime" [3msize[0m[2m=[0m124115
+[2m2026-03-25T02:57:14.943737Z[0m [34mDEBUG[0m [2mrex_build::server_dep_bundle[0m[2m:[0m Dep ESM module built [3mname[0m[2m=[0m"react/jsx-dev-runtime" [3msize[0m[2m=[0m123809
+[2m2026-03-25T02:57:14.968845Z[0m [32m INFO[0m [2mrex_server::handlers::page[0m[2m:[0m Handling page request [3mpath[0m[2m=[0m"/" [3mmethod[0m[2m=[0mGET
+[2m2026-03-25T02:57:15.189118Z[0m [34mDEBUG[0m [2mrex_build::server_dep_bundle[0m[2m:[0m Dep ESM module built [3mname[0m[2m=[0m"react-dom/server" [3msize[0m[2m=[0m756830
+[2m2026-03-25T02:57:15.189507Z[0m [34mDEBUG[0m [2mrex_server::startup[0m[2m:[0m Walking import graph for ESM [3mentries[0m[2m=[0m9
+[2m2026-03-25T02:57:15.192766Z[0m [34mDEBUG[0m [2mrex_server::startup[0m[2m:[0m Source modules collected [3msource_modules[0m[2m=[0m9 [3mextra_deps[0m[2m=[0m0
+[2m2026-03-25T02:57:15.239965Z[0m [34mDEBUG[0m [2mrex_v8::esm_module_registry[0m[2m:[0m Module evaluated [3mspecifier[0m[2m=[0m"rex://entry"
+[2m2026-03-25T02:57:15.240003Z[0m [34mDEBUG[0m [2mrex_v8::esm_module_registry[0m[2m:[0m Module evaluated [3mspecifier[0m[2m=[0m"rex://entry"
+[2m2026-03-25T02:57:15.239995Z[0m [34mDEBUG[0m [2mrex_v8::esm_module_registry[0m[2m:[0m Module evaluated [3mspecifier[0m[2m=[0m"rex://entry"
+[2m2026-03-25T02:57:15.240046Z[0m [34mDEBUG[0m [2mrex_v8::ssr_isolate_esm[0m[2m:[0m ESM modules loaded into V8 context
+[2m2026-03-25T02:57:15.240010Z[0m [34mDEBUG[0m [2mrex_v8::esm_module_registry[0m[2m:[0m Module evaluated [3mspecifier[0m[2m=[0m"rex://entry"
+[2m2026-03-25T02:57:15.240070Z[0m [34mDEBUG[0m [2mrex_v8::ssr_isolate_esm[0m[2m:[0m ESM modules loaded into V8 context
+[2m2026-03-25T02:57:15.240074Z[0m [34mDEBUG[0m [2mrex_v8::ssr_isolate_esm[0m[2m:[0m ESM modules loaded into V8 context
+[2m2026-03-25T02:57:15.240088Z[0m [34mDEBUG[0m [2mrex_v8::ssr_isolate_esm[0m[2m:[0m ESM modules loaded into V8 context
+[2m2026-03-25T02:57:15.240150Z[0m [34mDEBUG[0m [2mrex_v8::isolate_pool[0m[2m:[0m ESM modules loaded into all V8 isolates
+[2m2026-03-25T02:57:15.240191Z[0m [34mDEBUG[0m [2mrex_server::startup[0m[2m:[0m ESM modules loaded into V8
+[2m2026-03-25T02:57:15.240374Z[0m [34mDEBUG[0m [2mrex_server::state[0m[2m:[0m Lazy init complete [3mbuild_id[0m[2m=[0mb1b189a554aae012
+[2m2026-03-25T02:57:15.267721Z[0m [34mDEBUG[0m [2mrex_build::client_dep_bundle[0m[2m:[0m Client dep ESM built [3mname[0m[2m=[0m"react" [3msize[0m[2m=[0m40200
+[2m2026-03-25T02:57:15.267910Z[0m [34mDEBUG[0m [2mrex_build::client_dep_bundle[0m[2m:[0m Client dep bundled [3mspecifier[0m[2m=[0m"react" [3mkey[0m[2m=[0m"react" [3msize[0m[2m=[0m40200
+[2m2026-03-25T02:57:15.298828Z[0m [34mDEBUG[0m [2mrex_build::client_dep_bundle[0m[2m:[0m Client dep ESM built [3mname[0m[2m=[0m"react/jsx-runtime" [3msize[0m[2m=[0m49014
+[2m2026-03-25T02:57:15.298958Z[0m [34mDEBUG[0m [2mrex_build::client_dep_bundle[0m[2m:[0m Client dep bundled [3mspecifier[0m[2m=[0m"react/jsx-runtime" [3mkey[0m[2m=[0m"react__jsx-runtime" [3msize[0m[2m=[0m49014
+[2m2026-03-25T02:57:15.328219Z[0m [34mDEBUG[0m [2mrex_build::client_dep_bundle[0m[2m:[0m Client dep ESM built [3mname[0m[2m=[0m"react/jsx-dev-runtime" [3msize[0m[2m=[0m48708
+[2m2026-03-25T02:57:15.328328Z[0m [34mDEBUG[0m [2mrex_build::client_dep_bundle[0m[2m:[0m Client dep bundled [3mspecifier[0m[2m=[0m"react/jsx-dev-runtime" [3mkey[0m[2m=[0m"react__jsx-dev-runtime" [3msize[0m[2m=[0m48708
+[2m2026-03-25T02:57:15.720302Z[0m [34mDEBUG[0m [2mrex_build::client_dep_bundle[0m[2m:[0m Client dep ESM built [3mname[0m[2m=[0m"react-dom/client" [3msize[0m[2m=[0m874422
+[2m2026-03-25T02:57:15.720505Z[0m [34mDEBUG[0m [2mrex_build::client_dep_bundle[0m[2m:[0m Client dep bundled [3mspecifier[0m[2m=[0m"react-dom/client" [3mkey[0m[2m=[0m"react-dom__client" [3msize[0m[2m=[0m874422
+[2m2026-03-25T02:57:15.720889Z[0m [34mDEBUG[0m [2mrex_build::client_dep_bundle[0m[2m:[0m Client framework stub [3mspecifier[0m[2m=[0m"rex/head" [3mkey[0m[2m=[0m"rex__head"
+[2m2026-03-25T02:57:15.721595Z[0m [34mDEBUG[0m [2mrex_build::client_dep_bundle[0m[2m:[0m Client framework stub [3mspecifier[0m[2m=[0m"rex/link" [3mkey[0m[2m=[0m"rex__link"
+[2m2026-03-25T02:57:15.722593Z[0m [34mDEBUG[0m [2mrex_build::client_dep_bundle[0m[2m:[0m Client framework stub [3mspecifier[0m[2m=[0m"rex/image" [3mkey[0m[2m=[0m"rex__image"
+[2m2026-03-25T02:57:15.723098Z[0m [34mDEBUG[0m [2mrex_build::client_dep_bundle[0m[2m:[0m Client framework stub [3mspecifier[0m[2m=[0m"rex/router" [3mkey[0m[2m=[0m"rex__router"
+[2m2026-03-25T02:57:15.723167Z[0m [34mDEBUG[0m [2mrex_build::client_dep_bundle[0m[2m:[0m Client dep pre-bundling complete [3mmodules[0m[2m=[0m8
+[2m2026-03-25T02:57:15.723180Z[0m [34mDEBUG[0m [2mrex_server::state[0m[2m:[0m Client dep bundles ready [3mmodules[0m[2m=[0m8
+[2m2026-03-25T02:57:22.140492Z[0m [32m INFO[0m [2mrex_server::handlers::page[0m[2m:[0m Handling page request [3mpath[0m[2m=[0m"/" [3mmethod[0m[2m=[0mGET
+[2m2026-03-25T02:57:22.313503Z[0m [32m INFO[0m [2mrex_dev::hmr[0m[2m:[0m HMR client connected
+[2m2026-03-25T02:57:41.850121Z[0m [34mDEBUG[0m [2mrex_dev::watcher[0m[2m:[0m File event [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/pages/index.tsx [3mkind[0m[2m=[0mPageModified
+[2m2026-03-25T02:57:41.850261Z[0m [32m INFO[0m [2mrex::cmd_dev[0m[2m:[0m Rebuilding... [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/pages/index.tsx
+[2m2026-03-25T02:57:41.850307Z[0m [32m INFO[0m [2mrex_dev::rebuild[0m[2m:[0m Processing file change [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/pages/index.tsx [3mkind[0m[2m=[0mPageModified
+[2m2026-03-25T02:57:41.859314Z[0m [34mDEBUG[0m [2mrex_v8::esm_module_registry[0m[2m:[0m Module evaluated [3mspecifier[0m[2m=[0m"rex://entry"
+[2m2026-03-25T02:57:41.859383Z[0m [34mDEBUG[0m [2mrex_v8::ssr_isolate_esm[0m[2m:[0m ESM module invalidated and reloaded
+[2m2026-03-25T02:57:41.860562Z[0m [34mDEBUG[0m [2mrex_v8::esm_module_registry[0m[2m:[0m Module evaluated [3mspecifier[0m[2m=[0m"rex://entry"
+[2m2026-03-25T02:57:41.860592Z[0m [34mDEBUG[0m [2mrex_v8::ssr_isolate_esm[0m[2m:[0m ESM module invalidated and reloaded
+[2m2026-03-25T02:57:41.862158Z[0m [34mDEBUG[0m [2mrex_v8::esm_module_registry[0m[2m:[0m Module evaluated [3mspecifier[0m[2m=[0m"rex://entry"
+[2m2026-03-25T02:57:41.862274Z[0m [34mDEBUG[0m [2mrex_v8::ssr_isolate_esm[0m[2m:[0m ESM module invalidated and reloaded
+[2m2026-03-25T02:57:41.863884Z[0m [34mDEBUG[0m [2mrex_v8::esm_module_registry[0m[2m:[0m Module evaluated [3mspecifier[0m[2m=[0m"rex://entry"
+[2m2026-03-25T02:57:41.863937Z[0m [34mDEBUG[0m [2mrex_v8::ssr_isolate_esm[0m[2m:[0m ESM module invalidated and reloaded
+[2m2026-03-25T02:57:41.864007Z[0m [34mDEBUG[0m [2mrex_v8::isolate_pool[0m[2m:[0m ESM module invalidated in all V8 isolates
+[2m2026-03-25T02:57:41.864022Z[0m [34mDEBUG[0m [2mrex_dev::rebuild_esm[0m[2m:[0m ESM fast path: module invalidated [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/pages/index.tsx
+[2m2026-03-25T02:57:41.864053Z[0m [32m INFO[0m [2mrex_dev::rebuild[0m[2m:[0m ESM fast path rebuild [3mesm_ms[0m[2m=[0m13 [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/pages/index.tsx
+[2m2026-03-25T02:57:41.864141Z[0m [34mDEBUG[0m [2mrex_dev::rebuild[0m[2m:[0m ESM fast path complete — sent module update
+[2m2026-03-25T02:58:19.740272Z[0m [34mDEBUG[0m [2mrex_dev::watcher[0m[2m:[0m File event [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/pages/index.tsx [3mkind[0m[2m=[0mPageModified
+[2m2026-03-25T02:58:19.742325Z[0m [32m INFO[0m [2mrex::cmd_dev[0m[2m:[0m Rebuilding... [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/pages/index.tsx
+[2m2026-03-25T02:58:19.742357Z[0m [32m INFO[0m [2mrex_dev::rebuild[0m[2m:[0m Processing file change [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/pages/index.tsx [3mkind[0m[2m=[0mPageModified
+[2m2026-03-25T02:58:19.753475Z[0m [34mDEBUG[0m [2mrex_v8::esm_module_registry[0m[2m:[0m Module evaluated [3mspecifier[0m[2m=[0m"rex://entry"
+[2m2026-03-25T02:58:19.753540Z[0m [34mDEBUG[0m [2mrex_v8::ssr_isolate_esm[0m[2m:[0m ESM module invalidated and reloaded
+[2m2026-03-25T02:58:19.753897Z[0m [34mDEBUG[0m [2mrex_v8::esm_module_registry[0m[2m:[0m Module evaluated [3mspecifier[0m[2m=[0m"rex://entry"
+[2m2026-03-25T02:58:19.753929Z[0m [34mDEBUG[0m [2mrex_v8::ssr_isolate_esm[0m[2m:[0m ESM module invalidated and reloaded
+[2m2026-03-25T02:58:19.757430Z[0m [34mDEBUG[0m [2mrex_v8::esm_module_registry[0m[2m:[0m Module evaluated [3mspecifier[0m[2m=[0m"rex://entry"
+[2m2026-03-25T02:58:19.757471Z[0m [34mDEBUG[0m [2mrex_v8::ssr_isolate_esm[0m[2m:[0m ESM module invalidated and reloaded
+[2m2026-03-25T02:58:19.759858Z[0m [34mDEBUG[0m [2mrex_v8::esm_module_registry[0m[2m:[0m Module evaluated [3mspecifier[0m[2m=[0m"rex://entry"
+[2m2026-03-25T02:58:19.759910Z[0m [34mDEBUG[0m [2mrex_v8::ssr_isolate_esm[0m[2m:[0m ESM module invalidated and reloaded
+[2m2026-03-25T02:58:19.765054Z[0m [34mDEBUG[0m [2mrex_v8::isolate_pool[0m[2m:[0m ESM module invalidated in all V8 isolates
+[2m2026-03-25T02:58:19.765095Z[0m [34mDEBUG[0m [2mrex_dev::rebuild_esm[0m[2m:[0m ESM fast path: module invalidated [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/pages/index.tsx
+[2m2026-03-25T02:58:19.765116Z[0m [32m INFO[0m [2mrex_dev::rebuild[0m[2m:[0m ESM fast path rebuild [3mesm_ms[0m[2m=[0m22 [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/pages/index.tsx
+[2m2026-03-25T02:58:19.765203Z[0m [34mDEBUG[0m [2mrex_dev::rebuild[0m[2m:[0m ESM fast path complete — sent module update
+[2m2026-03-25T02:58:25.666080Z[0m [32m INFO[0m [2mrex_dev::hmr[0m[2m:[0m HMR client disconnected

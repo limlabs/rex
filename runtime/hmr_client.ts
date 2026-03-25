@@ -437,11 +437,17 @@
     const timestamp = msg.timestamp as number;
     const route = msg.route as string | undefined;
 
-    // Reimport the changed module with cache-bust
+    // Reimport the changed module with cache-bust.
+    // Browser ESM treats "foo.js" and "foo.js?t=123" as different modules,
+    // so we must capture the new exports and update __REX_PAGES directly.
     import(url + "?t=" + timestamp)
-      .then(function () {
-        if (route && window.__REX_PAGES && window.__REX_PAGES[route]) {
-          // Page module updated — fetch fresh GSSP data + re-render
+      .then(function (mod) {
+        if (route) {
+          // Page module updated — update the page registry with new exports
+          window.__REX_PAGES = window.__REX_PAGES || {};
+          window.__REX_PAGES[route] = mod;
+
+          // Fetch fresh GSSP data + re-render with the NEW component
           const buildId = window.__REX_MANIFEST__?.build_id;
           if (
             typeof buildId !== "string" ||
@@ -462,9 +468,8 @@
               const props = (data.props || {}) as Record<string, unknown>;
               const dataEl = document.getElementById("__REX_DATA__");
               if (dataEl) dataEl.textContent = JSON.stringify(props);
-              const page = window.__REX_PAGES[route!];
-              if (page && window.__REX_RENDER__) {
-                window.__REX_RENDER__(page.default, props);
+              if (mod.default && window.__REX_RENDER__) {
+                window.__REX_RENDER__(mod.default, props);
                 console.log("[Rex HMR] Module update applied");
               }
             });
