@@ -85,6 +85,7 @@ pub fn node_polyfill_aliases(runtime_dir: &Path) -> Vec<(String, Vec<Option<Stri
         ("tty", "tty.ts"),
         ("readline", "readline.ts"),
         ("querystring", "querystring.ts"),
+        ("perf_hooks", "perf_hooks.ts"),
     ];
     let mk = |s: &str, f: &str| {
         (

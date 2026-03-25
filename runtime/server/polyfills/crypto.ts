@@ -332,6 +332,26 @@
         };
     }
 
+    // ── pbkdf2Sync / pbkdf2 (Node.js crypto API) ────────────────────────
+    // Used by postgres.js for SCRAM-SHA-256 authentication.
+
+    _crypto.pbkdf2Sync = function(password: any, salt: any, iterations: number, keylen: number, _digest: string): any {
+        const pwBytes = _toBytes(password);
+        const saltBytes = _toBytes(salt);
+        const result = _pbkdf2(pwBytes, saltBytes, iterations, keylen);
+        if ((globalThis as any).Buffer) return (globalThis as any).Buffer.from(result);
+        return result;
+    };
+
+    _crypto.pbkdf2 = function(password: any, salt: any, iterations: number, keylen: number, digest: string, callback: any): void {
+        try {
+            const result = _crypto.pbkdf2Sync(password, salt, iterations, keylen, digest);
+            if (typeof callback === 'function') callback(null, result);
+        } catch (e) {
+            if (typeof callback === 'function') callback(e);
+        }
+    };
+
     // getRandomValues for SubtleCrypto usage
     if (typeof _crypto.getRandomValues !== 'function') {
         _crypto.getRandomValues = function(array: Uint8Array): Uint8Array {

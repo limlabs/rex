@@ -25,24 +25,24 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 include_dir = { workspace = true }
 reqwest = { workspace = true }
-oxc_allocator = "0.115"
-oxc_parser = "0.115"
-oxc_semantic = "0.115"
-oxc_ast = "0.115"
-oxc_span = "0.115"
-oxc_syntax = "0.115"
-oxc_codegen = "0.115"
-oxc_transformer = "0.115"
+oxc_allocator = "0.122"
+oxc_parser = "0.122"
+oxc_semantic = "0.122"
+oxc_ast = "0.122"
+oxc_span = "0.122"
+oxc_syntax = "0.122"
+oxc_codegen = "0.122"
+oxc_transformer = "0.122"
 rex_v8 = { path = "../rex_v8" }
 lightningcss = { workspace = true }
 
 [build-dependencies]
-oxc_allocator = "0.115"
-oxc_codegen = "0.115"
-oxc_parser = "0.115"
-oxc_semantic = "0.115"
-oxc_span = "0.115"
-oxc_transformer = "0.115"
+oxc_allocator = "0.122"
+oxc_codegen = "0.122"
+oxc_parser = "0.122"
+oxc_semantic = "0.122"
+oxc_span = "0.122"
+oxc_transformer = "0.122"
 
 [dev-dependencies]
 tempfile = "3"

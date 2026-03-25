@@ -68,7 +68,9 @@ impl TuiApp {
         }
 
         let visible_height = area.height as usize;
-        let msg_width = (area.width as usize).saturating_sub(4);
+        // Prefix: " HH:MM:SS ● " = 12 chars
+        let prefix_width = 12;
+        let msg_width = (area.width as usize).saturating_sub(prefix_width);
         let entry_count = entries.len();
 
         // Clamp cursor
@@ -99,16 +101,22 @@ impl TuiApp {
             } else {
                 Style::default()
             };
-            let prefix: String = format!(" {} ", level_symbol(&entry.level));
+            let time_prefix = format!(" {} ", entry.timestamp);
+            let sym_prefix = format!("{} ", level_symbol(&entry.level));
+            let indent = " ".repeat(prefix_width);
 
             if is_expanded || overflow == 0 {
                 // Show all lines
                 for (j, segment) in visual.iter().enumerate() {
                     let mut spans = Vec::new();
                     if j == 0 {
-                        spans.push(Span::styled(prefix.clone(), Style::default().fg(color)));
+                        spans.push(Span::styled(
+                            time_prefix.clone(),
+                            Style::default().fg(Color::DarkGray),
+                        ));
+                        spans.push(Span::styled(sym_prefix.clone(), Style::default().fg(color)));
                     } else {
-                        spans.push(Span::raw("    "));
+                        spans.push(Span::raw(indent.clone()));
                     }
                     if !self.search_query.is_empty() {
                         highlight_search(&mut spans, segment, &self.search_query);
@@ -122,7 +130,10 @@ impl TuiApp {
                 let indicator = format!(" …+{overflow}");
                 let max_text = msg_width.saturating_sub(indicator.len());
                 let display = truncate_str(&visual[0], max_text);
-                let mut spans = vec![Span::styled(prefix.clone(), Style::default().fg(color))];
+                let mut spans = vec![
+                    Span::styled(time_prefix.clone(), Style::default().fg(Color::DarkGray)),
+                    Span::styled(sym_prefix.clone(), Style::default().fg(color)),
+                ];
                 if !self.search_query.is_empty() {
                     highlight_search(&mut spans, display, &self.search_query);
                 } else {
