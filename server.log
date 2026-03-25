@@ -1,0 +1,24 @@
+
+  [38;2;46;204;113m        ▄████▄       [0m
+  [38;2;46;204;113m        █ ◦ █▀█▄    [0m  [38;2;46;204;113mrex[0m [2m0.19.3[0m
+  [38;2;46;204;113m  ▄▄▄▄▄▄█████▀▀     [0m
+  [38;2;46;204;113m    ▀▀▀▀██████       [0m
+  [38;2;46;204;113m        █▀ █▀        [0m
+
+  [2m◇[0m [2mTypeScript (watching)[0m
+  [1;32m✓ Ready in[0m [1;32m18ms[0m
+
+  [2m➜ Local:[0m [1mhttp://localhost:3811[0m
+
+  [2m7 pages · 1 API route[0m
+
+[2m2026-03-25T02:43:04.456945Z[0m [32m INFO[0m [2mrex_server::handlers::page[0m[2m:[0m Handling page request [3mpath[0m[2m=[0m"/" [3mmethod[0m[2m=[0mGET
+[2m2026-03-25T02:43:21.753676Z[0m [32m INFO[0m [2mrex_server::handlers::page[0m[2m:[0m Handling page request [3mpath[0m[2m=[0m"/about" [3mmethod[0m[2m=[0mGET
+[2m2026-03-25T02:43:21.905042Z[0m [32m INFO[0m [2mrex_dev::hmr[0m[2m:[0m HMR client connected
+[2m2026-03-25T02:43:36.993395Z[0m [32m INFO[0m [2mrex::cmd_dev[0m[2m:[0m Rebuilding... [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/pages/about.tsx
+[2m2026-03-25T02:43:36.993499Z[0m [32m INFO[0m [2mrex_dev::rebuild[0m[2m:[0m Processing file change [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/pages/about.tsx [3mkind[0m[2m=[0mPageModified
+[2m2026-03-25T02:43:37.008007Z[0m [32m INFO[0m [2mrex_dev::rebuild[0m[2m:[0m ESM fast path rebuild [3mesm_ms[0m[2m=[0m14 [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/pages/about.tsx
+[2m2026-03-25T02:44:05.962881Z[0m [32m INFO[0m [2mrex::cmd_dev[0m[2m:[0m Rebuilding... [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/pages/about.tsx
+[2m2026-03-25T02:44:05.962947Z[0m [32m INFO[0m [2mrex_dev::rebuild[0m[2m:[0m Processing file change [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/pages/about.tsx [3mkind[0m[2m=[0mPageModified
+[2m2026-03-25T02:44:05.978811Z[0m [32m INFO[0m [2mrex_dev::rebuild[0m[2m:[0m ESM fast path rebuild [3mesm_ms[0m[2m=[0m15 [3mpath[0m[2m=[0m/Users/austin/code/rex/.claude/worktrees/unbundled-client-dev/fixtures/basic/pages/about.tsx
+[2m2026-03-25T02:44:13.826683Z[0m [32m INFO[0m [2mrex_dev::hmr[0m[2m:[0m HMR client disconnected
