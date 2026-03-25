@@ -4639,7 +4639,7 @@ dependencies = [
 
 [[package]]
 name = "rex_build"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "hex",
@@ -4674,7 +4674,7 @@ dependencies = [
 
 [[package]]
 name = "rex_cli"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -4709,7 +4709,7 @@ dependencies = [
 
 [[package]]
 name = "rex_core"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "serde",
@@ -4720,7 +4720,7 @@ dependencies = [
 
 [[package]]
 name = "rex_dev"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -4740,7 +4740,7 @@ dependencies = [
 
 [[package]]
 name = "rex_e2e"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "futures",
@@ -4754,7 +4754,7 @@ dependencies = [
 
 [[package]]
 name = "rex_image"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "base64",
  "hex",
@@ -4805,7 +4805,7 @@ dependencies = [
 
 [[package]]
 name = "rex_napi"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "napi",
@@ -4844,7 +4844,7 @@ dependencies = [
 
 [[package]]
 name = "rex_router"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "rex_core",
@@ -4854,7 +4854,7 @@ dependencies = [
 
 [[package]]
 name = "rex_server"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -4882,7 +4882,7 @@ dependencies = [
 
 [[package]]
 name = "rex_v8"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
