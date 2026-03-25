@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 
 interface Props {
   message: string;
@@ -8,7 +8,7 @@ interface Props {
 export default function Home({ message, timestamp }: Props) {
   return (
     <div>
-      <h1>Hey it's Rex!</h1>
+      <h1>Rex!</h1>
       <p>{message}</p>
       <p>Rendered at: {new Date(timestamp).toISOString()}</p>
     </div>
@@ -18,7 +18,7 @@ export default function Home({ message, timestamp }: Props) {
 export async function getServerSideProps() {
   return {
     props: {
-      message: 'Hello from Rex!',
+      message: "Hello from Rex!",
       timestamp: Date.now(),
     },
   };
