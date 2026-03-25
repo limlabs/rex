@@ -142,7 +142,7 @@ pub async fn build_client_dep_esm(
 }
 
 /// Build a re-export entry source for an extra dep.
-fn build_reexport_entry(dep: &DepImport) -> String {
+pub(crate) fn build_reexport_entry(dep: &DepImport) -> String {
     let mut entry = String::new();
     if dep.has_default && dep.named_exports.is_empty() {
         entry.push_str(&format!("export {{ default }} from '{}';\n", dep.specifier));
@@ -268,7 +268,7 @@ async fn bundle_for_browser(
 }
 
 /// Generate the import map JSON string from collected entries.
-fn generate_import_map(entries: &[(String, String)]) -> String {
+pub(crate) fn generate_import_map(entries: &[(String, String)]) -> String {
     let mut imports = serde_json::Map::new();
     for (specifier, key) in entries {
         imports.insert(
@@ -278,4 +278,103 @@ fn generate_import_map(entries: &[(String, String)]) -> String {
     }
     let map = serde_json::json!({ "imports": imports });
     serde_json::to_string(&map).expect("import map JSON serialization")
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_specifier_to_url_key() {
+        assert_eq!(specifier_to_url_key("react"), "react");
+        assert_eq!(
+            specifier_to_url_key("react/jsx-runtime"),
+            "react__jsx-runtime"
+        );
+        assert_eq!(specifier_to_url_key("@scope/pkg"), "_scope__pkg");
+    }
+
+    #[test]
+    fn test_build_reexport_entry_default_only() {
+        let dep = DepImport {
+            specifier: "my-lib".to_string(),
+            named_exports: HashSet::new(),
+            has_default: true,
+        };
+        let entry = build_reexport_entry(&dep);
+        assert!(
+            entry.contains("export { default } from 'my-lib'"),
+            "Should re-export default, got: {entry}"
+        );
+        assert!(
+            !entry.contains("export *"),
+            "Should not have wildcard export, got: {entry}"
+        );
+    }
+
+    #[test]
+    fn test_build_reexport_entry_named() {
+        let mut named = HashSet::new();
+        named.insert("foo".to_string());
+        named.insert("bar".to_string());
+        let dep = DepImport {
+            specifier: "my-lib".to_string(),
+            named_exports: named,
+            has_default: false,
+        };
+        let entry = build_reexport_entry(&dep);
+        assert!(
+            entry.contains("foo") && entry.contains("bar"),
+            "Should contain named exports, got: {entry}"
+        );
+        assert!(
+            entry.contains("from 'my-lib'"),
+            "Should reference specifier, got: {entry}"
+        );
+        assert!(
+            !entry.contains("default"),
+            "Should not have default export, got: {entry}"
+        );
+    }
+
+    #[test]
+    fn test_build_reexport_entry_both() {
+        let mut named = HashSet::new();
+        named.insert("useState".to_string());
+        let dep = DepImport {
+            specifier: "react".to_string(),
+            named_exports: named,
+            has_default: true,
+        };
+        let entry = build_reexport_entry(&dep);
+        assert!(
+            entry.contains("export { default } from 'react'"),
+            "Should have default re-export, got: {entry}"
+        );
+        assert!(
+            entry.contains("useState"),
+            "Should have named re-export, got: {entry}"
+        );
+    }
+
+    #[test]
+    fn test_generate_import_map() {
+        let entries = vec![
+            ("react".to_string(), "react".to_string()),
+            (
+                "react/jsx-runtime".to_string(),
+                "react__jsx-runtime".to_string(),
+            ),
+        ];
+        let json = generate_import_map(&entries);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let imports = parsed.get("imports").unwrap().as_object().unwrap();
+        assert_eq!(imports.get("react").unwrap(), "/_rex/dep/react.js");
+        assert_eq!(
+            imports.get("react/jsx-runtime").unwrap(),
+            "/_rex/dep/react__jsx-runtime.js"
+        );
+    }
 }

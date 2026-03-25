@@ -377,3 +377,48 @@ fn to_camel_case(s: &str) -> String {
     }
     result
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, SystemTime};
+
+    #[test]
+    fn test_to_camel_case() {
+        assert_eq!(to_camel_case("foo-bar"), "fooBar");
+        assert_eq!(to_camel_case("already"), "already");
+        assert_eq!(to_camel_case("a-b-c"), "aBC");
+    }
+
+    #[test]
+    fn test_browser_transform_cache_basic() {
+        let cache = BrowserTransformCache::new();
+        let now = SystemTime::now();
+        let path = "/project/src/index.tsx";
+
+        // Initially empty
+        assert!(cache.get(path, now).is_none());
+
+        // Insert and retrieve
+        cache.insert(path.to_string(), now, "const x = 1;".to_string());
+        let hit = cache.get(path, now);
+        assert_eq!(hit.unwrap(), "const x = 1;");
+
+        // Different mtime → cache miss
+        let later = now + Duration::from_secs(1);
+        assert!(
+            cache.get(path, later).is_none(),
+            "Changed mtime should miss the cache"
+        );
+
+        // Invalidate explicitly
+        cache.insert(path.to_string(), later, "const x = 2;".to_string());
+        assert!(cache.get(path, later).is_some());
+        cache.invalidate(path);
+        assert!(
+            cache.get(path, later).is_none(),
+            "Invalidated entry should not be returned"
+        );
+    }
+}
