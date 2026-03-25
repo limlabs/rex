@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/limlabs/rex/compare/v0.20.0...v0.20.1) (2026-03-25)
+
+
+### Bug Fixes
+
+* **build:** auto-extract embedded deps when package.json exists ([#220](https://github.com/limlabs/rex/issues/220)) ([3e598f2](https://github.com/limlabs/rex/commit/3e598f28249cc235003eebce5379a2f80ea5b9fd))
+
 ## [0.20.0](https://github.com/limlabs/rex/compare/v0.19.3...v0.20.0) (2026-03-25)
 
 
