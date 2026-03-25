@@ -8,7 +8,7 @@ interface Props {
 export default function Home({ message, timestamp }: Props) {
   return (
     <div>
-      <h1>Hey it's Rex</h1>
+      <h1>Hey it's Rex!</h1>
       <p>{message}</p>
       <p>Rendered at: {new Date(timestamp).toISOString()}</p>
     </div>
