@@ -6,6 +6,26 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::cmd_lint::is_ignored;
 use crate::display::*;
 
+pub(crate) fn cmd_fmt_file(file: PathBuf, root: PathBuf, check: bool) -> Result<()> {
+    let file = std::fs::canonicalize(&file)?;
+    let root = std::fs::canonicalize(&root)?;
+    let options = load_format_options(&root);
+
+    let source = std::fs::read_to_string(&file)?;
+    let formatted = format_source(&source, &file, &options)?;
+
+    if formatted == source {
+        return Ok(());
+    }
+
+    if check {
+        anyhow::bail!("{} needs formatting", file.display());
+    }
+
+    std::fs::write(&file, &formatted)?;
+    Ok(())
+}
+
 pub(crate) fn cmd_fmt(root: PathBuf, check: bool) -> Result<()> {
     let root = std::fs::canonicalize(&root)?;
     let options = load_format_options(&root);
