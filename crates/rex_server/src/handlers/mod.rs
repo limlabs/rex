@@ -216,7 +216,11 @@ pub(crate) fn check_redirects(path: &str, config: &ProjectConfig) -> Option<Resp
 }
 
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod dev_module_handler_tests;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]

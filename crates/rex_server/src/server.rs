@@ -242,3 +242,178 @@ async fn dep_handler(
     )
         .into_response()
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::handlers::test_support::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use axum::routing::get;
+    use tower::ServiceExt;
+
+    fn build_dep_app_with_deps(deps: std::collections::HashMap<String, String>) -> Router {
+        TestAppBuilder::new()
+            .routes(
+                vec![make_route("/", "index.tsx", vec![])],
+                vec![(
+                    "index",
+                    "function Index() { return React.createElement('h1', null, 'Home'); }",
+                    None,
+                )],
+            )
+            .custom_router(move |state| {
+                let _ = state.client_deps.set(Arc::new(deps));
+                Router::new()
+                    .route("/_rex/dep/{*specifier}", get(dep_handler))
+                    .with_state(state)
+            })
+            .build()
+    }
+
+    #[tokio::test]
+    async fn dep_handler_serves_known_dep() {
+        let mut deps = std::collections::HashMap::new();
+        deps.insert(
+            "react".to_string(),
+            "// react ESM bundle\nexport default {};".to_string(),
+        );
+        let app = build_dep_app_with_deps(deps);
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/dep/react.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_string(resp.into_body()).await;
+        assert!(
+            body.contains("react ESM bundle"),
+            "Should serve the dep source: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn dep_handler_serves_dep_with_immutable_cache() {
+        let mut deps = std::collections::HashMap::new();
+        deps.insert("react".to_string(), "export default {}".to_string());
+        let app = build_dep_app_with_deps(deps);
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/dep/react.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let cc = resp
+            .headers()
+            .get("cache-control")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(
+            cc.contains("immutable"),
+            "Should have immutable cache: {cc}"
+        );
+        assert!(
+            cc.contains("max-age=31536000"),
+            "Should have long max-age: {cc}"
+        );
+    }
+
+    #[tokio::test]
+    async fn dep_handler_strips_js_extension() {
+        let mut deps = std::collections::HashMap::new();
+        deps.insert(
+            "react__jsx-runtime".to_string(),
+            "export const jsx = () => {};".to_string(),
+        );
+        let app = build_dep_app_with_deps(deps);
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/dep/react__jsx-runtime.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_string(resp.into_body()).await;
+        assert!(body.contains("jsx"), "Should serve jsx-runtime: {body}");
+    }
+
+    #[tokio::test]
+    async fn dep_handler_returns_404_for_unknown_dep() {
+        let deps = std::collections::HashMap::new();
+        let app = build_dep_app_with_deps(deps);
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/dep/unknown-lib.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn dep_handler_returns_404_when_no_deps_set() {
+        // Build without setting client_deps at all
+        let app = TestAppBuilder::new()
+            .routes(
+                vec![make_route("/", "index.tsx", vec![])],
+                vec![(
+                    "index",
+                    "function Index() { return React.createElement('h1', null, 'Home'); }",
+                    None,
+                )],
+            )
+            .custom_router(|state| {
+                // Don't set client_deps — OnceLock stays empty
+                Router::new()
+                    .route("/_rex/dep/{*specifier}", get(dep_handler))
+                    .with_state(state)
+            })
+            .build();
+
+        let resp = app
+            .oneshot(
+                Request::get("/_rex/dep/react.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn dep_handler_works_without_js_extension() {
+        let mut deps = std::collections::HashMap::new();
+        deps.insert("react".to_string(), "export default {}".to_string());
+        let app = build_dep_app_with_deps(deps);
+
+        // Request without .js suffix — should use specifier as-is
+        let resp = app
+            .oneshot(Request::get("/_rex/dep/react").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+}

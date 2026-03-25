@@ -4872,6 +4872,7 @@ dependencies = [
  "rex_v8",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tower",
  "tower-http",

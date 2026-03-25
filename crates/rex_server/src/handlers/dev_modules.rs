@@ -201,23 +201,7 @@ fn serve_css_module_proxy(css_path: &std::path::Path) -> impl IntoResponse {
         }
     };
 
-    // Simple CSS module class extraction — find .className patterns
-    let mut classes: Vec<String> = Vec::new();
-    for line in source.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix('.') {
-            if let Some(name) = rest.split([' ', '{', ',', ':', '>']).next() {
-                let name = name.trim();
-                if !name.is_empty()
-                    && name
-                        .chars()
-                        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
-                {
-                    classes.push(name.to_string());
-                }
-            }
-        }
-    }
+    let classes = extract_css_classes(&source);
 
     let stem = css_path
         .file_stem()
@@ -225,14 +209,7 @@ fn serve_css_module_proxy(css_path: &std::path::Path) -> impl IntoResponse {
         .unwrap_or("module")
         .replace(".module", "");
 
-    // Generate a simple proxy — in the full implementation, this would use
-    // the same scoping logic as css_modules.rs
-    let mut js = String::from("export default {\n");
-    for class in &classes {
-        let camel = to_camel_case(class);
-        js.push_str(&format!("  \"{camel}\": \"{stem}_{class}\",\n"));
-    }
-    js.push_str("};\n");
+    let js = generate_css_proxy_js(&classes, &stem);
 
     (
         StatusCode::OK,
@@ -270,7 +247,7 @@ pub async fn entry_handler(
             .unwrap_or(app_path)
             .to_string_lossy()
             .replace('\\', "/");
-        let js = format!("import App from '/_rex/src/{rel_path}';\nwindow.__REX_APP__ = App;\n");
+        let js = generate_app_entry_js(&rel_path);
         return (
             StatusCode::OK,
             [
@@ -309,8 +286,22 @@ pub async fn entry_handler(
         .replace('\\', "/");
 
     let src_url = format!("/_rex/src/{rel_path}");
+    let js = generate_page_entry_js(&route_pattern, &src_url);
 
-    let js = format!(
+    (
+        StatusCode::OK,
+        [
+            ("content-type", "application/javascript; charset=utf-8"),
+            ("cache-control", "no-store"),
+        ],
+        js,
+    )
+        .into_response()
+}
+
+/// Generate the page entry JS module for a given route.
+pub(crate) fn generate_page_entry_js(route_pattern: &str, src_url: &str) -> String {
+    format!(
         r#"import {{ createElement }} from 'react';
 import {{ hydrateRoot }} from 'react-dom/client';
 import Page from '{src_url}';
@@ -348,17 +339,44 @@ if (!window.__REX_NAVIGATING__) {{
   }}
 }}
 "#
-    );
-
-    (
-        StatusCode::OK,
-        [
-            ("content-type", "application/javascript; charset=utf-8"),
-            ("cache-control", "no-store"),
-        ],
-        js,
     )
-        .into_response()
+}
+
+/// Generate the _app entry JS module.
+pub(crate) fn generate_app_entry_js(rel_path: &str) -> String {
+    format!("import App from '/_rex/src/{rel_path}';\nwindow.__REX_APP__ = App;\n")
+}
+
+/// Extract CSS class names from a CSS source string.
+pub(crate) fn extract_css_classes(source: &str) -> Vec<String> {
+    let mut classes = Vec::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix('.') {
+            if let Some(name) = rest.split([' ', '{', ',', ':', '>']).next() {
+                let name = name.trim();
+                if !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+                {
+                    classes.push(name.to_string());
+                }
+            }
+        }
+    }
+    classes
+}
+
+/// Generate a CSS module JS proxy from class names and a stem.
+pub(crate) fn generate_css_proxy_js(classes: &[String], stem: &str) -> String {
+    let mut js = String::from("export default {\n");
+    for class in classes {
+        let camel = to_camel_case(class);
+        js.push_str(&format!("  \"{camel}\": \"{stem}_{class}\",\n"));
+    }
+    js.push_str("};\n");
+    js
 }
 
 /// Convert kebab-case to camelCase for CSS module class names.
@@ -420,5 +438,45 @@ mod tests {
             cache.get(path, later).is_none(),
             "Invalidated entry should not be returned"
         );
+    }
+
+    #[test]
+    fn test_generate_page_entry_js() {
+        let js = generate_page_entry_js("/about", "/_rex/src/pages/about.tsx");
+        assert!(js.contains("hydrateRoot"));
+        assert!(js.contains("__REX_PAGES"));
+        assert!(js.contains("__REX_RENDER__"));
+        assert!(js.contains("/_rex/src/pages/about.tsx"));
+        assert!(js.contains("'/about'"));
+    }
+
+    #[test]
+    fn test_generate_app_entry_js() {
+        let js = generate_app_entry_js("pages/_app.tsx");
+        assert!(js.contains("/_rex/src/pages/_app.tsx"));
+        assert!(js.contains("__REX_APP__"));
+    }
+
+    #[test]
+    fn test_extract_css_classes() {
+        let css = ".foo { color: red; }\n.bar-baz { margin: 0; }\n.a_b { padding: 1px; }\np { font-size: 14px; }";
+        let classes = extract_css_classes(css);
+        assert_eq!(classes, vec!["foo", "bar-baz", "a_b"]);
+    }
+
+    #[test]
+    fn test_extract_css_classes_empty() {
+        let css = "body { margin: 0; }";
+        let classes = extract_css_classes(css);
+        assert!(classes.is_empty());
+    }
+
+    #[test]
+    fn test_generate_css_proxy_js() {
+        let classes = vec!["foo".to_string(), "bar-baz".to_string()];
+        let js = generate_css_proxy_js(&classes, "styles");
+        assert!(js.contains("\"foo\": \"styles_foo\""));
+        assert!(js.contains("\"barBaz\": \"styles_bar-baz\""));
+        assert!(js.starts_with("export default {"));
     }
 }
