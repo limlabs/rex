@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.20.1](https://github.com/limlabs/rex/compare/v0.20.0...v0.20.1) (2026-03-25)
+
+
+### Bug Fixes
+
+* **build:** auto-extract embedded deps when package.json exists ([#220](https://github.com/limlabs/rex/issues/220)) ([3e598f2](https://github.com/limlabs/rex/commit/3e598f28249cc235003eebce5379a2f80ea5b9fd))
+
+## [0.20.0](https://github.com/limlabs/rex/compare/v0.19.3...v0.20.0) (2026-03-25)
+
+
+### Features
+
+* **docs:** add version to sidebar, publish docs on release ([#235](https://github.com/limlabs/rex/issues/235)) ([2f3beae](https://github.com/limlabs/rex/commit/2f3beae3ed5ca7d173220e1ef6ff1b3908aa3ed9))
+* **fmt:** add --file flag and Claude Code format-on-save hooks ([#234](https://github.com/limlabs/rex/issues/234)) ([380207d](https://github.com/limlabs/rex/commit/380207de49c89e929c0d505182a7c4f5b6159669))
+* **tui:** add timestamps to log entries ([#228](https://github.com/limlabs/rex/issues/228)) ([017aeb1](https://github.com/limlabs/rex/commit/017aeb11141d5cb8493d3a9babefa518c924b8fa))
+
+
+### Bug Fixes
+
+* **e2e:** disable flaky HMR ESM fast-path test ([#226](https://github.com/limlabs/rex/issues/226)) ([6a381e3](https://github.com/limlabs/rex/commit/6a381e3cf84d10a0d81ff1fd612f0183b764a8a1))
+* resolve npm audit vulnerabilities ([#236](https://github.com/limlabs/rex/issues/236)) ([0e8b982](https://github.com/limlabs/rex/commit/0e8b982d74a595ee938951b9fa7df6e073224491))
+* **v8:** add window/self/document polyfills for SSR ([#233](https://github.com/limlabs/rex/issues/233)) ([77680dc](https://github.com/limlabs/rex/commit/77680dc887a033147b44959e7f7df03ae19a9e07))
+* **v8:** keep IO loop alive for active TCP sockets (postgres.js compat) ([#224](https://github.com/limlabs/rex/issues/224)) ([8551769](https://github.com/limlabs/rex/commit/85517694cbaaa47aa44a79e56869e171d1a9153b))
+
 ## [0.19.3](https://github.com/limlabs/rex/compare/v0.19.2...v0.19.3) (2026-03-23)
 
 

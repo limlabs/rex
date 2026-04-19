@@ -14,6 +14,9 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
+  "overrides": {
+    "h3-v2": "npm:h3@2.0.1-rc.19"
+  },
   "devDependencies": {
     "@tanstack/router-plugin": "^1",
     "@types/react": "^19",

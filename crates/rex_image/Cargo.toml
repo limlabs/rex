@@ -1,6 +1,6 @@
 [package]
 name = "rex_image"
-version = "0.19.3" # x-release-please-version
+version = "0.20.1" # x-release-please-version
 edition = "2021"
 description = "Image optimization and processing for the Rex framework"
 license = "MIT"
