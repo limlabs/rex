@@ -20,3 +20,4 @@ dist/
 
 *.tsbuildinfo
 coverage.json
+server*.log

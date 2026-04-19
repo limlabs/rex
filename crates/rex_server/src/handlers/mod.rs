@@ -1,6 +1,8 @@
 mod action;
 mod api;
 mod data;
+#[cfg(feature = "build")]
+pub mod dev_modules;
 mod image;
 mod page;
 mod rsc;
@@ -8,6 +10,8 @@ mod rsc;
 pub use action::server_action_handler;
 pub use api::api_handler;
 pub use data::data_handler;
+#[cfg(feature = "build")]
+pub use dev_modules::{entry_handler, src_handler};
 pub use image::{image_handler, ImageQuery};
 pub use page::page_handler;
 pub use rsc::{rsc_handler, rsc_handler_root};
@@ -174,6 +178,7 @@ pub(crate) async fn render_error_page(
         doc_descriptor: hot.document_descriptor.as_ref(),
         manifest_json: Some(&hot.manifest_json),
         font_preloads: &hot.manifest.font_preloads,
+        import_map_json: None,
     });
 
     (status, Html(document)).into_response()
@@ -213,7 +218,11 @@ pub(crate) fn check_redirects(path: &str, config: &ProjectConfig) -> Option<Resp
 }
 
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
+
+#[cfg(all(test, feature = "build"))]
+#[allow(clippy::unwrap_used)]
+mod dev_module_handler_tests;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]

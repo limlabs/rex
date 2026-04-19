@@ -10,39 +10,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-fn rex_binary() -> PathBuf {
-    if let Ok(bin) = std::env::var("REX_BIN") {
-        return PathBuf::from(bin);
-    }
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf();
-    let debug = workspace_root.join("target/debug/rex");
-    if debug.exists() {
-        return debug;
-    }
-    let release = workspace_root.join("target/release/rex");
-    if release.exists() {
-        return release;
-    }
-    panic!("Rex binary not found. Run `cargo build` first.");
-}
-
 fn fixture_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("fixtures/app-router")
-}
-
-fn find_free_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.local_addr().unwrap().port()
+    crate::workspace_root().join("fixtures/app-router")
 }
 
 /// Wait until the server accepts TCP connections (port is open).
@@ -63,9 +32,9 @@ fn wait_for_server(port: u16, timeout: Duration) {
 #[tokio::test]
 #[ignore]
 async fn e2e_hmr_esm_fast_path_for_source_change() {
-    let bin = rex_binary();
+    let bin = crate::rex_binary();
     let root = fixture_root();
-    let port = find_free_port();
+    let port = crate::find_free_port();
     let component_path = root.join("components/Counter.tsx");
 
     // Save original content for restoration

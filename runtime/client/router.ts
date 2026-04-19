@@ -178,7 +178,10 @@
 
     if (!loadingChunks[js]) {
       window.__REX_NAVIGATING__ = true;
-      loadingChunks[js] = import('/_rex/static/' + js).then(function () {
+      // Dev unbundled mode: js is already a full URL (/_rex/entry/...)
+      // Production: js is a chunk filename that needs /_rex/static/ prefix
+      const url = js.startsWith('/_rex/') ? js : '/_rex/static/' + js;
+      loadingChunks[js] = import(url).then(function () {
         delete loadingChunks[js];
       });
     }

@@ -1,7 +1,8 @@
 use crate::document::{
-    assemble_body_tail, assemble_head_shell, assemble_rsc_document, extract_body_tag_attrs,
-    extract_html_tag_attrs, DocumentDescriptor, RscDocumentParams,
+    assemble_body_tail, assemble_head_shell, extract_body_tag_attrs, extract_html_tag_attrs,
+    BodyTailParams, DocumentDescriptor, HeadShellParams,
 };
+use crate::document_rsc::{assemble_rsc_document, RscDocumentParams};
 use rex_core::{AppRouteAssets, AssetManifest, Fallback, PageAssets, RenderMode, Route};
 use rex_v8::IsolatePool;
 use std::collections::HashMap;
@@ -303,25 +304,27 @@ fn assemble_static_html(
     let mut css_files = manifest.global_css.clone();
     css_files.extend(assets.css.iter().cloned());
 
-    let shell = assemble_head_shell(
-        &css_files,
-        &manifest.css_contents,
-        &manifest.shared_chunks,
-        manifest.app_script.as_deref(),
-        &client_scripts,
+    let shell = assemble_head_shell(&HeadShellParams {
+        css_files: &css_files,
+        css_contents: &manifest.css_contents,
+        shared_chunks: &manifest.shared_chunks,
+        app_script: manifest.app_script.as_deref(),
+        client_scripts: &client_scripts,
         doc_descriptor,
-        &manifest.font_preloads,
-    );
+        font_preloads: &manifest.font_preloads,
+        import_map_json: None, // never unbundled for pre-rendered pages
+    });
 
-    let tail = assemble_body_tail(
-        &render_result.body,
-        &render_result.head,
+    let tail = assemble_body_tail(&BodyTailParams {
+        ssr_html: &render_result.body,
+        head_html: &render_result.head,
         props_json,
-        &client_scripts,
-        manifest.app_script.as_deref(),
-        false, // never dev mode for pre-rendered pages
-        Some(manifest_json),
-    );
+        client_scripts: &client_scripts,
+        app_script: manifest.app_script.as_deref(),
+        is_dev: false, // never dev mode for pre-rendered pages
+        manifest_json: Some(manifest_json),
+        import_map_json: None, // never unbundled for pre-rendered pages
+    });
 
     format!("{shell}{tail}")
 }
