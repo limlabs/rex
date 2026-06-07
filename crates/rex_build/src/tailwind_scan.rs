@@ -3,7 +3,10 @@ use rex_core::RexConfig;
 use rex_router::ScanResult;
 use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Directories never worth scanning for Tailwind candidates.
+const SKIP_DIRS: &[&str] = &["node_modules", ".rex", ".git", ".next", "public", "dist"];
 
 /// Scan all project source files and extract Tailwind utility class candidates.
 ///
@@ -61,11 +64,125 @@ fn collect_source_files(config: &RexConfig, scan: &ScanResult) -> Vec<PathBuf> {
     // This matches Tailwind v4's automatic content detection behavior.
     scan_project_root(&config.project_root, &mut files);
 
+    // Honor Tailwind v4 `@source` directives in the project's CSS entry files.
+    // Unlike the project-root walk above, these may reference files OUTSIDE
+    // `project_root` (e.g. a sibling monorepo package) — exactly the case the
+    // root walk misses (issue #246).
+    collect_source_directive_files(scan, &mut files);
+
     // Deduplicate
     let mut seen = HashSet::new();
     files.retain(|f| seen.insert(f.clone()));
 
     files
+}
+
+/// Collect source files referenced by Tailwind v4 `@source "<path>"` directives
+/// in the project's CSS entry files.
+///
+/// Tailwind's built-in V8 compiler is handed a pre-scanned candidate list, so it
+/// never performs its own filesystem scan of `@source` paths — that scan has to
+/// happen here. Paths are resolved relative to the CSS file's own directory (NOT
+/// `project_root`) and are added without any project-root restriction. The
+/// file-path forms are honored:
+///   - `@source "../shared/components"`     → recursive directory walk
+///   - `@source "../shared/components/"`    → recursive directory walk
+///   - `@source "../shared/**/*.{ts,tsx}"`  → walk the pre-glob base directory
+///   - `@source "../shared/Button.tsx"`     → single file
+///
+/// `@source inline("…")` is intentionally skipped: its candidates are embedded in
+/// the CSS and emitted by the Tailwind engine itself. `@source not "…"`
+/// exclusions are also left as no-ops.
+fn collect_source_directive_files(scan: &ScanResult, files: &mut Vec<PathBuf>) {
+    let css_paths = match crate::tailwind::collect_all_css_import_paths(scan) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    for css_path in &css_paths {
+        let content = match fs::read_to_string(css_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if !crate::tailwind::needs_tailwind(&content) {
+            continue;
+        }
+        let css_dir = css_path.parent().unwrap_or_else(|| Path::new("."));
+        for body in parse_source_directives(&content) {
+            add_source_directive(css_dir, &body, files);
+        }
+    }
+}
+
+/// Extract the body of each `@source` at-rule (the text between `@source` and the
+/// terminating `;`). Commented-out directives are not special-cased — a stray
+/// match merely scans a few extra files, which is harmless given the candidate
+/// scanner is intentionally over-inclusive.
+fn parse_source_directives(css: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = css;
+    while let Some(idx) = rest.find("@source") {
+        let after = &rest[idx + "@source".len()..];
+        // Require whitespace right after `@source` so we don't match `@sources`.
+        if !after.chars().next().is_some_and(char::is_whitespace) {
+            rest = after;
+            continue;
+        }
+        let end = after.find(';').unwrap_or(after.len());
+        let body = after[..end].trim();
+        if !body.is_empty() {
+            out.push(body.to_string());
+        }
+        rest = &after[end..];
+    }
+    out
+}
+
+/// Resolve one `@source` directive body to source files and add them to `files`.
+fn add_source_directive(css_dir: &Path, body: &str, files: &mut Vec<PathBuf>) {
+    let body = body.trim();
+    // Exclusions (`not …`) and inline safelists (`inline(…)`) are handled by the
+    // Tailwind engine itself; the candidate scanner skips them.
+    if body.starts_with("not") || body.starts_with("inline") {
+        return;
+    }
+    let path = match unquote(body) {
+        Some(p) => p,
+        None => return,
+    };
+    let (base, has_glob) = split_glob_base(path);
+    let resolved = css_dir.join(base);
+    if has_glob || resolved.is_dir() {
+        scan_directory_filtered(&resolved, files, SKIP_DIRS);
+    } else if resolved.is_file() {
+        files.push(resolved);
+    }
+}
+
+/// Strip a single- or double-quoted wrapper, returning the inner string.
+fn unquote(s: &str) -> Option<&str> {
+    let s = s.trim();
+    let quote = match s.chars().next()? {
+        c @ ('"' | '\'') => c,
+        _ => return None,
+    };
+    let inner = &s[quote.len_utf8()..];
+    let end = inner.find(quote)?;
+    Some(&inner[..end])
+}
+
+/// Split a `@source` path into its non-glob base directory and whether a glob
+/// pattern followed. Mirrors Tailwind v4: everything before the first path
+/// segment containing a glob metacharacter is the base directory that gets
+/// scanned.
+fn split_glob_base(path: &str) -> (String, bool) {
+    let mut base = Vec::new();
+    for segment in path.split('/') {
+        if segment.contains(['*', '?', '[', ']', '{', '}']) {
+            return (base.join("/"), true);
+        }
+        base.push(segment);
+    }
+    (base.join("/"), false)
 }
 
 /// Scan the project root for source files, skipping non-source directories.
@@ -74,7 +191,6 @@ fn collect_source_files(config: &RexConfig, scan: &ScanResult) -> Vec<PathBuf> {
 /// `src/`) are included in Tailwind candidate scanning — matching Tailwind v4's
 /// automatic content detection.
 fn scan_project_root(root: &std::path::Path, files: &mut Vec<PathBuf>) {
-    const SKIP_DIRS: &[&str] = &["node_modules", ".rex", ".git", ".next", "public", "dist"];
     scan_directory_filtered(root, files, SKIP_DIRS);
 }
 
@@ -286,6 +402,181 @@ mod tests {
         assert!(
             !names.iter().any(|n| n.contains("node_modules")),
             "should skip node_modules, got: {names:?}"
+        );
+    }
+
+    #[test]
+    fn test_parse_source_directives() {
+        let css = "@import \"tailwindcss\";\n\
+                   @source \"../shared\";\n\
+                   @source inline(\"foo bar\");\n\
+                   @source not \"../excluded\";\n";
+        assert_eq!(
+            parse_source_directives(css),
+            vec![
+                "\"../shared\"".to_string(),
+                "inline(\"foo bar\")".to_string(),
+                "not \"../excluded\"".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_source_directives_ignores_non_directive_token() {
+        // `@sources` (no whitespace) must not be treated as a directive.
+        let css = "@sources nothing;\n@source \"./real\";\n";
+        assert_eq!(parse_source_directives(css), vec!["\"./real\"".to_string()]);
+    }
+
+    #[test]
+    fn test_unquote() {
+        assert_eq!(unquote("\"abc\""), Some("abc"));
+        assert_eq!(unquote("'abc'"), Some("abc"));
+        assert_eq!(unquote("  \"abc\"  "), Some("abc"));
+        assert_eq!(unquote("abc"), None);
+        assert_eq!(unquote("\"unterminated"), None);
+    }
+
+    #[test]
+    fn test_split_glob_base() {
+        assert_eq!(
+            split_glob_base("../shared/src/components"),
+            ("../shared/src/components".to_string(), false)
+        );
+        assert_eq!(
+            split_glob_base("../shared/src/**/*.{ts,tsx}"),
+            ("../shared/src".to_string(), true)
+        );
+        assert_eq!(
+            split_glob_base("../shared/*.tsx"),
+            ("../shared".to_string(), true)
+        );
+    }
+
+    #[test]
+    fn test_add_source_directive_skips_inline_and_not() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut files = Vec::new();
+        add_source_directive(tmp.path(), "inline(\"foo bar\")", &mut files);
+        add_source_directive(tmp.path(), "not \"./x\"", &mut files);
+        assert!(
+            files.is_empty(),
+            "inline/not directives add no files: {files:?}"
+        );
+    }
+
+    #[test]
+    fn test_add_source_directive_walks_directory() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let comp = tmp.path().join("shared/components");
+        fs::create_dir_all(&comp).unwrap();
+        fs::write(comp.join("Card.tsx"), "className=\"text-emerald-600\"").unwrap();
+        // node_modules under the source dir must still be skipped.
+        let nm = comp.join("node_modules");
+        fs::create_dir_all(&nm).unwrap();
+        fs::write(nm.join("dep.js"), "className=\"should-not-appear\"").unwrap();
+
+        let css_dir = tmp.path().join("app/styles");
+        fs::create_dir_all(&css_dir).unwrap();
+
+        let mut files = Vec::new();
+        add_source_directive(&css_dir, "\"../../shared/components\"", &mut files);
+
+        let names: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
+        assert!(
+            names.iter().any(|n| n.contains("Card.tsx")),
+            "should walk the @source directory, got: {names:?}"
+        );
+        assert!(
+            !names.iter().any(|n| n.contains("node_modules")),
+            "should skip node_modules inside @source dir, got: {names:?}"
+        );
+    }
+
+    #[test]
+    fn test_add_source_directive_single_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let comp = tmp.path().join("shared");
+        fs::create_dir_all(&comp).unwrap();
+        let file = comp.join("Only.tsx");
+        fs::write(&file, "className=\"p-7\"").unwrap();
+
+        let css_dir = tmp.path().join("app");
+        fs::create_dir_all(&css_dir).unwrap();
+
+        let mut files = Vec::new();
+        add_source_directive(&css_dir, "\"../shared/Only.tsx\"", &mut files);
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("Only.tsx"));
+    }
+
+    /// Regression for #246: a class used only in a sibling package referenced via
+    /// an out-of-root `@source` directive must still end up in the candidate set.
+    #[test]
+    fn test_scan_candidates_honors_out_of_root_at_source() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // project_root = <tmp>/app ; sibling package = <tmp>/shared
+        let app = tmp.path().join("app");
+        let pages = app.join("pages");
+        let styles = app.join("styles");
+        fs::create_dir_all(&pages).unwrap();
+        fs::create_dir_all(&styles).unwrap();
+        let shared_components = tmp.path().join("shared/src/components");
+        fs::create_dir_all(&shared_components).unwrap();
+
+        // CSS entry imports Tailwind and points @source at the sibling package.
+        fs::write(
+            styles.join("globals.css"),
+            "@import \"tailwindcss\";\n@source \"../../shared/src/components\";\n",
+        )
+        .unwrap();
+
+        // _app imports the CSS; it does NOT use the sibling-only class.
+        let app_entry = pages.join("_app.tsx");
+        fs::write(
+            &app_entry,
+            "import '../styles/globals.css';\nexport default function App() { return null; }\n",
+        )
+        .unwrap();
+
+        // The sibling component is the ONLY place this class appears.
+        fs::write(
+            shared_components.join("Widget.tsx"),
+            "export default function Widget() { return <div className=\"bg-fuchsia-700\">hi</div>; }",
+        )
+        .unwrap();
+
+        let config = rex_core::RexConfig {
+            project_root: app.clone(),
+            pages_dir: pages.clone(),
+            app_dir: app.join("app"),
+            output_dir: app.join(".rex"),
+            port: 3000,
+            dev: false,
+        };
+        let scan = rex_router::ScanResult {
+            app: Some(rex_core::Route {
+                pattern: "/_app".to_string(),
+                file_path: app_entry.clone(),
+                abs_path: app_entry,
+                dynamic_segments: vec![],
+                page_type: rex_core::PageType::Regular,
+                specificity: 0,
+            }),
+            routes: vec![],
+            not_found: None,
+            error: None,
+            document: None,
+            middleware: None,
+            mcp_tools: vec![],
+            api_routes: vec![],
+            app_scan: None,
+        };
+
+        let candidates = scan_candidates(&config, &scan).unwrap();
+        assert!(
+            candidates.iter().any(|c| c == "bg-fuchsia-700"),
+            "out-of-root @source should contribute its candidates, got: {candidates:?}"
         );
     }
 }

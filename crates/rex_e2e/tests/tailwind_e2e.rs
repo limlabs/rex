@@ -260,6 +260,20 @@ mod tailwind {
 
     #[tokio::test]
     #[ignore]
+    async fn e2e_tailwind_css_includes_out_of_root_source() {
+        // Regression for limlabs/rex#246: globals.css references a sibling package
+        // outside the app's project root via `@source "../../tailwind-builtin-shared"`.
+        // `bg-rose-700` is used ONLY in that sibling (fixtures/tailwind-builtin-shared),
+        // so it appears here only if the out-of-root @source directive is honored.
+        let css = get_tailwind_css().await;
+        assert!(
+            css.contains(".bg-rose-700"),
+            "CSS should contain .bg-rose-700 from the out-of-root @source package"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
     async fn e2e_tailwind_ssr_renders_class_attributes() {
         // Verify the SSR HTML contains the Tailwind class names in the rendered markup
         let url = format!("{}/", base_url());
