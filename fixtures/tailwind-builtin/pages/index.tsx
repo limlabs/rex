@@ -11,6 +11,13 @@ export default function Home({ message, timestamp }: Props) {
       <h1 className="text-4xl font-bold text-gray-900 mb-4">Tailwind Builtin</h1>
       <p className="text-lg text-gray-600 mb-2">{message}</p>
       <p className="text-sm text-gray-400">Rendered at: {timestamp}</p>
+      {/* Arbitrary value embedding a CSS function. The parentheses inside the
+          `[…]` must survive candidate scanning, so the built-in compiler emits
+          `.text-\[var\(--color-accent\)\]` without any `@source inline(...)`
+          safelist. */}
+      <p className="text-[var(--color-accent)] hover:text-[var(--color-accent)]">
+        Accent text via an arbitrary CSS variable
+      </p>
       <div className="mt-8 grid grid-cols-2 gap-4">
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-xl font-semibold mb-2">Zero Install</h2>

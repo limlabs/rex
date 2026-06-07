@@ -274,6 +274,25 @@ mod tailwind {
 
     #[tokio::test]
     #[ignore]
+    async fn e2e_tailwind_css_includes_parenthesized_arbitrary_value() {
+        // Regression: a utility whose arbitrary value embeds a CSS function —
+        // `text-[var(--color-accent)]` in index.tsx — must be emitted by the
+        // built-in compiler WITHOUT any `@source inline(...)` safelist. The
+        // candidate scanner previously split on `(`/`)`, dropping the utility.
+        let css = get_tailwind_css().await;
+        // The escaped selector only appears if the parenthesized arbitrary value
+        // survived candidate tokenization; the unescaped `var(--color-accent)` is
+        // the compiled declaration value. Both substrings are format-independent
+        // (dev pretty-prints, `build` minifies).
+        assert!(
+            css.contains(r"text-\[var\(--color-accent\)\]") && css.contains("var(--color-accent)"),
+            "CSS should contain the escaped `.text-\\[var\\(--color-accent\\)\\]` rule \
+             (compiled from a parenthesized arbitrary value with no inline safelist)"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
     async fn e2e_tailwind_ssr_renders_class_attributes() {
         // Verify the SSR HTML contains the Tailwind class names in the rendered markup
         let url = format!("{}/", base_url());

@@ -229,16 +229,48 @@ fn is_scannable(path: &std::path::Path) -> bool {
 /// word-like tokens. Over-inclusion is intentional — the Tailwind compiler
 /// ignores candidates that don't match any utility definition.
 fn scan_source(source: &str, candidates: &mut HashSet<String>) {
-    // Split on delimiters that can't be part of CSS class names
-    for token in source.split(is_delimiter) {
-        let token = token.trim();
-        if is_candidate(token) {
-            candidates.insert(token.to_string());
+    // Split on delimiters that can't be part of CSS class names. Parentheses are
+    // a special case: they delimit tokens only OUTSIDE arbitrary-value brackets.
+    // That keeps call-expression syntax splitting cleanly (`cn("flex", …)` yields
+    // `cn` + `flex`, not `cn(`) while letting arbitrary values that embed CSS
+    // functions survive intact — e.g. `text-[var(--color-accent)]`,
+    // `w-[calc(100%-2rem)]`, `bg-[image:theme(colors.red)]`. Without this, the
+    // built-in compiler would never emit those utilities (issue: parenthesized
+    // arbitrary values dropped during candidate scanning).
+    let mut token_start: Option<usize> = None;
+    let mut bracket_depth: u32 = 0;
+    for (i, c) in source.char_indices() {
+        match c {
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            _ => {}
         }
+        let delimits = is_delimiter(c) || (bracket_depth == 0 && matches!(c, '(' | ')'));
+        if delimits {
+            if let Some(start) = token_start.take() {
+                insert_candidate(&source[start..i], candidates);
+            }
+        } else if token_start.is_none() {
+            token_start = Some(i);
+        }
+    }
+    if let Some(start) = token_start {
+        insert_candidate(&source[start..], candidates);
     }
 }
 
-/// Characters that delimit tokens (can't appear in utility class names).
+/// Trim a raw token and add it to the candidate set if it looks like a utility.
+fn insert_candidate(token: &str, candidates: &mut HashSet<String>) {
+    let token = token.trim();
+    if is_candidate(token) {
+        candidates.insert(token.to_string());
+    }
+}
+
+/// Characters that unconditionally delimit tokens (can't appear in utility class
+/// names). Parentheses are handled contextually in [`scan_source`] — they are
+/// delimiters only outside `[…]` arbitrary values — so they are deliberately
+/// absent here.
 fn is_delimiter(c: char) -> bool {
     matches!(
         c,
@@ -250,8 +282,6 @@ fn is_delimiter(c: char) -> bool {
             | '\r'
             | '{'
             | '}'
-            | '('
-            | ')'
             | '<'
             | '>'
             | '='
@@ -348,6 +378,58 @@ mod tests {
         scan_source(r#"className="w-[200px] bg-[#ff0000]""#, &mut candidates);
         assert!(candidates.contains("w-[200px]"));
         assert!(candidates.contains("bg-[#ff0000]"));
+    }
+
+    #[test]
+    fn test_scan_arbitrary_values_with_parentheses() {
+        // Arbitrary values that embed CSS functions must survive tokenization —
+        // the parentheses must NOT split them. Regression for parenthesized
+        // arbitrary values being dropped during candidate scanning.
+        let mut candidates = HashSet::new();
+        scan_source(
+            r#"className="text-[var(--color-accent)] w-[calc(100%-2rem)] bg-[image:theme(colors.red)]""#,
+            &mut candidates,
+        );
+        assert!(
+            candidates.contains("text-[var(--color-accent)]"),
+            "var() arbitrary value must survive, got: {candidates:?}"
+        );
+        assert!(
+            candidates.contains("w-[calc(100%-2rem)]"),
+            "calc() arbitrary value must survive, got: {candidates:?}"
+        );
+        assert!(
+            candidates.contains("bg-[image:theme(colors.red)]"),
+            "theme() arbitrary value must survive, got: {candidates:?}"
+        );
+    }
+
+    #[test]
+    fn test_scan_variant_arbitrary_value_with_parens() {
+        // The real-world pantry-host case: a `hover:` variant on a parenthesized
+        // arbitrary value (`hover:text-[var(--color-accent)]`).
+        let mut candidates = HashSet::new();
+        scan_source(
+            r#"<a className="hover:text-[var(--color-accent)]">link</a>"#,
+            &mut candidates,
+        );
+        assert!(
+            candidates.contains("hover:text-[var(--color-accent)]"),
+            "variant + parenthesized arbitrary value must survive, got: {candidates:?}"
+        );
+    }
+
+    #[test]
+    fn test_scan_clsx_with_conditional_and_parens() {
+        // Parentheses outside `[…]` still delimit, so `cn(`/`)` don't pollute the
+        // real classes — `flex` and `p-4` come through cleanly.
+        let mut candidates = HashSet::new();
+        scan_source(r#"cn("flex", x && "p-4")"#, &mut candidates);
+        assert!(candidates.contains("flex"));
+        assert!(candidates.contains("p-4"));
+        // The call expression itself is split on its parens, so the bare
+        // function name is the clean token (never `cn(`).
+        assert!(!candidates.contains("cn("));
     }
 
     #[test]
