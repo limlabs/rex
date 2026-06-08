@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.2](https://github.com/limlabs/rex/compare/v0.20.1...v0.20.2) (2026-06-08)
+
+
+### Bug Fixes
+
+* **build:** out-of-root [@source](https://github.com/source) directives + parenthesized arbitrary values ([#246](https://github.com/limlabs/rex/issues/246), [#248](https://github.com/limlabs/rex/issues/248)) ([#247](https://github.com/limlabs/rex/issues/247)) ([56af4d4](https://github.com/limlabs/rex/commit/56af4d4bfb92f5aebadaca828956c19d3532d07e))
+
 ## [0.20.1](https://github.com/limlabs/rex/compare/v0.20.0...v0.20.1) (2026-03-25)
 
 
