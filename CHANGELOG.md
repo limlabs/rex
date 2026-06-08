@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.3](https://github.com/limlabs/rex/compare/v0.20.2...v0.20.3) (2026-06-08)
+
+
+### Bug Fixes
+
+* **build:** isolate per-build scratch dirs to stop flaky dev output-dir race ([#250](https://github.com/limlabs/rex/issues/250)) ([1201628](https://github.com/limlabs/rex/commit/1201628e9464bdbe415bb90815236e86a3187078))
+
 ## [0.20.2](https://github.com/limlabs/rex/compare/v0.20.1...v0.20.2) (2026-06-08)
 
 
