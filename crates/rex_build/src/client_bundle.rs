@@ -1,4 +1,6 @@
-use crate::build_utils::{find_route_for_chunk, route_to_chunk_name, runtime_client_dir};
+use crate::build_utils::{
+    find_route_for_chunk, route_to_chunk_name, runtime_client_dir, unique_scratch_dir,
+};
 use crate::css_collect::collect_css_files;
 use crate::css_modules::CssModuleProcessing;
 use crate::manifest::AssetManifest;
@@ -58,8 +60,10 @@ pub(crate) async fn build_client_bundles(
     // Runtime files for rex/link, rex/head aliases
     let runtime_dir = runtime_client_dir()?;
 
-    // Generate virtual entry files for rolldown
-    let entries_dir = output_dir.join("_entries");
+    // Generate virtual entry files for rolldown. Use a per-build scratch dir so
+    // overlapping builds (e.g. a cancelled-then-restarted dev init) can't delete
+    // each other's in-flight entry files via the cleanup below.
+    let entries_dir = unique_scratch_dir(output_dir, "_entries");
     fs::create_dir_all(&entries_dir)?;
 
     let mut inputs = Vec::new();
@@ -80,8 +84,8 @@ pub(crate) async fn build_client_bundles(
         });
     }
 
-    // Page entries (with server-export DCE)
-    let dce_dir = output_dir.join("_dce");
+    // Page entries (with server-export DCE). Per-build scratch dir (see above).
+    let dce_dir = unique_scratch_dir(output_dir, "_dce");
     fs::create_dir_all(&dce_dir)?;
 
     for route in &scan.routes {

@@ -1,4 +1,4 @@
-use crate::build_utils::runtime_server_dir;
+use crate::build_utils::{runtime_server_dir, unique_scratch_dir};
 use anyhow::Result;
 use rex_core::{ProjectConfig, RexConfig};
 use rex_router::ScanResult;
@@ -385,8 +385,10 @@ pub(crate) async fn build_server_bundle(
 ) -> Result<PathBuf> {
     let runtime_dir = runtime_server_dir()?;
 
-    // Generate virtual entry that imports everything and registers on globalThis
-    let entries_dir = output_dir.join("_server_entry");
+    // Generate virtual entry that imports everything and registers on globalThis.
+    // Per-build scratch dir so overlapping builds don't delete each other's
+    // in-flight entry files via the cleanup at the end of this function.
+    let entries_dir = unique_scratch_dir(output_dir, "_server_entry");
     fs::create_dir_all(&entries_dir)?;
 
     let mut entry = String::new();

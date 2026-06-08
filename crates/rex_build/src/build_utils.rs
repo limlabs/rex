@@ -1,9 +1,29 @@
 use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 // Re-export detection functions from page_exports for backward compatibility
 pub(crate) use crate::page_exports::{detect_data_strategy, extract_middleware_matchers};
+
+/// Monotonic counter that makes per-build scratch directories unique.
+static SCRATCH_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Return a process-unique scratch directory path under `output_dir` using the
+/// given `prefix` (e.g. `_dce`, `_entries`, `_server_entry`). The directory is
+/// NOT created — callers `create_dir_all` it themselves.
+///
+/// Builds write transient inputs (DCE'd page copies, virtual entry files) into
+/// these dirs and `remove_dir_all` them on completion. When two builds overlap
+/// on the same `output_dir` — e.g. a dev-server init build that gets cancelled
+/// by a dropped HTTP connection and is then restarted — a shared, fixed scratch
+/// path means one build's cleanup deletes the other's in-flight files, which
+/// surfaces to rolldown as `UNLOADABLE_DEPENDENCY`. A unique suffix per
+/// invocation isolates each build's scratch so cleanup can never cross builds.
+pub(crate) fn unique_scratch_dir(output_dir: &Path, prefix: &str) -> PathBuf {
+    let seq = SCRATCH_SEQ.fetch_add(1, Ordering::Relaxed);
+    output_dir.join(format!("{prefix}-{seq}"))
+}
 
 /// Map a route to a chunk name for rolldown entry naming.
 pub(crate) fn route_to_chunk_name(route: &rex_core::Route) -> String {
@@ -259,6 +279,27 @@ mod tests {
     fn test_route_to_chunk_name_index() {
         let route = make_route("/", "index.tsx");
         assert_eq!(route_to_chunk_name(&route), "index");
+    }
+
+    #[test]
+    fn test_unique_scratch_dir_paths_are_distinct() {
+        let out = PathBuf::from("/tmp/out");
+        let a = unique_scratch_dir(&out, "_dce");
+        let b = unique_scratch_dir(&out, "_dce");
+        assert_ne!(
+            a, b,
+            "each call must yield a distinct dir so overlapping builds never \
+             share — and thus never delete each other's — scratch files"
+        );
+        // Both live under the output dir and carry the requested prefix.
+        for p in [&a, &b] {
+            assert_eq!(p.parent().unwrap(), out.as_path());
+            assert!(p
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("_dce-"));
+        }
     }
 
     #[test]
