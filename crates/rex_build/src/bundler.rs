@@ -91,8 +91,18 @@ pub async fn build_bundles_with_id(
     // Clean output directories to remove stale artifacts from previous builds.
     // Use let _ to ignore errors — on macOS, remove_dir_all can race with
     // Spotlight/fsevents and fail with ENOTEMPTY (os error 66).
-    let _ = fs::remove_dir_all(&server_dir);
-    let _ = fs::remove_dir_all(&client_dir);
+    //
+    // Only wipe for production builds, which are single-shot with no concurrency.
+    // In dev, builds can overlap on the same output dir (an init build cancelled
+    // by a dropped HTTP connection then restarted, or rapid rebuilds), and a
+    // blanket wipe would delete another in-flight build's files mid-bundle —
+    // surfacing as rolldown `UNLOADABLE_DEPENDENCY`. Dev relies instead on
+    // content-hashed output names (stale chunks are unreferenced and harmless)
+    // plus per-build scratch dirs (see `unique_scratch_dir`).
+    if !config.dev {
+        let _ = fs::remove_dir_all(&server_dir);
+        let _ = fs::remove_dir_all(&client_dir);
+    }
     fs::create_dir_all(&server_dir)?;
     fs::create_dir_all(&client_dir)?;
 
