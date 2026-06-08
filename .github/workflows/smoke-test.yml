@@ -26,10 +26,21 @@ jobs:
         with:
           node-version: 22
 
-      - name: Rewrite @limlabs/rex to published version
+      - name: Stage fixture outside the workspace
+        id: stage
         run: |
           VERSION="${INPUT_VERSION#v}"
-          cd "fixtures/${{ matrix.fixture }}"
+          # Stage the fixture OUTSIDE the repo. fixtures/* are npm workspace members,
+          # so installing in-tree makes npm symlink @limlabs/rex to the local
+          # packages/rex and hoist the `rex` bin to the workspace root — the smoke
+          # test would then exercise local source (not the published artifact) and
+          # ./node_modules/.bin/rex would not exist in the fixture dir. Copying to
+          # $RUNNER_TEMP isolates the install exactly like a real consumer project.
+          DEST="$RUNNER_TEMP/smoke-${{ matrix.fixture }}"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          cp -R "fixtures/${{ matrix.fixture }}/." "$DEST/"
+          cd "$DEST"
           # Remove lockfile so npm resolves from registry, not stale file: references
           rm -f package-lock.json
           node -e "
@@ -42,6 +53,7 @@ jobs:
             }
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
+          echo "dir=$DEST" >> "$GITHUB_OUTPUT"
         env:
           INPUT_VERSION: ${{ inputs.version }}
 
@@ -67,9 +79,9 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
 
       - name: Install dependencies
+        working-directory: ${{ steps.stage.outputs.dir }}
         run: |
           VERSION="${INPUT_VERSION#v}"
-          cd "fixtures/${{ matrix.fixture }}"
           npm install
           # Verify the platform binary was installed (optional deps can be silently skipped)
           if ! node -e "require.resolve('@limlabs/rex-linux-x64/package.json')" 2>/dev/null; then
@@ -81,7 +93,7 @@ jobs:
 
       - name: rex build
         run: ./node_modules/.bin/rex build
-        working-directory: fixtures/${{ matrix.fixture }}
+        working-directory: ${{ steps.stage.outputs.dir }}
 
       - name: rex start (verify HTTP 200)
         run: |
@@ -109,4 +121,4 @@ jobs:
             echo "::error::Expected HTTP 200, got $STATUS"
             exit 1
           fi
-        working-directory: fixtures/${{ matrix.fixture }}
+        working-directory: ${{ steps.stage.outputs.dir }}
