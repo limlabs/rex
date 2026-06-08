@@ -1,6 +1,9 @@
 #![allow(clippy::unwrap_used)]
 
 use super::*;
+use crate::document_rsc::{
+    assemble_rsc_body_tail, assemble_rsc_document, assemble_rsc_head_shell, RscDocumentParams,
+};
 
 #[test]
 fn escape_script_content_script_tag() {
@@ -80,6 +83,7 @@ fn assemble_document_escapes_inline_css() {
         doc_descriptor: None,
         manifest_json: None,
         font_preloads: &[],
+        import_map_json: None,
     };
     let html = assemble_document(&params);
     // The </style> inside the CSS must be escaped so the style block isn't closed prematurely

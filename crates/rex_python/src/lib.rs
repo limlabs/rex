@@ -190,6 +190,7 @@ impl Renderer {
             doc_descriptor: hot.document_descriptor.as_ref(),
             manifest_json: Some(&hot.manifest_json),
             font_preloads: &hot.manifest.font_preloads,
+            import_map_json: None,
         });
 
         Ok(html)

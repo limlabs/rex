@@ -1,5 +1,6 @@
 pub mod builtin_modules;
 pub mod bundler;
+pub mod client_dep_bundle;
 pub mod client_manifest;
 pub mod dce;
 pub(crate) mod diagnostics;
@@ -23,7 +24,7 @@ pub(crate) mod css_modules;
 pub(crate) mod font;
 pub(crate) mod font_google;
 pub mod mdx;
-pub(crate) mod page_exports;
+pub mod page_exports;
 pub mod server_bundle;
 pub mod tailwind;
 pub mod tailwind_optimize;

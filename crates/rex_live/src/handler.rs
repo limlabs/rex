@@ -272,6 +272,7 @@ async fn live_handler_impl(server: Arc<LiveServer>, request: axum::extract::Requ
         doc_descriptor: None,
         manifest_json: Some(&manifest_json),
         font_preloads: &build.manifest.font_preloads,
+        import_map_json: None,
     });
 
     Response::builder()

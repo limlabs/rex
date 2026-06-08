@@ -53,7 +53,7 @@ declare global {
 
   /** HMR update message */
   interface RexHmrMessage {
-    type: "connected" | "update" | "full-reload" | "error" | "tsc-error" | "tsc-clear";
+    type: "connected" | "full-reload" | "module-update" | "error" | "tsc-error" | "tsc-clear";
     path?: string;
     manifest?: RexManifest;
     message?: string;
@@ -62,6 +62,12 @@ declare global {
     kind?: "build" | "server" | "client";
     /** TypeScript diagnostics (for tsc-error type) */
     errors?: RexTscDiagnostic[];
+    /** Module URL for module-update messages */
+    url?: string;
+    /** Timestamp for cache-busting module reimport */
+    timestamp?: number;
+    /** Route pattern affected (for module-update on page files) */
+    route?: string;
   }
 
   /** A single TypeScript diagnostic from tsc --watch */

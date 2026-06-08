@@ -321,24 +321,26 @@ async fn export_404_page(
     let mut css_files = ctx.manifest.global_css.clone();
     css_files.extend(assets.css.iter().cloned());
 
-    let shell = crate::document::assemble_head_shell(
-        &css_files,
-        &ctx.manifest.css_contents,
-        &ctx.manifest.shared_chunks,
-        ctx.manifest.app_script.as_deref(),
-        &client_scripts,
-        ctx.doc_descriptor,
-        &ctx.manifest.font_preloads,
-    );
-    let tail = crate::document::assemble_body_tail(
-        &render_result.body,
-        &render_result.head,
-        &props_json,
-        &client_scripts,
-        ctx.manifest.app_script.as_deref(),
-        false,
-        Some(ctx.manifest_json),
-    );
+    let shell = crate::document::assemble_head_shell(&crate::document::HeadShellParams {
+        css_files: &css_files,
+        css_contents: &ctx.manifest.css_contents,
+        shared_chunks: &ctx.manifest.shared_chunks,
+        app_script: ctx.manifest.app_script.as_deref(),
+        client_scripts: &client_scripts,
+        doc_descriptor: ctx.doc_descriptor,
+        font_preloads: &ctx.manifest.font_preloads,
+        import_map_json: None, // never unbundled for static export
+    });
+    let tail = crate::document::assemble_body_tail(&crate::document::BodyTailParams {
+        ssr_html: &render_result.body,
+        head_html: &render_result.head,
+        props_json: &props_json,
+        client_scripts: &client_scripts,
+        app_script: ctx.manifest.app_script.as_deref(),
+        is_dev: false,
+        manifest_json: Some(ctx.manifest_json),
+        import_map_json: None, // never unbundled for static export
+    });
     let combined = format!("{shell}{tail}");
     let html = if config.html_extensions {
         rewrite_nav_links_to_html(&combined)

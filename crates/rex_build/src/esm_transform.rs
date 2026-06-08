@@ -516,6 +516,54 @@ fn is_mdx_file(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()) == Some("mdx")
 }
 
+/// Transform a source file for browser consumption (unbundled dev serving).
+///
+/// Like `transform_and_rewrite_imports()` but:
+/// - Rewrites relative imports to `/_rex/src/{rel_path}` URLs instead of absolute file paths
+/// - Leaves bare specifiers (react, etc.) untouched — browser import map resolves them
+/// - Applies DCE to strip `getServerSideProps` / `getStaticProps` from the output
+///
+/// The result is valid ESM JavaScript that can be loaded directly by the browser
+/// with `<script type="module">`.
+pub fn transform_for_browser(
+    source: &str,
+    file_path: &Path,
+    project_root: &Path,
+    known_dep_specifiers: &HashSet<String>,
+) -> Result<String> {
+    let filename = file_path.to_string_lossy().to_string();
+
+    // First apply DCE to strip server-only exports before transforming
+    let source_type = crate::esm_parse_helpers::source_type_from_filename(&filename);
+    let dce_source = crate::dce::strip_server_exports(source, source_type)?;
+
+    // Extract and resolve imports from the DCE'd source
+    let (local_imports, _bare_imports) =
+        extract_and_resolve_imports(&dce_source, file_path, project_root, known_dep_specifiers);
+
+    // Build import map: rewrite relative imports to /_rex/src/ URLs
+    let canonical_root = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
+    let mut import_map: HashMap<String, String> = HashMap::new();
+    for (specifier, resolved_path) in &local_imports {
+        let canonical = resolved_path
+            .canonicalize()
+            .unwrap_or_else(|_| resolved_path.clone());
+        let rel = canonical
+            .strip_prefix(&canonical_root)
+            .unwrap_or(&canonical);
+        let url = format!("/_rex/src/{}", rel.to_string_lossy());
+        import_map.insert(specifier.clone(), url);
+    }
+
+    // OXC transform TS/TSX → JS
+    let transformed = transform_to_esm(&dce_source, &filename)?;
+
+    // Rewrite imports to browser URLs
+    Ok(rewrite_imports_to_absolute(&transformed, &import_map))
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {

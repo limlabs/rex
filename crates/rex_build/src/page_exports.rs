@@ -10,7 +10,7 @@ use std::fs;
 use std::path::Path;
 
 /// Detect data strategy by scanning source for exported getServerSideProps / getStaticProps.
-pub(crate) fn detect_data_strategy(source_path: &Path) -> Result<DataStrategy> {
+pub fn detect_data_strategy(source_path: &Path) -> Result<DataStrategy> {
     let source = fs::read_to_string(source_path)?;
     detect_data_strategy_from_source(&source)
 }
@@ -81,7 +81,7 @@ pub(crate) fn detect_data_strategy_from_source(source: &str) -> Result<DataStrat
 }
 
 /// Detect whether a page source exports `getStaticPaths`.
-pub(crate) fn detect_has_static_paths(source_path: &Path) -> Result<bool> {
+pub fn detect_has_static_paths(source_path: &Path) -> Result<bool> {
     let source = fs::read_to_string(source_path)?;
     Ok(detect_has_static_paths_from_source(&source))
 }

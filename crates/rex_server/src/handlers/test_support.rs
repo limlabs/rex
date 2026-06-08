@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 /// Same minimal React stub as rex_v8 tests.
-pub(super) const MOCK_REACT_RUNTIME: &str = r#"
+pub(crate) const MOCK_REACT_RUNTIME: &str = r#"
     globalThis.__React = {
         createElement: function(type, props) {
             var children = Array.prototype.slice.call(arguments, 2);
@@ -50,7 +50,7 @@ pub(super) const MOCK_REACT_RUNTIME: &str = r#"
     };
 "#;
 
-pub(super) fn make_server_bundle(pages: &[(&str, &str, Option<&str>)]) -> String {
+pub(crate) fn make_server_bundle(pages: &[(&str, &str, Option<&str>)]) -> String {
     let mut bundle = String::new();
     bundle.push_str("'use strict';\n");
     bundle.push_str("globalThis.__rex_pages = globalThis.__rex_pages || {};\n\n");
@@ -185,7 +185,7 @@ globalThis.__rex_resolve_static_paths = function() {
     bundle
 }
 
-pub(super) fn make_route(pattern: &str, file_path: &str, segments: Vec<DynamicSegment>) -> Route {
+pub(crate) fn make_route(pattern: &str, file_path: &str, segments: Vec<DynamicSegment>) -> Route {
     let specificity = if segments.is_empty() { 100 } else { 50 };
     Route {
         pattern: pattern.to_string(),
@@ -197,14 +197,14 @@ pub(super) fn make_route(pattern: &str, file_path: &str, segments: Vec<DynamicSe
     }
 }
 
-pub(super) async fn body_string(body: axum::body::Body) -> String {
+pub(crate) async fn body_string(body: axum::body::Body) -> String {
     use http_body_util::BodyExt;
     let bytes = body.collect().await.unwrap().to_bytes();
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 
 /// Unified test app builder — replaces the 3 separate `build_test_app*` functions.
-pub(super) struct TestAppBuilder {
+pub(crate) struct TestAppBuilder {
     routes: Vec<Route>,
     pages: Vec<(&'static str, &'static str, Option<&'static str>)>,
     api_routes: Vec<Route>,
@@ -222,6 +222,7 @@ pub(super) struct TestAppBuilder {
     prerendered: std::collections::HashMap<String, PrerenderedPage>,
     static_paths_pages: Vec<(String, Fallback)>,
     strategy_overrides: Vec<(String, DataStrategy)>,
+    route_paths: std::collections::HashMap<String, PathBuf>,
 }
 
 impl TestAppBuilder {
@@ -244,6 +245,7 @@ impl TestAppBuilder {
             prerendered: std::collections::HashMap::new(),
             static_paths_pages: Vec::new(),
             strategy_overrides: Vec::new(),
+            route_paths: std::collections::HashMap::new(),
         }
     }
 
@@ -323,6 +325,11 @@ impl TestAppBuilder {
     pub fn static_paths_page(mut self, pattern: &str, fallback: Fallback) -> Self {
         self.static_paths_pages
             .push((pattern.to_string(), fallback));
+        self
+    }
+
+    pub fn route_paths(mut self, paths: std::collections::HashMap<String, PathBuf>) -> Self {
+        self.route_paths = paths;
         self
     }
 
@@ -410,6 +417,9 @@ impl TestAppBuilder {
             image_cache: rex_image::ImageCache::new(project_root.join(".rex-cache")),
             project_root,
             esm: None,
+            client_deps: std::sync::OnceLock::new(),
+            #[cfg(feature = "build")]
+            browser_transform_cache: std::sync::OnceLock::new(),
             lazy_init: tokio::sync::OnceCell::const_new_with(()),
             lazy_init_ctx: std::sync::Mutex::new(None),
             hot: RwLock::new(Arc::new(HotState {
@@ -434,6 +444,8 @@ impl TestAppBuilder {
                 has_mcp_tools: false,
                 prerendered: self.prerendered,
                 prerendered_app: std::collections::HashMap::new(),
+                import_map_json: None,
+                route_paths: self.route_paths,
             })),
         });
 
@@ -449,7 +461,7 @@ impl TestAppBuilder {
 }
 
 /// Minimal middleware runtime for tests (mirrors MIDDLEWARE_RUNTIME from bundler).
-pub(super) const TEST_MIDDLEWARE_REDIRECT: &str = r#"
+pub(crate) const TEST_MIDDLEWARE_REDIRECT: &str = r#"
     globalThis.__rex_run_middleware = function(reqJson) {
         var req = JSON.parse(reqJson);
         if (req.pathname === '/protected') {
@@ -472,7 +484,7 @@ pub(super) const TEST_MIDDLEWARE_REDIRECT: &str = r#"
 "#;
 
 /// API handler runtime for tests.
-pub(super) const TEST_API_RUNTIME: &str = r#"
+pub(crate) const TEST_API_RUNTIME: &str = r#"
     globalThis.__rex_api_routes = globalThis.__rex_api_routes || {};
     globalThis.__rex_api_routes['api/hello'] = function(req) {
         var parsed = JSON.parse(req);
@@ -497,7 +509,7 @@ pub(super) const TEST_API_RUNTIME: &str = r#"
 "#;
 
 /// Middleware runtime that rewrites /old-path to /new-path.
-pub(super) const TEST_MIDDLEWARE_REWRITE: &str = r#"
+pub(crate) const TEST_MIDDLEWARE_REWRITE: &str = r#"
     globalThis.__rex_run_middleware = function(reqJson) {
         var req = JSON.parse(reqJson);
         if (req.pathname === '/rewrite-me') {
@@ -520,7 +532,7 @@ pub(super) const TEST_MIDDLEWARE_REWRITE: &str = r#"
 "#;
 
 /// RSC flight runtime for tests.
-pub(super) const TEST_RSC_FLIGHT_RUNTIME: &str = r#"
+pub(crate) const TEST_RSC_FLIGHT_RUNTIME: &str = r#"
     globalThis.__rex_render_flight = function(routeKey, propsJson) {
         var props = JSON.parse(propsJson);
         return JSON.stringify({
@@ -532,7 +544,7 @@ pub(super) const TEST_RSC_FLIGHT_RUNTIME: &str = r#"
 "#;
 
 /// App route handler runtime for tests (route.ts).
-pub(super) const TEST_APP_ROUTE_HANDLER_RUNTIME: &str = r#"
+pub(crate) const TEST_APP_ROUTE_HANDLER_RUNTIME: &str = r#"
     globalThis.__rex_app_route_handlers = globalThis.__rex_app_route_handlers || {};
     globalThis.__rex_app_route_handlers['/api/hello'] = {
         GET: function(req) {
@@ -561,21 +573,21 @@ pub(super) const TEST_APP_ROUTE_HANDLER_RUNTIME: &str = r#"
 "#;
 
 /// App route handler that throws (for testing V8 error path).
-pub(super) const TEST_APP_ROUTE_HANDLER_THROWS: &str = r#"
+pub(crate) const TEST_APP_ROUTE_HANDLER_THROWS: &str = r#"
     globalThis.__rex_call_app_route_handler = function(routePattern, reqJson) {
         throw new Error('handler exploded');
     };
 "#;
 
 /// App route handler that returns invalid JSON (for testing parse error path).
-pub(super) const TEST_APP_ROUTE_HANDLER_BAD_JSON: &str = r#"
+pub(crate) const TEST_APP_ROUTE_HANDLER_BAD_JSON: &str = r#"
     globalThis.__rex_call_app_route_handler = function(routePattern, reqJson) {
         return 'not valid json {{{';
     };
 "#;
 
 /// Action runtime for server action tests.
-pub(super) const TEST_ACTION_RUNTIME: &str = r#"
+pub(crate) const TEST_ACTION_RUNTIME: &str = r#"
     globalThis.__rex_server_actions = {
         "test_action_id": function(x) { return x + 1; }
     };

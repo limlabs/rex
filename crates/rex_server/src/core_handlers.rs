@@ -48,6 +48,7 @@ async fn render_error_page(
         doc_descriptor: hot.document_descriptor.as_ref(),
         manifest_json: Some(&hot.manifest_json),
         font_preloads: &hot.manifest.font_preloads,
+        import_map_json: None,
     });
 
     RexResponse::html(status, document)
@@ -332,6 +333,7 @@ async fn handle_page_inner(
         doc_descriptor: hot.document_descriptor.as_ref(),
         manifest_json: Some(&hot.manifest_json),
         font_preloads: &hot.manifest.font_preloads,
+        import_map_json: None,
     });
 
     RexResponse::html(200, document)

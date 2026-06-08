@@ -16,22 +16,26 @@ fn rex_binary() -> PathBuf {
     if let Ok(bin) = std::env::var("REX_BIN") {
         return PathBuf::from(bin);
     }
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let ws = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
         .unwrap()
         .to_path_buf();
-    // Prefer debug (matches `cargo build` default and pre-push hook)
-    let debug = workspace_root.join("target/debug/rex");
+    let debug = ws.join("target/debug/rex");
     if debug.exists() {
         return debug;
     }
-    let release = workspace_root.join("target/release/rex");
+    let release = ws.join("target/release/rex");
     if release.exists() {
         return release;
     }
-    panic!("Rex binary not found. Run `cargo build` first.");
+    panic!("Rex binary not found");
+}
+
+fn find_free_port() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.local_addr().unwrap().port()
 }
 
 fn fixture_root() -> PathBuf {
@@ -41,11 +45,6 @@ fn fixture_root() -> PathBuf {
         .parent()
         .unwrap()
         .join("fixtures/app-router")
-}
-
-fn find_free_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.local_addr().unwrap().port()
 }
 
 fn ensure_server() -> &'static TestServer {

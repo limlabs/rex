@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
-use crate::document::{assemble_body_tail, assemble_head_shell};
+use crate::document::{assemble_body_tail, assemble_head_shell, BodyTailParams, HeadShellParams};
 
 use super::action::parse_form_action_fields;
 use super::{
@@ -500,19 +500,21 @@ pub(super) async fn page_handler_inner(
     let shared_chunks = hot.manifest.shared_chunks.clone();
     let app_script = hot.manifest.app_script.clone();
     let is_dev = state.is_dev;
+    let import_map_json = hot.import_map_json.clone();
 
     // Build the HTML head shell: doctype, <head> with CSS + JS modulepreload hints, opening <body>.
     // This is flushed to the browser immediately so it can start fetching resources
     // while V8 renders the page body.
-    let shell = assemble_head_shell(
-        &css_files,
-        &hot.manifest.css_contents,
-        &shared_chunks,
-        app_script.as_deref(),
-        &client_scripts,
-        hot.document_descriptor.as_ref(),
-        &hot.manifest.font_preloads,
-    );
+    let shell = assemble_head_shell(&HeadShellParams {
+        css_files: &css_files,
+        css_contents: &hot.manifest.css_contents,
+        shared_chunks: &shared_chunks,
+        app_script: app_script.as_deref(),
+        client_scripts: &client_scripts,
+        doc_descriptor: hot.document_descriptor.as_ref(),
+        font_preloads: &hot.manifest.font_preloads,
+        import_map_json: import_map_json.as_deref(),
+    });
 
     // Stream response in two chunks: shell (immediate) → render + tail (after V8)
     let state_clone = state.clone();
@@ -544,15 +546,16 @@ pub(super) async fn page_handler_inner(
             }
         };
 
-        let tail = assemble_body_tail(
-            &body_html,
-            &head_html,
-            &render_props,
-            &client_scripts,
-            app_script.as_deref(),
+        let tail = assemble_body_tail(&BodyTailParams {
+            ssr_html: &body_html,
+            head_html: &head_html,
+            props_json: &render_props,
+            client_scripts: &client_scripts,
+            app_script: app_script.as_deref(),
             is_dev,
-            Some(&manifest_json),
-        );
+            manifest_json: Some(&manifest_json),
+            import_map_json: import_map_json.as_deref(),
+        });
 
         Ok::<_, std::convert::Infallible>(tail)
     });
