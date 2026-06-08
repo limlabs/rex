@@ -1,1 +1,5 @@
 @import "tailwindcss";
+
+/* Pull in a sibling package that lives OUTSIDE this app's project root.
+   Exercises Tailwind v4 out-of-root `@source` support (limlabs/rex#246). */
+@source "../../tailwind-builtin-shared";
