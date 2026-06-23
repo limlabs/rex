@@ -1,0 +1,6 @@
+name: "Rex CodeQL config"
+
+paths-ignore:
+  # rex_napi is entirely #[napi] proc-macro FFI bindings.
+  # The macro-generated code triggers rust/access-invalid-pointer false positives.
+  - crates/rex_napi

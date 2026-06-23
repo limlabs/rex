@@ -12,23 +12,27 @@ impl ImageCache {
         Self { cache_dir }
     }
 
-    /// Build a deterministic cache path from request parameters.
-    /// The filename is a hex-encoded SHA256 hash — no user input reaches the path.
-    fn cache_path(&self, url: &str, width: u32, quality: u8, format: &str) -> PathBuf {
+    /// Compute a cache key from request parameters.
+    /// Returns a hex-encoded SHA256 hash (64 chars, `[0-9a-f]` only).
+    fn cache_key(url: &str, width: u32, quality: u8, format: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(format!("{url}:{width}:{quality}:{format}").as_bytes());
-        let hex_hash = hex::encode(hasher.finalize());
-        self.cache_dir.join(hex_hash)
+        hex::encode(hasher.finalize())
+    }
+
+    /// Validate the cache key and build the path under `cache_dir`.
+    /// Rejects any key containing non-hex characters to prevent path traversal.
+    fn validated_cache_path(&self, key: &str) -> Option<PathBuf> {
+        if key.is_empty() || !key.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        Some(self.cache_dir.join(key))
     }
 
     /// Try to read a cached image. Returns None on miss.
     pub fn get(&self, url: &str, width: u32, quality: u8, format: &str) -> Option<Vec<u8>> {
-        let path = self.cache_path(url, width, quality, format);
-        // Safety: cache_path produces a SHA256 hex filename under cache_dir,
-        // but verify containment to satisfy static analysis (path-injection).
-        if !path.starts_with(&self.cache_dir) {
-            return None;
-        }
+        let key = Self::cache_key(url, width, quality, format);
+        let path = self.validated_cache_path(&key)?;
         match fs::read(&path) {
             Ok(data) => {
                 debug!(%url, width, quality, format, "image cache hit");
@@ -47,15 +51,10 @@ impl ImageCache {
         format: &str,
         data: &[u8],
     ) -> std::io::Result<()> {
-        let path = self.cache_path(url, width, quality, format);
-        // Safety: cache_path produces a SHA256 hex filename under cache_dir,
-        // but verify containment to satisfy static analysis (path-injection).
-        if !path.starts_with(&self.cache_dir) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "cache path escapes cache directory",
-            ));
-        }
+        let key = Self::cache_key(url, width, quality, format);
+        let path = self.validated_cache_path(&key).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid cache key")
+        })?;
         fs::create_dir_all(&self.cache_dir)?;
         fs::write(&path, data)?;
         debug!(%url, width, quality, format, bytes = data.len(), "image cached");
@@ -101,21 +100,27 @@ mod tests {
 
     #[test]
     fn cache_key_determinism() {
-        let cache = ImageCache::new(PathBuf::from("/tmp/test-cache"));
-        let p1 = cache.cache_path("/images/hero.jpg", 640, 75, "webp");
-        let p2 = cache.cache_path("/images/hero.jpg", 640, 75, "webp");
-        let p3 = cache.cache_path("/images/hero.jpg", 320, 75, "webp");
-        assert_eq!(p1, p2);
-        assert_ne!(p1, p3);
+        let k1 = ImageCache::cache_key("/images/hero.jpg", 640, 75, "webp");
+        let k2 = ImageCache::cache_key("/images/hero.jpg", 640, 75, "webp");
+        let k3 = ImageCache::cache_key("/images/hero.jpg", 320, 75, "webp");
+        assert_eq!(k1, k2);
+        assert_ne!(k1, k3);
     }
 
     #[test]
-    fn cache_path_is_hex_only() {
-        let cache = ImageCache::new(PathBuf::from("/tmp/test-cache"));
-        let path = cache.cache_path("/../../../etc/passwd", 64, 75, "jpeg");
-        let filename = path.file_name().unwrap().to_str().unwrap();
+    fn cache_key_is_hex_only() {
+        let key = ImageCache::cache_key("/../../../etc/passwd", 64, 75, "jpeg");
         // SHA256 hex output: only hex chars, no path separators
-        assert!(filename.bytes().all(|b| b.is_ascii_hexdigit()));
-        assert_eq!(filename.len(), 64); // SHA256 = 32 bytes = 64 hex chars
+        assert!(key.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert_eq!(key.len(), 64); // SHA256 = 32 bytes = 64 hex chars
+    }
+
+    #[test]
+    fn validated_cache_path_rejects_non_hex() {
+        let cache = ImageCache::new(PathBuf::from("/tmp/test-cache"));
+        assert!(cache.validated_cache_path("").is_none());
+        assert!(cache.validated_cache_path("../etc/passwd").is_none());
+        assert!(cache.validated_cache_path("foo/bar").is_none());
+        assert!(cache.validated_cache_path("abcdef0123456789").is_some());
     }
 }
