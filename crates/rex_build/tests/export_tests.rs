@@ -2,13 +2,13 @@
 
 mod common;
 
-use common::{build_and_load, setup_test_project};
+use common::{build_and_load, setup_test_project_prod};
 use rex_server::export::{validate_exportability, ExportConfig, ExportContext};
 use std::path::Path;
 
 #[tokio::test]
 async fn test_export_static_pages_creates_html_files() {
-    let (_tmp, config, scan) = setup_test_project(
+    let (_tmp, config, scan) = setup_test_project_prod(
         &[
             (
                 "index.tsx",
@@ -89,7 +89,7 @@ async fn test_export_static_pages_creates_html_files() {
 
 #[tokio::test]
 async fn test_export_creates_static_asset_dir() {
-    let (_tmp, config, scan) = setup_test_project(
+    let (_tmp, config, scan) = setup_test_project_prod(
         &[(
             "index.tsx",
             r#"
@@ -135,7 +135,7 @@ async fn test_export_creates_static_asset_dir() {
 
 #[tokio::test]
 async fn test_export_cleans_output_on_rerun() {
-    let (_tmp, config, scan) = setup_test_project(
+    let (_tmp, config, scan) = setup_test_project_prod(
         &[(
             "index.tsx",
             r#"

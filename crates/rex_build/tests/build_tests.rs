@@ -2,7 +2,9 @@
 
 mod common;
 
-use common::{setup_mock_node_modules, setup_test_project, setup_test_project_full};
+use common::{
+    setup_mock_node_modules, setup_test_project, setup_test_project_full, setup_test_project_prod,
+};
 use rex_build::{build_bundles, AssetManifest};
 use rex_core::{PageType, ProjectConfig, RexConfig, Route};
 use rex_router::ScanResult;
@@ -166,7 +168,7 @@ async fn test_server_bundle_with_app() {
 
 #[tokio::test]
 async fn test_client_bundles_per_page() {
-    let (_tmp, config, scan) = setup_test_project(
+    let (_tmp, config, scan) = setup_test_project_prod(
         &[
             (
                 "index.tsx",
@@ -211,7 +213,7 @@ async fn test_client_bundles_per_page() {
 
 #[tokio::test]
 async fn test_manifest_contents() {
-    let (_tmp, config, scan) = setup_test_project(
+    let (_tmp, config, scan) = setup_test_project_prod(
         &[
             (
                 "index.tsx",
@@ -376,7 +378,7 @@ async fn test_global_css_from_app() {
 
 #[tokio::test]
 async fn test_client_bundle_app_wrapping() {
-    let (_tmp, config, scan) = setup_test_project(
+    let (_tmp, config, scan) = setup_test_project_prod(
         &[(
             "index.tsx",
             "export default function Home() { return <div>Home</div>; }",
@@ -480,7 +482,7 @@ export default function Home() {
     )
     .unwrap();
 
-    let config = RexConfig::new(root).with_dev(true);
+    let config = RexConfig::new(root).with_dev(false);
     let scan = ScanResult {
         routes: vec![Route {
             pattern: "/".to_string(),

@@ -12,7 +12,7 @@ rex_core = { path = "../rex_core" }
 rex_router = { path = "../rex_router" }
 rex_build = { path = "../rex_build" }
 rex_v8 = { path = "../rex_v8" }
-rex_server = { path = "../rex_server" }
+rex_server = { path = "../rex_server", features = ["build"] }
 notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 axum = { workspace = true }

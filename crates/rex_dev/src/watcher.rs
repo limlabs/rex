@@ -53,6 +53,17 @@ pub fn start_watcher(
                             continue;
                         }
 
+                        // Skip editor temp/swap files (atomic saves create dotfiles
+                        // like .!89808!about.tsx which briefly appear then disappear,
+                        // triggering spurious PageRemoved events)
+                        if path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .is_some_and(|n| n.starts_with('.'))
+                        {
+                            continue;
+                        }
+
                         let kind = match event.kind {
                             DebouncedEventKind::Any => {
                                 if is_middleware_file(&path, &project_root_owned) {

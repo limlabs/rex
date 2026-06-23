@@ -8,15 +8,18 @@ use tracing::{debug, info};
 pub enum HmrMessage {
     #[serde(rename = "connected")]
     Connected,
-    #[serde(rename = "update")]
-    Update {
-        path: String,
-        timestamp: u64,
-        /// Serialized manifest ({ build_id, pages }) for the client to hot-swap chunks
-        manifest: serde_json::Value,
-    },
     #[serde(rename = "full-reload")]
     FullReload,
+    /// Module-level update for unbundled dev serving.
+    /// Client reimports the specific module instead of full page reload.
+    #[serde(rename = "module-update")]
+    ModuleUpdate {
+        /// Source URL of the changed module (e.g., "/_rex/src/pages/index.tsx")
+        url: String,
+        timestamp: u64,
+        /// Route pattern affected (if the changed file is a page)
+        route: Option<String>,
+    },
     #[serde(rename = "error")]
     Error {
         message: String,
@@ -58,19 +61,6 @@ impl HmrBroadcast {
         Self { tx }
     }
 
-    pub fn send_update(&self, path: &str, manifest: serde_json::Value) {
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system clock before UNIX epoch")
-            .as_millis() as u64;
-
-        let _ = self.tx.send(HmrMessage::Update {
-            path: path.to_string(),
-            timestamp,
-            manifest,
-        });
-    }
-
     pub fn send_full_reload(&self) {
         let _ = self.tx.send(HmrMessage::FullReload);
     }
@@ -93,6 +83,19 @@ impl HmrBroadcast {
 
     pub fn send_tsc_errors(&self, errors: Vec<TscDiagnostic>) {
         let _ = self.tx.send(HmrMessage::TscError { errors });
+    }
+
+    pub fn send_module_update(&self, url: &str, route: Option<&str>) {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before UNIX epoch")
+            .as_millis() as u64;
+
+        let _ = self.tx.send(HmrMessage::ModuleUpdate {
+            url: url.to_string(),
+            timestamp,
+            route: route.map(String::from),
+        });
     }
 
     pub fn send_tsc_clear(&self) {

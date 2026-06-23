@@ -24,6 +24,9 @@ pub struct DocumentParams<'a> {
     pub doc_descriptor: Option<&'a DocumentDescriptor>,
     pub manifest_json: Option<&'a str>,
     pub font_preloads: &'a [String],
+    /// Import map JSON for unbundled dev serving (dev mode only).
+    /// When Some, script srcs are treated as full URLs (not prefixed with /_rex/static/).
+    pub import_map_json: Option<&'a str>,
 }
 
 /// Assemble the final HTML document
@@ -68,6 +71,13 @@ pub fn assemble_document(params: &DocumentParams<'_>) -> String {
         ));
     }
 
+    // Import map for unbundled dev serving (must appear before any module scripts)
+    if let Some(import_map) = params.import_map_json {
+        html.push_str(&format!(
+            "  <script type=\"importmap\">{import_map}</script>\n"
+        ));
+    }
+
     // CSS: inline content to avoid render-blocking network requests
     for css in params.css_files {
         if let Some(content) = params.css_contents.get(css) {
@@ -107,18 +117,32 @@ pub fn assemble_document(params: &DocumentParams<'_>) -> String {
         ));
     }
 
+    let unbundled = params.import_map_json.is_some();
+
     // _app client chunk (must load before page scripts for hydration wrapping)
     if let Some(app) = params.app_script {
-        html.push_str(&format!(
-            "  <script type=\"module\" src=\"/_rex/static/{app}\"></script>\n"
-        ));
+        if unbundled {
+            html.push_str(&format!(
+                "  <script type=\"module\" src=\"{app}\"></script>\n"
+            ));
+        } else {
+            html.push_str(&format!(
+                "  <script type=\"module\" src=\"/_rex/static/{app}\"></script>\n"
+            ));
+        }
     }
 
-    // Client chunks (ESM bundles produced by rolldown)
+    // Client chunks (ESM bundles produced by rolldown, or /_rex/entry/ URLs in dev)
     for script in params.client_scripts {
-        html.push_str(&format!(
-            "  <script type=\"module\" src=\"/_rex/static/{script}\"></script>\n"
-        ));
+        if unbundled {
+            html.push_str(&format!(
+                "  <script type=\"module\" src=\"{script}\"></script>\n"
+            ));
+        } else {
+            html.push_str(&format!(
+                "  <script type=\"module\" src=\"/_rex/static/{script}\"></script>\n"
+            ));
+        }
     }
 
     // Client-side router (must load after page scripts register __REX_RENDER__)
@@ -142,7 +166,7 @@ pub fn assemble_document(params: &DocumentParams<'_>) -> String {
 /// `</script>` (or `</SCRIPT>`, `<!--`, etc.) inside the script block.
 /// This is the same approach used by Next.js (`htmlEscapeJsonString`) and
 /// the `serialize-javascript` npm package.
-fn escape_script_content(s: &str) -> String {
+pub(crate) fn escape_script_content(s: &str) -> String {
     s.replace('<', "\\u003c")
         .replace('\u{2028}', "\\u2028")
         .replace('\u{2029}', "\\u2029")
@@ -152,13 +176,13 @@ fn escape_script_content(s: &str) -> String {
 ///
 /// Replaces all `<` so the HTML parser can never see a closing `</style>`
 /// tag (case-insensitive) inside the style block.
-fn escape_style_content(s: &str) -> String {
+pub(crate) fn escape_style_content(s: &str) -> String {
     s.replace('<', "\\u003c")
 }
 
 /// Escape a string for safe embedding inside a JavaScript single-quoted string literal.
 /// Handles backslashes, single quotes, newlines, and `</script>` sequences.
-fn escape_js_string(s: &str) -> String {
+pub(crate) fn escape_js_string(s: &str) -> String {
     s.replace('\\', "\\\\")
         .replace('\'', "\\'")
         .replace('\n', "\\n")
@@ -179,30 +203,46 @@ fn escape_attr(s: &str) -> String {
 /// `extract_*_tag_attrs` already stops at the first `>`, so by construction the
 /// string cannot contain `>`. This is a defense-in-depth measure that strips any
 /// `>` character to prevent premature tag closure.
-fn sanitize_tag_attrs(s: &str) -> String {
+pub(crate) fn sanitize_tag_attrs(s: &str) -> String {
     s.replace('>', "")
+}
+
+/// Parameters for assembling the HTML head shell.
+pub struct HeadShellParams<'a> {
+    pub css_files: &'a [String],
+    pub css_contents: &'a HashMap<String, String>,
+    pub shared_chunks: &'a [String],
+    pub app_script: Option<&'a str>,
+    pub client_scripts: &'a [String],
+    pub doc_descriptor: Option<&'a DocumentDescriptor>,
+    pub font_preloads: &'a [String],
+    pub import_map_json: Option<&'a str>,
+}
+
+/// Parameters for assembling the body tail.
+pub struct BodyTailParams<'a> {
+    pub ssr_html: &'a str,
+    pub head_html: &'a str,
+    pub props_json: &'a str,
+    pub client_scripts: &'a [String],
+    pub app_script: Option<&'a str>,
+    pub is_dev: bool,
+    pub manifest_json: Option<&'a str>,
+    pub import_map_json: Option<&'a str>,
 }
 
 /// Assemble the HTML head shell — everything from doctype through opening `<body>` tag.
 ///
 /// This is flushed to the browser immediately so it can start fetching CSS/JS
 /// resources while the server renders the page body in V8.
-pub fn assemble_head_shell(
-    css_files: &[String],
-    css_contents: &HashMap<String, String>,
-    shared_chunks: &[String],
-    app_script: Option<&str>,
-    client_scripts: &[String],
-    doc_descriptor: Option<&DocumentDescriptor>,
-    font_preloads: &[String],
-) -> String {
+pub fn assemble_head_shell(params: &HeadShellParams<'_>) -> String {
     let mut html = String::with_capacity(2048);
 
     html.push_str("<!DOCTYPE html>\n");
 
     // <html> tag with optional attributes from _document
     html.push_str("<html");
-    if let Some(desc) = doc_descriptor {
+    if let Some(desc) = params.doc_descriptor {
         for (k, v) in &desc.html_attrs {
             html.push_str(&format!(" {k}=\"{}\"", escape_attr(v)));
         }
@@ -212,7 +252,7 @@ pub fn assemble_head_shell(
     html.push_str("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n");
 
     // Inject extra head content from _document
-    if let Some(desc) = doc_descriptor {
+    if let Some(desc) = params.doc_descriptor {
         if !desc.head_content.is_empty() {
             html.push_str("  ");
             html.push_str(&desc.head_content);
@@ -220,16 +260,23 @@ pub fn assemble_head_shell(
         }
     }
 
+    // Import map for unbundled dev serving (must appear before any module scripts)
+    if let Some(import_map) = params.import_map_json {
+        html.push_str(&format!(
+            "  <script type=\"importmap\">{import_map}</script>\n"
+        ));
+    }
+
     // Font preloads: start fetching font files early to prevent layout shift
-    for font_file in font_preloads {
+    for font_file in params.font_preloads {
         html.push_str(&format!(
             "  <link rel=\"preload\" as=\"font\" type=\"font/woff2\" href=\"/_rex/static/{font_file}\" crossorigin />\n"
         ));
     }
 
     // CSS: inline content to avoid render-blocking network requests
-    for css in css_files {
-        if let Some(content) = css_contents.get(css) {
+    for css in params.css_files {
+        if let Some(content) = params.css_contents.get(css) {
             html.push_str("  <style>");
             html.push_str(&escape_style_content(content));
             html.push_str("</style>\n");
@@ -240,27 +287,50 @@ pub fn assemble_head_shell(
         }
     }
 
+    let unbundled = params.import_map_json.is_some();
+
     // Modulepreload hints: browser starts fetching + compiling JS immediately,
     // eliminating the import waterfall where entry modules must be fetched and
     // parsed before shared dependencies (React, etc.) are discovered.
-    for chunk in shared_chunks {
-        html.push_str(&format!(
-            "  <link rel=\"modulepreload\" href=\"/_rex/static/{chunk}\" />\n"
-        ));
+    if unbundled {
+        // In unbundled dev mode, preload the core dep modules
+        for dep in &["react.js", "react__jsx-runtime.js", "react-dom__client.js"] {
+            html.push_str(&format!(
+                "  <link rel=\"modulepreload\" href=\"/_rex/dep/{dep}\" />\n"
+            ));
+        }
+    } else {
+        for chunk in params.shared_chunks {
+            html.push_str(&format!(
+                "  <link rel=\"modulepreload\" href=\"/_rex/static/{chunk}\" />\n"
+            ));
+        }
     }
-    if let Some(app) = app_script {
-        html.push_str(&format!(
-            "  <link rel=\"modulepreload\" href=\"/_rex/static/{app}\" />\n"
-        ));
+    if let Some(app) = params.app_script {
+        if unbundled {
+            html.push_str(&format!(
+                "  <link rel=\"modulepreload\" href=\"{app}\" />\n"
+            ));
+        } else {
+            html.push_str(&format!(
+                "  <link rel=\"modulepreload\" href=\"/_rex/static/{app}\" />\n"
+            ));
+        }
     }
-    for script in client_scripts {
-        html.push_str(&format!(
-            "  <link rel=\"modulepreload\" href=\"/_rex/static/{script}\" />\n"
-        ));
+    for script in params.client_scripts {
+        if unbundled {
+            html.push_str(&format!(
+                "  <link rel=\"modulepreload\" href=\"{script}\" />\n"
+            ));
+        } else {
+            html.push_str(&format!(
+                "  <link rel=\"modulepreload\" href=\"/_rex/static/{script}\" />\n"
+            ));
+        }
     }
 
     html.push_str("</head>\n<body");
-    if let Some(desc) = doc_descriptor {
+    if let Some(desc) = params.doc_descriptor {
         for (k, v) in &desc.body_attrs {
             html.push_str(&format!(" {k}=\"{}\"", escape_attr(v)));
         }
@@ -271,29 +341,21 @@ pub fn assemble_head_shell(
 }
 
 /// Assemble the body content and closing tags, sent after SSR render completes.
-pub fn assemble_body_tail(
-    ssr_html: &str,
-    head_html: &str,
-    props_json: &str,
-    client_scripts: &[String],
-    app_script: Option<&str>,
-    is_dev: bool,
-    manifest_json: Option<&str>,
-) -> String {
-    let escaped_props = escape_script_content(props_json);
+pub fn assemble_body_tail(params: &BodyTailParams<'_>) -> String {
+    let escaped_props = escape_script_content(params.props_json);
 
-    let mut html = String::with_capacity(ssr_html.len() + 1024);
+    let mut html = String::with_capacity(params.ssr_html.len() + 1024);
 
     // Dynamic head elements from rex/head (title, meta, etc.)
     // Placed at top of body — browsers handle these correctly
-    if !head_html.is_empty() {
+    if !params.head_html.is_empty() {
         html.push_str("  ");
-        html.push_str(head_html);
+        html.push_str(params.head_html);
         html.push('\n');
     }
 
     // Main content
-    html.push_str(&format!("  <div id=\"__rex\">{ssr_html}</div>\n"));
+    html.push_str(&format!("  <div id=\"__rex\">{}</div>\n", params.ssr_html));
 
     // Props data for hydration
     html.push_str(&format!(
@@ -301,284 +363,52 @@ pub fn assemble_body_tail(
     ));
 
     // Route manifest for client-side navigation
-    if let Some(manifest) = manifest_json {
+    if let Some(manifest) = params.manifest_json {
         let escaped_manifest = escape_script_content(manifest);
         html.push_str(&format!(
             "  <script>window.__REX_MANIFEST__={escaped_manifest}</script>\n"
         ));
     }
 
+    let unbundled = params.import_map_json.is_some();
+
     // _app client chunk (must load before page scripts for hydration wrapping)
-    if let Some(app) = app_script {
-        html.push_str(&format!(
-            "  <script type=\"module\" src=\"/_rex/static/{app}\"></script>\n"
-        ));
+    if let Some(app) = params.app_script {
+        if unbundled {
+            html.push_str(&format!(
+                "  <script type=\"module\" src=\"{app}\"></script>\n"
+            ));
+        } else {
+            html.push_str(&format!(
+                "  <script type=\"module\" src=\"/_rex/static/{app}\"></script>\n"
+            ));
+        }
     }
 
-    // Client chunks (ESM bundles produced by rolldown)
-    for script in client_scripts {
-        html.push_str(&format!(
-            "  <script type=\"module\" src=\"/_rex/static/{script}\"></script>\n"
-        ));
+    // Client chunks (ESM bundles produced by rolldown, or /_rex/entry/ URLs in dev)
+    for script in params.client_scripts {
+        if unbundled {
+            html.push_str(&format!(
+                "  <script type=\"module\" src=\"{script}\"></script>\n"
+            ));
+        } else {
+            html.push_str(&format!(
+                "  <script type=\"module\" src=\"/_rex/static/{script}\"></script>\n"
+            ));
+        }
     }
 
     // Client-side router (must load after page scripts register __REX_RENDER__)
-    if manifest_json.is_some() {
+    if params.manifest_json.is_some() {
         html.push_str("  <script defer src=\"/_rex/router.js\"></script>\n");
     }
 
     // HMR client in dev mode
-    if is_dev {
+    if params.is_dev {
         html.push_str("  <script defer src=\"/_rex/hmr-client.js\"></script>\n");
     }
 
     html.push_str("</body>\n</html>");
-
-    html
-}
-
-/// Parameters for assembling an RSC HTML document.
-pub struct RscDocumentParams<'a> {
-    /// Server-rendered HTML body from the RSC two-pass render
-    pub ssr_html: &'a str,
-    /// Head elements from server rendering
-    pub head_html: &'a str,
-    /// Flight data for client hydration
-    pub flight_data: &'a str,
-    /// Client component chunks to load
-    pub client_chunks: &'a [String],
-    /// Client reference manifest JSON (maps ref IDs to chunk URLs)
-    pub client_manifest_json: &'a str,
-    /// CSS filenames to include (global + per-route)
-    pub css_files: &'a [String],
-    /// CSS file contents for inlining (filename -> content)
-    pub css_contents: &'a HashMap<String, String>,
-    pub is_dev: bool,
-    pub manifest_json: Option<&'a str>,
-    /// Raw attribute string for `<html>` tag (e.g. `lang="en"`)
-    pub html_attrs: &'a str,
-    /// Raw attribute string for `<body>` tag (e.g. `class="bg-white"`)
-    pub body_attrs: &'a str,
-}
-
-/// Assemble an RSC HTML document (non-streaming path).
-///
-/// Delegates to the streaming functions for consistency.
-pub fn assemble_rsc_document(params: &RscDocumentParams<'_>) -> String {
-    let mut html = String::new();
-    html.push_str(&assemble_rsc_head_shell_with_attrs(
-        params.client_chunks,
-        params.client_manifest_json,
-        params.css_files,
-        params.css_contents,
-        params.html_attrs,
-        params.body_attrs,
-    ));
-    html.push_str(&assemble_rsc_body_tail(
-        params.ssr_html,
-        params.head_html,
-        params.flight_data,
-        params.client_chunks,
-        params.client_manifest_json,
-        params.is_dev,
-        params.manifest_json,
-    ));
-    html
-}
-
-/// Assemble the RSC head shell — flushed to the browser immediately while V8 renders.
-///
-/// Emits the full `<head>` (meta, CSS, modulepreloads) and opens `<body>` with the
-/// module map and webpack shims. This lets the browser start fetching client
-/// chunks while V8 is still rendering the body HTML.
-pub fn assemble_rsc_head_shell(
-    client_chunks: &[String],
-    client_manifest_json: &str,
-    css_files: &[String],
-    css_contents: &HashMap<String, String>,
-) -> String {
-    assemble_rsc_head_shell_with_attrs(
-        client_chunks,
-        client_manifest_json,
-        css_files,
-        css_contents,
-        "",
-        "",
-    )
-}
-
-/// Like `assemble_rsc_head_shell` but allows passing through `<html>` and `<body>` attributes
-/// extracted from the SSR output so the served HTML matches the RSC flight data.
-fn assemble_rsc_head_shell_with_attrs(
-    client_chunks: &[String],
-    client_manifest_json: &str,
-    css_files: &[String],
-    css_contents: &HashMap<String, String>,
-    html_attrs: &str,
-    body_attrs: &str,
-) -> String {
-    let mut html = String::with_capacity(2048);
-    if html_attrs.is_empty() {
-        html.push_str("<!DOCTYPE html>\n<html><head>");
-    } else {
-        html.push_str("<!DOCTYPE html>\n<html ");
-        html.push_str(&sanitize_tag_attrs(html_attrs));
-        html.push_str("><head>");
-    }
-    html.push_str("<meta charset=\"utf-8\" />");
-    html.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />");
-
-    // CSS: inline content to avoid render-blocking network requests
-    for css in css_files {
-        if let Some(content) = css_contents.get(css) {
-            html.push_str("<style>");
-            html.push_str(&escape_style_content(content));
-            html.push_str("</style>");
-        } else {
-            html.push_str(&format!(
-                "<link rel=\"stylesheet\" href=\"/_rex/static/{css}\" />"
-            ));
-        }
-    }
-
-    for chunk in client_chunks {
-        html.push_str(&format!(
-            "<link rel=\"modulepreload\" href=\"/_rex/static/{chunk}\" />"
-        ));
-    }
-
-    if body_attrs.is_empty() {
-        html.push_str("</head><body>");
-    } else {
-        html.push_str("</head><body ");
-        html.push_str(&sanitize_tag_attrs(body_attrs));
-        html.push('>');
-    }
-
-    // Module map — must be available before client chunks load
-    let escaped_manifest = escape_script_content(client_manifest_json);
-    html.push_str(&format!(
-        "<script>window.__REX_RSC_MODULE_MAP__={escaped_manifest}</script>"
-    ));
-
-    // Webpack shims — react-server-dom-webpack/client accesses __webpack_require__ during init.
-    // Process shim: Next.js internals (router, image loader) reference process.env.__NEXT_*
-    // which doesn't exist in the browser. Provide a minimal shim so lookups return undefined.
-    // NODE_ENV is already replaced by rolldown define; this just prevents runtime crashes.
-    html.push_str(
-        "<script>\
-         if(typeof process===\"undefined\")globalThis.process={env:{}};\
-         (function(){var _m=performance.measure.bind(performance);\
-         performance.measure=function(n,o,e){\
-           try{if(o&&typeof o===\"object\"){\
-             if(!isFinite(o.start))o.start=0;\
-             if(!isFinite(o.end))o.end=o.start;\
-           }return _m(n,o,e)}catch(x){return null}\
-         }})();\
-         var __rexModuleCache={};\
-         globalThis.__webpack_require__=function(id){return __rexModuleCache[id]||{}};\
-         globalThis.__webpack_require__.u=function(c){return c};\
-         globalThis.__webpack_chunk_load__=function(c){\
-           if(__rexModuleCache[c])return Promise.resolve();\
-           return import(c).then(function(m){__rexModuleCache[c]=m})\
-         };\
-         window.__rexModuleCache=__rexModuleCache;\
-         </script>",
-    );
-
-    html
-}
-
-/// Assemble the RSC body tail — sent after V8 render completes.
-///
-/// The head shell (from `assemble_rsc_head_shell`) already emitted
-/// `<!DOCTYPE html><html><head>...</head><body>` plus the module map and
-/// webpack shims. This function outputs:
-///   SSR body content + scripts + `</body></html>`
-///
-/// The SSR HTML from V8 may contain `<html>...<body>...</body></html>` from
-/// the root layout; we strip those outer tags and extract only the body content.
-pub fn assemble_rsc_body_tail(
-    ssr_html: &str,
-    head_html: &str,
-    flight_data: &str,
-    client_chunks: &[String],
-    _client_manifest_json: &str,
-    is_dev: bool,
-    manifest_json: Option<&str>,
-) -> String {
-    // Extract the inner body content from the SSR HTML.
-    // The root layout typically renders <html><head></head><body>...</body></html>.
-    let body_content = extract_body_content(ssr_html);
-
-    let mut html = String::with_capacity(body_content.len() + 2048);
-
-    // Patch <html> and <body> attributes to match the RSC flight data.
-    // In the streaming path the head shell was flushed before V8 rendered,
-    // so the attributes are not yet on the DOM. This sync script applies them
-    // before React hydration runs, preventing hydration mismatches.
-    let html_attrs = extract_html_tag_attrs(ssr_html);
-    let body_attrs = extract_body_tag_attrs(ssr_html);
-    if !html_attrs.is_empty() || !body_attrs.is_empty() {
-        html.push_str("<script>");
-        if !html_attrs.is_empty() {
-            let escaped = escape_script_content(&escape_js_string(html_attrs));
-            html.push_str(&format!(
-                "!function(){{var d=document.createElement('div');d.innerHTML='\\u003cspan {escaped}>';var a=d.firstChild.attributes;for(var i=0;i<a.length;i++)document.documentElement.setAttribute(a[i].name,a[i].value)}}();"
-            ));
-        }
-        if !body_attrs.is_empty() {
-            let escaped = escape_script_content(&escape_js_string(body_attrs));
-            html.push_str(&format!(
-                "!function(){{var d=document.createElement('div');d.innerHTML='\\u003cspan {escaped}>';var a=d.firstChild.attributes;for(var i=0;i<a.length;i++)document.body.setAttribute(a[i].name,a[i].value)}}();"
-            ));
-        }
-        html.push_str("</script>");
-    }
-
-    // Metadata head elements (title, meta, link, etc.) from generateMetadata / metadata exports.
-    // Emitted at the top of the body — browsers relocate these to <head> automatically.
-    // This is the standard approach for streaming SSR (used by Next.js and others).
-    if !head_html.is_empty() {
-        html.push_str(head_html);
-    }
-
-    // RSC hydrates the full document (hydrateRoot(document, tree)),
-    // so emit the body content directly without a wrapper div.
-    html.push_str(body_content);
-
-    // Inline flight data for hydration
-    let escaped_flight = escape_script_content(flight_data);
-    html.push_str(&format!(
-        "<script id=\"__REX_RSC_DATA__\" type=\"text/rsc\">{escaped_flight}</script>"
-    ));
-
-    // Route manifest
-    if let Some(manifest) = manifest_json {
-        let escaped = escape_script_content(manifest);
-        html.push_str(&format!(
-            "<script>window.__REX_MANIFEST__={escaped}</script>"
-        ));
-    }
-
-    // Client component chunks (includes the RSC hydration entry)
-    for chunk in client_chunks {
-        html.push_str(&format!(
-            "<script type=\"module\" src=\"/_rex/static/{chunk}\"></script>"
-        ));
-    }
-
-    // Client-side router
-    if manifest_json.is_some() {
-        html.push_str("<script defer src=\"/_rex/router.js\"></script>");
-    }
-
-    // HMR in dev
-    if is_dev {
-        html.push_str("<script defer src=\"/_rex/hmr-client.js\"></script>");
-    }
-
-    html.push_str("</body></html>");
     html
 }
 
@@ -610,20 +440,6 @@ pub fn extract_body_tag_attrs(ssr_html: &str) -> &str {
         }
     }
     ""
-}
-
-/// Extract the content between `<body>` and `</body>` from SSR HTML.
-/// Falls back to the entire string if no body tags are found.
-fn extract_body_content(ssr_html: &str) -> &str {
-    if let Some(body_start) = ssr_html.find("<body") {
-        if let Some(tag_end) = ssr_html[body_start..].find('>') {
-            let content_start = body_start + tag_end + 1;
-            if let Some(body_end) = ssr_html.rfind("</body>") {
-                return &ssr_html[content_start..body_end];
-            }
-        }
-    }
-    ssr_html
 }
 
 #[cfg(test)]
