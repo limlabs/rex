@@ -63,7 +63,14 @@ async fn build_app_router_deps(
 
     // Build single IIFE with ALL react-server condition deps.
     // This ensures one React instance shared by createElement and renderToReadableStream.
-    let server_iife = build_server_deps_iife(config, module_dirs, webpack_shims).await?;
+    let server_iife = build_server_deps_iife(
+        config,
+        module_dirs,
+        APP_SERVER_DEPS_ENTRY,
+        webpack_shims,
+        &["react-server", "workerd", "browser", "import", "default"],
+    )
+    .await?;
 
     let mut polyfills = V8_POLYFILLS.to_string();
     polyfills.push('\n');
@@ -79,12 +86,12 @@ async fn build_app_router_deps(
         // react/jsx-runtime wrapper
         DepEsmModule {
             specifier: "react/jsx-runtime".to_string(),
-            source: "var R = globalThis.__rex_jsx_runtime; export var jsx = R.jsx; export var jsxs = R.jsxs; export var Fragment = R.Fragment;".to_string(),
+            source: JSX_RUNTIME_WRAPPER_ESM.to_string(),
         },
         // react/jsx-dev-runtime wrapper
         DepEsmModule {
             specifier: "react/jsx-dev-runtime".to_string(),
-            source: "var R = globalThis.__rex_jsx_dev_runtime; export var jsxDEV = R.jsxDEV; export var Fragment = R.Fragment;".to_string(),
+            source: JSX_DEV_RUNTIME_WRAPPER_ESM.to_string(),
         },
         // react-server-dom-webpack/server wrapper
         DepEsmModule {
@@ -96,7 +103,8 @@ async fn build_app_router_deps(
                 "export var decodeReply = S.decodeReply;\n",
                 "export var decodeAction = S.decodeAction;\n",
                 "export default S;\n",
-            ).to_string(),
+            )
+            .to_string(),
         },
     ];
 
@@ -139,70 +147,67 @@ async fn build_app_router_deps(
     Ok(ServerDepBundles { polyfills, modules })
 }
 
-/// Pages router: each dep as a separate self-contained ESM module.
+/// Pages router: one IIFE holding React, both JSX runtimes and `react-dom/server`
+/// (a single React instance, so hooks see the dispatcher `renderToString` sets),
+/// exposed through thin ESM wrappers like the app router. Extra deps reach the
+/// same instance through [`crate::shared_react::SharedReactResolvePlugin`].
 async fn build_pages_router_deps(
     config: &RexConfig,
     module_dirs: &[String],
 ) -> Result<ServerDepBundles> {
-    let mut modules = Vec::new();
-    let react_conditions: &[&str] = &["require", "default"];
+    let server_iife = build_server_deps_iife(
+        config,
+        module_dirs,
+        crate::shared_react::PAGES_SERVER_DEPS_ENTRY,
+        "",
+        &["require", "default"],
+    )
+    .await?;
 
-    let react_deps = vec![
-        ("react", concat!(
-            "import React from 'react';\n",
-            "var { createElement, useState, useEffect, useContext, useReducer, useCallback,\n",
-            "  useMemo, useRef, useLayoutEffect, useImperativeHandle, useDebugValue,\n",
-            "  useDeferredValue, useTransition, useId, useSyncExternalStore, useInsertionEffect,\n",
-            "  useActionState, useOptimistic, use, memo, forwardRef, lazy, Suspense, Fragment,\n",
-            "  Children, Component, PureComponent, createContext, createRef, cloneElement,\n",
-            "  isValidElement, startTransition, cache } = React;\n",
-            "export { createElement, useState, useEffect, useContext, useReducer, useCallback,\n",
-            "  useMemo, useRef, useLayoutEffect, useImperativeHandle, useDebugValue,\n",
-            "  useDeferredValue, useTransition, useId, useSyncExternalStore, useInsertionEffect,\n",
-            "  useActionState, useOptimistic, use, memo, forwardRef, lazy, Suspense, Fragment,\n",
-            "  Children, Component, PureComponent, createContext, createRef, cloneElement,\n",
-            "  isValidElement, startTransition, cache };\n",
-            "export default React;\n",
-        )),
-        ("react/jsx-runtime", "import { jsx, jsxs, Fragment } from 'react/jsx-runtime'; export { jsx, jsxs, Fragment };"),
-        ("react/jsx-dev-runtime", "import { jsxDEV, Fragment } from 'react/jsx-dev-runtime'; export { jsxDEV, Fragment };"),
+    let mut polyfills = V8_POLYFILLS.to_string();
+    polyfills.push('\n');
+    polyfills.push_str(&server_iife);
+
+    let modules = vec![
+        DepEsmModule {
+            specifier: "react".to_string(),
+            source: REACT_WRAPPER_ESM.to_string(),
+        },
+        DepEsmModule {
+            specifier: "react/jsx-runtime".to_string(),
+            source: JSX_RUNTIME_WRAPPER_ESM.to_string(),
+        },
+        DepEsmModule {
+            specifier: "react/jsx-dev-runtime".to_string(),
+            source: JSX_DEV_RUNTIME_WRAPPER_ESM.to_string(),
+        },
+        DepEsmModule {
+            specifier: "react-dom/server".to_string(),
+            source: crate::shared_react::REACT_DOM_SERVER_WRAPPER_ESM.to_string(),
+        },
     ];
 
-    for (specifier, entry_source) in &react_deps {
-        let source = build_dep_esm(
-            config,
-            entry_source,
-            specifier,
-            react_conditions,
-            "",
-            module_dirs,
-        )
-        .await?;
-        modules.push(DepEsmModule {
-            specifier: specifier.to_string(),
-            source,
-        });
-    }
-
-    // react-dom/server
-    let rdom_source = build_dep_esm(
-        config,
-        "import S from 'react-dom/server'; var { renderToString, renderToStaticMarkup } = S; export { renderToString, renderToStaticMarkup }; export default S;",
-        "react-dom/server",
-        react_conditions,
-        "",
-        module_dirs,
-    ).await?;
-    modules.push(DepEsmModule {
-        specifier: "react-dom/server".to_string(),
-        source: rdom_source,
-    });
-
-    Ok(ServerDepBundles {
-        polyfills: V8_POLYFILLS.to_string(),
-        modules,
-    })
+    Ok(ServerDepBundles { polyfills, modules })
 }
+
+/// IIFE entry for app-router server deps (`react-server` conditions).
+const APP_SERVER_DEPS_ENTRY: &str = concat!(
+    "import React from 'react';\n",
+    "import { jsx, jsxs, Fragment } from 'react/jsx-runtime';\n",
+    "import { jsxDEV } from 'react/jsx-dev-runtime';\n",
+    "import S from 'react-server-dom-webpack/server';\n",
+    "\n",
+    "globalThis.__rex_React = React;\n",
+    "globalThis.__rex_jsx_runtime = { jsx: jsx, jsxs: jsxs, Fragment: Fragment };\n",
+    "globalThis.__rex_jsx_dev_runtime = { jsxDEV: jsxDEV, Fragment: Fragment };\n",
+    "globalThis.__rex_flight_server = S;\n",
+);
+
+/// Thin ESM wrapper for `react/jsx-runtime` over the IIFE global.
+const JSX_RUNTIME_WRAPPER_ESM: &str = "var R = globalThis.__rex_jsx_runtime; export var jsx = R.jsx; export var jsxs = R.jsxs; export var Fragment = R.Fragment;";
+
+/// Thin ESM wrapper for `react/jsx-dev-runtime` over the IIFE global.
+const JSX_DEV_RUNTIME_WRAPPER_ESM: &str = "var R = globalThis.__rex_jsx_dev_runtime; export var jsxDEV = R.jsxDEV; export var Fragment = R.Fragment;";
 
 /// Thin ESM wrapper for the `react` module.
 /// Re-exports from `globalThis.__rex_React` (set by the server deps IIFE).
@@ -244,28 +249,16 @@ const REACT_WRAPPER_ESM: &str = concat!(
     "export default R;\n",
 );
 
-/// Build a single IIFE containing all react-server condition deps.
-///
-/// Entry imports React + jsx-runtime + react-server-dom-webpack/server and
-/// sets globals on `globalThis`. Bundled as IIFE so everything shares one
-/// React instance (no dual-instance bugs).
+/// Build a single IIFE from `entry_source`, which imports React and its
+/// renderer(s) and sets globals on `globalThis`. Bundled as one IIFE so
+/// everything shares one React instance (no dual-instance bugs).
 async fn build_server_deps_iife(
     config: &RexConfig,
     module_dirs: &[String],
+    entry_source: &str,
     webpack_shims: &str,
+    condition_names: &[&str],
 ) -> Result<String> {
-    let entry_source = concat!(
-        "import React from 'react';\n",
-        "import { jsx, jsxs, Fragment } from 'react/jsx-runtime';\n",
-        "import { jsxDEV } from 'react/jsx-dev-runtime';\n",
-        "import S from 'react-server-dom-webpack/server';\n",
-        "\n",
-        "globalThis.__rex_React = React;\n",
-        "globalThis.__rex_jsx_runtime = { jsx: jsx, jsxs: jsxs, Fragment: Fragment };\n",
-        "globalThis.__rex_jsx_dev_runtime = { jsxDEV: jsxDEV, Fragment: Fragment };\n",
-        "globalThis.__rex_flight_server = S;\n",
-    );
-
     let sanitized_name = "server_deps";
     let output_dir = config.server_build_dir().join("_dep_bundles");
     std::fs::create_dir_all(&output_dir)?;
@@ -339,12 +332,7 @@ async fn build_server_deps_iife(
         treeshake: crate::rsc_build_config::react_treeshake_options(),
         resolve: Some(rolldown::ResolveOptions {
             alias: Some(aliases),
-            condition_names: Some(
-                ["react-server", "workerd", "browser", "import", "default"]
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect(),
-            ),
+            condition_names: Some(condition_names.iter().map(|s| s.to_string()).collect()),
             extensions: Some(vec![
                 ".tsx".to_string(),
                 ".ts".to_string(),

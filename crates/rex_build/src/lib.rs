@@ -14,6 +14,7 @@ pub mod rsc_graph;
 pub mod server_action_extract;
 pub mod server_action_manifest;
 pub mod server_dep_bundle;
+pub mod shared_react;
 
 // Internal modules extracted from bundler.rs
 pub mod build_utils;

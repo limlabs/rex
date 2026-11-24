@@ -114,11 +114,17 @@ pub struct ExtraDepBundleResult {
 /// chunks. All modules use `/_rex_deps/` path-based specifiers so relative
 /// imports between chunks resolve correctly. Entry modules also get bare-specifier
 /// aliases (e.g., "payload" → "/_rex_deps/payload.js").
+///
+/// With `shared_react`, every `react`, JSX runtime and `react-dom/server` import
+/// inside the deps resolves to the instance the pages-router server deps IIFE
+/// published on `globalThis` (see [`crate::shared_react`]), instead of a copy
+/// bundled into the deps.
 pub async fn build_extra_deps_multi_entry(
     config: &RexConfig,
     deps: &[DepImport],
     module_dirs: &[String],
     externals: &[String],
+    shared_react: bool,
 ) -> Result<ExtraDepBundleResult> {
     let output_dir = config
         .server_build_dir()
@@ -176,7 +182,12 @@ pub async fn build_extra_deps_multi_entry(
         entry_name_to_specifier.insert(safe_name, dep.specifier.clone());
     }
 
-    let bc = build_config(config)?;
+    let mut bc = build_config(config)?;
+    if shared_react {
+        // First, so it wins over node_modules resolution.
+        bc.plugins
+            .insert(0, Arc::new(crate::shared_react::SharedReactResolvePlugin));
+    }
 
     // Mark pre-bundled deps as external so rolldown doesn't re-bundle them.
     // They're already loaded as separate V8 ESM modules (React, etc.).

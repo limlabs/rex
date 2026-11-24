@@ -425,6 +425,36 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
+    async fn e2e_dev_ssr_runs_hooks_inside_app_with_route() {
+        let url = format!("{}/hooks", base_url());
+        let resp = reqwest::get(&url).await.unwrap();
+        assert_eq!(resp.status(), 200);
+        let body = resp.text().await.unwrap();
+
+        // limlabs/rex#240: hooks threw "reading 'useState'" of null in dev SSR
+        // because react and react-dom/server were separate React instances.
+        assert!(
+            body.contains("count:1"),
+            "useState should render on the server"
+        );
+        assert!(
+            body.contains("context:provided"),
+            "useContext should render on the server"
+        );
+        // _app wraps the page on the server, as it does on the client.
+        assert!(
+            body.contains("app-wrapper"),
+            "dev SSR should render pages inside _app"
+        );
+        // useRouter() on the server reports the route being rendered.
+        assert!(
+            body.contains("pathname:/hooks"),
+            "server useRouter() should report the page's route"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
     async fn e2e_client_router_script_served() {
         let url = format!("{}/_rex/router.js", base_url());
         let resp = reqwest::get(&url).await.unwrap();

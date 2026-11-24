@@ -20,6 +20,16 @@ declare var __rex_resolve_gsp: () => string;
 declare var __rex_is_async_settled: () => boolean;
 /* eslint-enable no-var */
 
+// Route key ("index", "rules/index", "blog/[slug]") → Next.js route pathname
+// ("/", "/rules", "/blog/[slug]"). The server useRouter() reads it from
+// __rex_router_state, so a layout that branches on the route renders the same
+// markup on the server as on the client.
+function routeKeyToPathname(routeKey: string): string {
+    if (routeKey === 'index') return '/';
+    const path = routeKey.endsWith('/index') ? routeKey.slice(0, -'/index'.length) : routeKey;
+    return '/' + path;
+}
+
 // SSR render function — returns JSON { body, head }
 globalThis.__rex_render_page = function(routeKey: string, propsJson: string): string {
     const page = globalThis.__rex_pages[routeKey];
@@ -28,6 +38,10 @@ globalThis.__rex_render_page = function(routeKey: string, propsJson: string): st
     if (!Component) throw new Error('Page has no default export: ' + routeKey);
 
     const props = JSON.parse(propsJson);
+    // asPath and query follow Next's automatic static optimization: the route
+    // pattern and {} until the client hydrates with the real URL.
+    const pathname = routeKeyToPathname(routeKey);
+    globalThis.__rex_router_state = { pathname: pathname, asPath: pathname, query: {} };
     let element = __rex_createElement(Component, props);
 
     if (globalThis.__rex_app && globalThis.__rex_app.default) {
