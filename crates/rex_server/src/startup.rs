@@ -68,6 +68,9 @@ pub fn esm_collect_ids(
     for route in &scan.routes {
         entry_paths.push(route.abs_path.clone());
     }
+    if let Some(app) = &scan.app {
+        entry_paths.push(app.abs_path.clone());
+    }
     for route in &scan.api_routes {
         entry_paths.push(route.abs_path.clone());
     }
@@ -146,6 +149,9 @@ pub async fn esm_load_modules(
     let mut entry_paths: Vec<std::path::PathBuf> = Vec::new();
     for route in &scan.routes {
         entry_paths.push(route.abs_path.clone());
+    }
+    if let Some(app) = &scan.app {
+        entry_paths.push(app.abs_path.clone());
     }
     for route in &scan.api_routes {
         entry_paths.push(route.abs_path.clone());
@@ -333,6 +339,7 @@ pub async fn esm_load_modules(
         };
         rex_v8::esm_rsc_entry::generate_pages_esm_entry(
             &page_sources,
+            scan.app.as_ref().map(|a| a.abs_path.as_path()),
             &api_sources,
             &mcp_sources,
             SSR_RUNTIME,
@@ -348,12 +355,17 @@ pub async fn esm_load_modules(
     let mut extra_dep_modules = Vec::new();
     let mut dep_aliases: Vec<(String, String)> = Vec::new();
     if !collected.extra_dep_imports.is_empty() {
-        // Externalize RSC-specific packages only. React itself is NOT externalized
-        // because the pre-bundled React uses `react-server` conditions (missing
-        // createContext, useState, etc.), while extra deps need the full React API
-        // with standard conditions. Rolldown bundles a standard-conditions React
-        // into the extra deps — this is the correct dual-instance architecture
+        // App router: externalize RSC-specific packages only. React itself is NOT
+        // externalized because the pre-bundled React uses `react-server` conditions
+        // (missing createContext, useState, etc.), while extra deps need the full
+        // React API with standard conditions. Rolldown bundles a standard-conditions
+        // React into the extra deps — the correct dual-instance architecture
         // (server React for RSC rendering, standard React for SSR/UI deps).
+        //
+        // Pages router: there is no RSC pass, so a dep must use the same React
+        // that `renderToString` dispatches hooks through, or its hooks throw
+        // (`useContext` of null). `shared_react` routes the deps' React imports
+        // to the server deps IIFE's instance.
         let mut externals: Vec<String> = Vec::new();
         if has_app {
             externals.push("react-server-dom-webpack/server".to_string());
@@ -364,6 +376,7 @@ pub async fn esm_load_modules(
             &collected.extra_dep_imports,
             &module_dirs,
             &externals,
+            !has_app,
         )
         .await
         {
@@ -429,16 +442,18 @@ pub async fn esm_load_modules(
         }
     }
 
-    // Add rex/actions stub from runtime/server/actions.ts
-    {
-        let actions_path = runtime_dir.join("actions.ts");
-        if actions_path.exists() {
-            let actions_ts = std::fs::read_to_string(&actions_path).unwrap_or_default();
-            let actions_js = esm_transform::transform_to_esm(&actions_ts, "actions.ts")
-                .unwrap_or_else(|_| rex_stub.to_string());
+    // Add rex/router and rex/actions from runtime/server, as the IIFE path
+    // aliases them. rex/router's useRouter() reads the route __rex_render_page
+    // publishes; without this module, importing it failed the whole entry.
+    for (specifier, file) in [("rex/router", "router.ts"), ("rex/actions", "actions.ts")] {
+        let path = runtime_dir.join(file);
+        if path.exists() {
+            let ts = std::fs::read_to_string(&path).unwrap_or_default();
+            let js =
+                esm_transform::transform_to_esm(&ts, file).unwrap_or_else(|_| rex_stub.to_string());
             all_dep_modules.push(EsmSourceModule {
-                specifier: "rex/actions".to_string(),
-                source: actions_js,
+                specifier: specifier.to_string(),
+                source: js,
             });
         }
     }

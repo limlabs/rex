@@ -114,6 +114,11 @@ declare global {
   var __rex_resolve_static_paths: () => string;
 
   // Server-side globals (V8 SSR environment)
+  // Route of the page being rendered, set by __rex_render_page, read by the
+  // server useRouter() stubs.
+  var __rex_router_state:
+    | { pathname: string; asPath: string; query: Record<string, string> }
+    | undefined;
   var __rex_head_elements: ReactElement[];
   var __rex_doc_html_attrs: Record<string, string>;
   var __rex_doc_body_attrs: Record<string, string>;

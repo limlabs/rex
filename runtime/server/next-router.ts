@@ -3,11 +3,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export function useRouter(): any {
+    // Set by __rex_render_page for the page being rendered (ssr-runtime.ts).
+    const state = globalThis.__rex_router_state;
+    const pathname = state ? state.pathname : '/';
     return {
-        route: '/',
-        pathname: '/',
-        query: {},
-        asPath: '/',
+        route: pathname,
+        pathname: pathname,
+        query: state ? state.query : {},
+        asPath: state ? state.asPath : '/',
         basePath: '',
         locale: undefined,
         push() { return Promise.resolve(true); },
